@@ -31,4 +31,7 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "Whaybench ${GITHUB_REF_NAME#v}" --notes-file notes.md whaybench-x86_64-linux.tar.gz whaybench-x86_64-linux.tar.gz.sha256 install.sh
+        # A tag with a '-' (v0.2.0-rc.1) is a pre-release: never the latest one install.sh takes.
+        run: |
+          pre=""; case "$GITHUB_REF_NAME" in *-*) pre=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" $pre --title "Whaybench ${GITHUB_REF_NAME#v}" --notes-file notes.md whaybench-x86_64-linux.tar.gz whaybench-x86_64-linux.tar.gz.sha256 install.sh

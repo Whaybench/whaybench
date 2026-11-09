@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installs the latest Whaybench release for this user:
 #   curl -fsSL https://github.com/whaybench/whaybench/releases/latest/download/install.sh | sh
+# With whaybench-x86_64-linux.tar.gz (and its .sha256) already in the current folder, that file is installed instead.
 # The programs go to ~/.local/lib/whaybench, the command to ~/.local/bin/whaybench. When Claude Code is installed, its
 # Whaybench plugin is installed too. System packages are only checked: their install command is shown.
 set -eu
@@ -20,9 +21,14 @@ command -v tar >/dev/null || fail "tar is needed."
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-say "Downloading $NAME.tar.gz"
-curl -fsSL "$REPO/releases/latest/download/$NAME.tar.gz" -o "$tmp/$NAME.tar.gz"
-curl -fsSL "$REPO/releases/latest/download/$NAME.tar.gz.sha256" -o "$tmp/$NAME.tar.gz.sha256"
+if [ -f "$NAME.tar.gz" ] && [ -f "$NAME.tar.gz.sha256" ]; then
+    say "Installing $NAME.tar.gz from this folder"
+    cp "$NAME.tar.gz" "$NAME.tar.gz.sha256" "$tmp"/
+else
+    say "Downloading $NAME.tar.gz"
+    curl -fsSL "$REPO/releases/latest/download/$NAME.tar.gz" -o "$tmp/$NAME.tar.gz"
+    curl -fsSL "$REPO/releases/latest/download/$NAME.tar.gz.sha256" -o "$tmp/$NAME.tar.gz.sha256"
+fi
 (cd "$tmp" && sha256sum -c --quiet "$NAME.tar.gz.sha256") || fail "the download does not match its checksum."
 tar xzf "$tmp/$NAME.tar.gz" -C "$tmp"
 
