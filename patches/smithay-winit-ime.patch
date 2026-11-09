@@ -1,0 +1,22 @@
+diff --git a/src/backend/winit/mod.rs b/src/backend/winit/mod.rs
+index 80e0cb5..f60f8a6 100644
+--- a/src/backend/winit/mod.rs
++++ b/src/backend/winit/mod.rs
+@@ -782,6 +782,9 @@ impl<F: FnMut(WinitEvent)> ApplicationHandler for WinitEventLoopApp<'_, F> {
+                 };
+                 (self.callback)(WinitEvent::Input(event));
+             }
++            WindowEvent::Ime(ime) => {
++                (self.callback)(WinitEvent::Ime(ime));
++            }
+             _ => (),
+         }
+     }
+@@ -875,4 +878,7 @@ pub enum WinitEvent {
+ 
+     /// A redraw was requested
+     Redraw,
++
++    /// An input method event from the host compositor.
++    Ime(winit::event::Ime),
+ }

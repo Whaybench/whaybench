@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/wb-core", "crates/whaybench", "crates/whaybench-term", "crates/wb-store", "crates/whaybench-panel"]
+exclude = ["third_party/smithay"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/whaybench/whaybench"
+description = "A desktop workspace for working with a coding agent: conversation map, sessions, answers and views as panels on one surface"
+
+[workspace.dependencies]
+wb-core = { path = "crates/wb-core" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+png = "0.17"
+libc = "0.2"
+ab_glyph = "0.2"
+
+[workspace.dependencies.smithay]
+path = "third_party/smithay"
+default-features = false
+features = ["backend_winit", "wayland_frontend", "desktop"]

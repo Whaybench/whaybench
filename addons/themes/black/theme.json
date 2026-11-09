@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "name": "Black",
+  "version": "1.0",
+  "palette": {
+    "background": "#282a36", "current": "#44475a", "foreground": "#f8f8f2", "purple": "#bd93f9", "pink": "#ff79c6",
+    "night_top": "#1a1b26", "night_bottom": "#2b2140"
+  },
+  "base": { "background": "background", "surface": "current", "text": "foreground", "accent": "purple" },
+  "frame": {
+    "outer": 18, "gap": 12, "pad": 6, "radius": 16, "border_width": 2, "shadow_size": 26,
+    "shadow": "#000000a0",
+    "surface_top": "night_top", "surface_bottom": "night_bottom",
+    "panel": "background",
+    "bar_top": "#3a3c4e", "bar_bottom": "#2f3140",
+    "front_top": "#5a4b86", "front_bottom": "#3f3a66",
+    "border": "#3a3c4e", "front_border": "purple",
+    "tab_front": "#6a5a9c",
+    "shared": "pink", "wall": "purple"
+  }
+}

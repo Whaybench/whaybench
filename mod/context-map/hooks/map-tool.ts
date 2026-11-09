@@ -1,0 +1,114 @@
+// The context_map tool Claude calls, and the /map command.
+import type { Register } from 'claude-code'
+
+import type { MapNode } from '../types'
+import { inheritMap, mapNow, setOther, storedMaps, summary, writeMap } from './map-data'
+import type { Change } from './map-data'
+import { asText } from './map-text'
+// Literal here, not imported: the engine reads hook matchers from the hook's own file.
+const PANE = 'context-map'
+const TOOL = 'mcp__context-map__context_map'
+
+type On = Parameters<Register>[0]
+
+export const DESCRIPTION = `Updates the conversation map pane beside the chat: a tree of the topics this conversation has branched into, and where the conversation stands now. The map is kept between calls, so send only what changed.
+
+Call it in the same turn whenever the structure changes: a new topic, task or side branch starts, the conversation returns to an earlier topic, or a question gets settled. The person follows the conversation on this map, so do not put an update off because the change seems small. A turn in which nothing changed needs no call.
+- \`upsert\`: nodes to add or change, by id. For an existing node give only the fields that change (e.g. \`{ "id": "n4", "isOpen": false }\`); a new node needs \`label\` and \`isOpen\`.
+- \`remove\`: ids to drop, with everything under them.
+- \`current\`: the node the conversation is on now.
+- \`nodes\`: the whole map, replacing it. Only for a real regrouping, rarely.
+- \`show\`: true returns the map as text, when you have lost track of its ids.
+Labels are short (a few words) in the conversation's language. A node is open while its question is unsettled; mark it closed once settled, and open it again when the person comes back to it with more to say. Record topics and questions. When the conversation builds something (a game, an app, a setup), keep a branch for it whose children are its parts as in its structure diagram, each with \`state\` (plan, doing, done, changed) updated as the work moves, so the person sees which part is being made, finished or changed without reading code. Keep the two kinds of open node apart: work that could be done now but is put off for later gets \`state: plan\` (drawn □), while an idea or question thought about and paused stays open with no state (drawn ◇). When you lay out a list for the person (options, items, steps), add every item as a child node at once so the list stays beside the chat, and close each as it is done or declined; do not invent next steps nobody has raised.`
+
+export const SCHEMA = {
+  type: 'object',
+  properties: {
+    nodes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          label: { type: 'string' },
+          parent: { type: 'string', description: 'id of the parent node; omit for a top-level topic' },
+          isOpen: { type: 'boolean', description: 'true while the question is unsettled' },
+          state: { type: 'string', enum: ['plan', 'doing', 'done', 'changed'], description: 'for a part of something being built; plan = work put off for later (an open idea or question has no state)' },
+          kind: { type: 'string', enum: ['question', 'option', 'pro', 'con', 'conclusion', 'note'], description: 'what the node is in the discussion: conclusion on every settled decision; the other kinds when a map style asks for them' },
+          reason: { type: 'string', description: 'one short line: why the conversation moved to this node; give it when a map style asks for it' },
+          links: { type: 'array', items: { type: 'object', properties: { to: { type: 'string' }, rel: { type: 'string', enum: ['cause', 'leads', 'blocks', 'replaces', 'related'] } }, required: ['to', 'rel'] }, description: 'ties to nodes in other branches; give them when a map style asks for them' },
+          source: { type: 'object', properties: { file: { type: 'string' }, node: { type: 'string' }, title: { type: 'string' }, path: { type: 'array', items: { type: 'string' } } }, required: ['file', 'node'], description: 'for a node taken up from an imported map: that map file and node; give it when Whaybench asks' },
+        },
+        required: ['id', 'label', 'isOpen'],
+      },
+    },
+    upsert: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          label: { type: 'string' },
+          parent: { type: 'string', description: 'id of the parent node; empty string for a top-level topic' },
+          isOpen: { type: 'boolean', description: 'true while the question is unsettled' },
+          state: { type: 'string', enum: ['plan', 'doing', 'done', 'changed'], description: 'for a part of something being built; plan = work put off for later (an open idea or question has no state)' },
+          kind: { type: 'string', enum: ['question', 'option', 'pro', 'con', 'conclusion', 'note'], description: 'what the node is in the discussion: conclusion on every settled decision; the other kinds when a map style asks for them' },
+          reason: { type: 'string', description: 'one short line: why the conversation moved to this node; give it when a map style asks for it' },
+          links: { type: 'array', items: { type: 'object', properties: { to: { type: 'string' }, rel: { type: 'string', enum: ['cause', 'leads', 'blocks', 'replaces', 'related'] } }, required: ['to', 'rel'] }, description: 'ties to nodes in other branches; give them when a map style asks for them' },
+          source: { type: 'object', properties: { file: { type: 'string' }, node: { type: 'string' }, title: { type: 'string' }, path: { type: 'array', items: { type: 'string' } } }, required: ['file', 'node'], description: 'for a node taken up from an imported map: that map file and node; give it when Whaybench asks' },
+        },
+        required: ['id'],
+      },
+    },
+    remove: { type: 'array', items: { type: 'string' } },
+    current: { type: 'string', description: 'id of the node the conversation is on now' },
+    show: { type: 'boolean' },
+    inherit: { type: 'string', description: 'a session id whose map this session takes over, replacing its own' },
+  },
+}
+
+// /map and the map tool's calls.
+export function mapToolHooks(on: On) {
+  on('command.run', { command: 'map' }, async ($, e) => {
+    const arg = String((e as { args?: string }).args ?? '').trim()
+    const own = await $.session.id()
+    if (arg === 'list') {
+      const lines = (await storedMaps($)).map(
+        ({ sessionId, map: m }) =>
+          `${sessionId.slice(0, 8)}${sessionId === own ? ' (this session)' : ''}  ${new Date(m.updatedAt).toLocaleString()}  ${summary(m)}`,
+      )
+      return { text: lines.length ? lines.join('\n') : 'No saved maps.' }
+    }
+    if (arg === '' || own.startsWith(arg)) {
+      await setOther($, null)
+      await $.ui.open({ id: PANE, title: 'Conversation map' })
+      return { text: 'Showing the map of this session.' }
+    }
+    const found = (await storedMaps($)).filter(m => m.sessionId.startsWith(arg))
+    if (found.length !== 1) {
+      return { text: found.length ? `Several sessions start with "${arg}". Give more characters.` : `No map starts with "${arg}". See /map list.` }
+    }
+    await setOther($, found[0] ?? null)
+    await $.ui.open({ id: PANE, title: 'Conversation map' })
+    return { text: `Showing the map of session ${found[0].sessionId.slice(0, 8)}. Back: /map` }
+  })
+
+  on('tool.call', { tool: TOOL }, async ($, e) => {
+    // A registered tool's arguments arrive spread on the event itself.
+    const input = e as unknown as { nodes?: MapNode[]; upsert?: Change[]; remove?: string[]; current?: string; show?: boolean; inherit?: string }
+    if (input.inherit) {
+      const taken = await inheritMap($, await $.session.id(), input.inherit)
+      if (!taken) return { result: `No map found for ${input.inherit}.` }
+    }
+    const changes = input.nodes || input.upsert?.length || input.remove?.length || input.current
+    if (changes) {
+      try {
+        await writeMap($, await $.session.id(), { nodes: input.nodes, upsert: input.upsert, remove: input.remove, current: input.current })
+      } catch (err) {
+        return { result: `Map not updated: ${(err as Error).message}. Send the change again, fixed.` }
+      }
+    }
+
+    return { result: input.show ? asText(await mapNow($)) : 'Map updated.' }
+  })
+}

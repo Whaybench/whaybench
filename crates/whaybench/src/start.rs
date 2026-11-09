@@ -1,0 +1,170 @@
+//! What happens before the window: the header of the record, the check of what the program needs,
+//! and the way to the person's desktop. A missing part is told, never fatal, except
+//! having no desktop to open a window on.
+use std::{ffi::OsStr, path::{Path, PathBuf}, process::Command, time::Duration};
+
+use serde::{Deserialize, Serialize};
+use wb_core::{log as record, paths, versions};
+
+/// Components without which part of the product does not work, and what to do.
+const NEEDED: [(&str, &str); 3] = [("Alacritty", "install the alacritty package"), ("wl-clipboard", "install wl-clipboard for the clipboard with the desktop"), ("GTK", "install the gtk4 development package")];
+
+/// The commands a session uses, where every session finds them: one in the background keeps the environment of the
+/// day it started, whose PATH may not have this build's folder. A file of another origin stays as it is.
+fn link_commands() {
+    let (Some(home), Some(bins)) = (std::env::var_os("HOME"), std::env::current_exe().ok().map(|e| PathBuf::from(e.to_string_lossy().trim_end_matches(" (deleted)")))) else { return };
+    let Some(bins) = bins.parent().map(PathBuf::from) else { return };
+    let dir = PathBuf::from(home).join(".local/bin");
+    let _ = std::fs::create_dir_all(&dir);
+    for name in ["whaybench", "whaybench-view", "whaybench-project", "whaybench-files"] {
+        let (link, target) = (dir.join(name), bins.join(name));
+        if !target.exists() { continue; }
+        let ours = std::fs::symlink_metadata(&link).is_ok_and(|m| m.file_type().is_symlink());
+        if ours { let _ = std::fs::remove_file(&link); }
+        if ours || !link.exists() {
+            if let Err(e) = std::os::unix::fs::symlink(&target, &link) { record::warn("run", "command not linked", &e.to_string(), &[("command", name.to_string())]); }
+        }
+    }
+}
+
+pub fn prepare() -> Result<(), String> {
+    link_commands();
+    let runtime = std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from).map_err(|_| "XDG_RUNTIME_DIR is not set: start from a desktop session".to_string())?;
+    let env = std::env::var("WAYLAND_DISPLAY").ok();
+    let host = versions::host_socket(env.as_deref(), &runtime, versions::desktop_shell_socket);
+    record::header(&format!("environment · user={} desktop={} session_type={} input_method={}", var("USER"), var("XDG_CURRENT_DESKTOP"), var("XDG_SESSION_TYPE"), input_method()));
+
+    let host = host.ok_or("no desktop Wayland socket found: start from a Wayland desktop session")?;
+    // winit reads this when it opens the window. Set before any thread starts reading the environment.
+    unsafe { std::env::set_var("WAYLAND_DISPLAY", &host) };
+    record::decide("run", "display connected", "the user's desktop socket", &[("socket", host)]);
+
+    let (early, rest) = versions::read_components(Duration::from_millis(500), Duration::from_secs(20));
+    let mut version = vec![("Whaybench".to_string(), format!("{} ({})", env!("CARGO_PKG_VERSION"), env!("WB_COMMIT"))), ("Rust".to_string(), env!("WB_RUSTC").to_string()), ("Smithay".to_string(), env!("WB_SMITHAY").to_string())];
+    version.extend(early);
+    record::header(&format!("versions · {}", fields(&version)));
+    record::header(&format!("settings · detail={}", record::value(&std::env::var(record::ENV_TRACE).unwrap_or_default())));
+    record::header("open before · none");
+
+    // The comparison and the check need every version; slow programs must not hold up the window.
+    std::thread::spawn(move || {
+        let late = rest();
+        if !late.is_empty() { record::header(&format!("versions+ · {}", fields(&late))); }
+        version.extend(late);
+        let release = versions::parse_release(include_str!(concat!(env!("OUT_DIR"), "/release.toml")));
+        for (name, tested, now) in versions::differences(&release, &version) {
+            record::warn("run", "component version differs", "differs from the release record; running on", &[("name", name), ("tested", tested), ("now", now)]);
+        }
+        check_needed(&version);
+    });
+    Ok(())
+}
+
+fn fields(v: &[(String, String)]) -> String {
+    v.iter().map(|(k, x)| format!("{k}={}", record::value(x))).collect::<Vec<_>>().join(" ")
+}
+fn var(k: &str) -> String { std::env::var(k).unwrap_or_default() }
+
+fn input_method() -> String {
+    ["XMODIFIERS", "GTK_IM_MODULE", "QT_IM_MODULE"].iter().map(|k| var(k)).find(|v| !v.is_empty()).unwrap_or_default()
+}
+
+fn check_needed(parts: &[(String, String)]) {
+    for (name, advice) in NEEDED {
+        let now = parts.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str());
+        if now == Some(versions::MISSING) {
+            record::warn("run", "component missing", advice, &[("name", name.to_string())]);
+        }
+    }
+}
+
+/// What a new conversation tab starts with.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TermOpen { pub attach: Option<String>, pub resume: Option<String>, pub map_from: Option<String> }
+
+fn new_tab_id() -> String {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("{:012x}", (nanos ^ ((std::process::id() as u128) << 40)) & 0xffff_ffff_ffff)
+}
+
+/// The panel app id of a conversation tab carries its tab id, so the panel knows which tab it is.
+pub const TERM_APP: &str = "whaybench-term";
+
+/// The command for a conversation tab: Alacritty showing the relay, the relay holding Claude Code.
+pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<String, String> {
+    let config = wb_core::theme::write_terminal_config(data).map_err(|e| e.to_string())?;
+    let relay = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench-term");
+    let tab = new_tab_id();
+    // The terminal knows its tab too: a link opened from it goes to the views of this tab's session.
+    let mut command = format!("exec env WHAYBENCH_TAB={tab} alacritty --class {TERM_APP}-{tab} --config-file '{}' -e '{}' --tab {tab}", config.display(), relay.display());
+    if let Some(a) = &open.attach { command += &format!(" --attach {a}"); }
+    if let Some(r) = &open.resume { command += &format!(" --resume {r}"); }
+    if let Some(m) = &open.map_from { command += &format!(" --map-from '{m}'"); }
+    Ok(command)
+}
+
+/// An app that belongs in a panel: it gets our socket, the data directory and the run.
+/// The apps this run started, waited for when they end so none is left as a zombie.
+static APPS: std::sync::Mutex<Vec<std::process::Child>> = std::sync::Mutex::new(Vec::new());
+
+/// Called often: the apps that have ended are waited for.
+pub fn reap_apps() {
+    APPS.lock().unwrap().retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+    // SAFETY: waitpid on one known child with WNOHANG only reaps it if it has ended.
+    LEFT.lock().unwrap().retain(|pid| unsafe { libc::waitpid(*pid, std::ptr::null_mut(), libc::WNOHANG) } == 0);
+}
+
+/// At the very start: a restart keeps the process, so the apps the run before started are its children still. Those
+/// that ended are reaped now; the others are remembered and reaped when they end (reap_apps).
+pub fn reap_left_over() {
+    let me = std::process::id().to_string();
+    let left: Vec<i32> = std::fs::read_dir("/proc").into_iter().flatten().flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|pid| std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
+            .and_then(|t| t.rsplit_once(") ").map(|(_, rest)| rest.split(' ').nth(1) == Some(me.as_str()))).unwrap_or(false))
+        .collect();
+    *LEFT.lock().unwrap() = left;
+    reap_apps();
+}
+
+/// Children of the run before a restart, not yet ended.
+static LEFT: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
+
+/// The apps inside open links and files with xdg-open (a terminal's link, Claude Code's login page). Theirs goes to
+/// the view panel: a browser started from inside would otherwise hand the address to one already
+/// running on the desktop and show it there. Returns the folder to put first in PATH, with its colon.
+fn open_shim(data: &paths::Data, bins: &str) -> String {
+    let dir = data.cache().join("bin");
+    let script = format!("#!/bin/sh\n# Whaybench: what the apps inside open goes to the view panel.\nexec '{bins}/whaybench-view' open \"$@\"\n");
+    let file = dir.join("xdg-open");
+    if std::fs::read_to_string(&file).ok().as_deref() != Some(script.as_str()) {
+        use std::os::unix::fs::PermissionsExt;
+        let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, &script))
+            .and_then(|_| std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)));
+        if let Err(e) = written { record::warn("screen", "open shim not made", &e.to_string(), &[]); return String::new(); }
+    }
+    format!("{}:", dir.display())
+}
+
+pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
+    // The program's own commands (whaybench-project and the like) are found by the apps and by Claude Code.
+    let bins = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())).map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
+    let shims = open_shim(data, &bins);
+    let path = format!("{shims}{bins}:{}", std::env::var("PATH").unwrap_or_default());
+    let started = Command::new("sh").arg("-c").arg(command)
+        .env("PATH", path)
+        .env("WAYLAND_DISPLAY", socket)
+        // Inside, Korean and other input methods come through this compositor's text input; a GTK or Qt module of
+        // the desktop's input method would talk past it and the apps would get no composed text.
+        .env_remove("GTK_IM_MODULE").env_remove("QT_IM_MODULE")
+        .env(paths::ENV_DATA_DIR, Path::new(&data.root))
+        .env(record::ENV_RUN, run)
+        .spawn();
+    match started {
+        Ok(c) => {
+            record::decide("screen", "app started", "a requested app", &[("command", command.to_string()), ("process", c.id().to_string())]);
+            APPS.lock().unwrap().push(c);
+        }
+        Err(e) => record::error("screen", "app not started", &[("command", command.to_string()), ("error", e.to_string())]),
+    }
+}

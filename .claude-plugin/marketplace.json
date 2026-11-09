@@ -1,0 +1,1 @@
+{"name": "whaybench", "owner": {"name": "whaybench"}, "plugins": [{"name": "context-map", "source": "./mod/context-map", "description": "Conversation map and session record for Whaybench"}]}

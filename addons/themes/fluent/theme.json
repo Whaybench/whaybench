@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "name": "Fluent",
+  "version": "1.0",
+  "palette": { "mica": "#f3f3f3", "layer": "#fbfbfb", "card": "#ffffff", "stroke": "#e5e5e5", "ink": "#1b1b1b", "accent": "#005fb8" },
+  "base": { "background": "card", "surface": "layer", "text": "ink", "accent": "accent" },
+  "frame": {
+    "outer": 8, "gap": 6, "pad": 4, "radius": 8, "border_width": 1, "shadow_size": 12,
+    "joint_width": 2, "joint_show": "active",
+    "surface_top": "mica", "panel": "card",
+    "bar_top": "mica", "front_top": "card", "tab_front": "card",
+    "border": "stroke", "front_border": "#c8c8c8",
+    "shadow": "#00000024",
+    "shared": "accent", "wall": "#8a8a8a", "edge": "#c42b1c"
+  }
+}

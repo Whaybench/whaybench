@@ -1,0 +1,17 @@
+[package]
+name = "whaybench-panel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+wb-core.workspace = true
+wb-store = { path = "../wb-store" }
+serde_json.workspace = true
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+webkit6 = "0.6"
+regex = "1"
+chrono.workspace = true
+similar = "2"

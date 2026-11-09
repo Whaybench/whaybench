@@ -1,0 +1,8 @@
+# The conversation terminal. The font and colours come from the theme (wb_core::theme::write_terminal_config).
+[window]
+decorations = "None"
+
+[[keyboard.bindings]]
+key = "Return"
+mods = "Shift"
+chars = "\u001b\r"

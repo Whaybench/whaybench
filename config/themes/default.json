@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "version": "1.0",
+  "palette": {
+    "base": "#eff1f5", "mantle": "#e6e9ef", "crust": "#dce0e8",
+    "text": "#4c4f69", "blue": "#1e66f5", "lavender": "#7287fd",
+    "sky_top": "#dfe6f5", "sky_bottom": "#c9d3ea"
+  },
+  "base": { "background": "base", "surface": "mantle", "text": "text", "accent": "blue" },
+  "frame": {
+    "outer": 14, "gap": 10, "pad": 5, "radius": 12, "border_width": 1.5, "shadow_size": 16,
+    "joint_width": 2, "joint_show": "always",
+    "surface_top": "sky_top", "surface_bottom": "sky_bottom",
+    "panel": "base",
+    "bar_top": "#f4f6fa", "bar_bottom": "crust",
+    "front_top": "#ffffff", "front_bottom": "#d5dcf2",
+    "border": "#c3c9d9", "front_border": "lavender",
+    "tab_front": "#ffffff",
+    "shadow": "#3b466b40",
+    "shared": "#fe640b", "wall": "#04a5e5", "edge": "#d20f39"
+  }
+}

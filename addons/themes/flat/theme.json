@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "name": "Flat",
+  "version": "1.0",
+  "palette": { "white": "#ffffff", "paper": "#f4f5f7", "line": "#d4d7dd", "ink": "#22262e", "blue": "#2563eb" },
+  "base": { "background": "white", "surface": "paper", "text": "ink", "accent": "blue" },
+  "frame": {
+    "outer": 0, "gap": 2, "pad": 0, "radius": 0, "border_width": 1, "shadow_size": 0,
+    "joint_width": 2, "joint_show": "active",
+    "surface_top": "line", "panel": "white",
+    "bar_top": "paper", "front_top": "white", "tab_front": "white",
+    "border": "line", "front_border": "blue",
+    "shadow": "#00000000",
+    "shared": "blue", "wall": "#94a3b8", "edge": "#dc2626"
+  }
+}

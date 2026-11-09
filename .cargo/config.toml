@@ -1,0 +1,4 @@
+# Tests compare the English texts, whatever language the person chose for the program.
+# The built program (target/release/whaybench) follows the person's choice.
+[env]
+WHAYBENCH_LANG = "en"
