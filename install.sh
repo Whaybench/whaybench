@@ -63,7 +63,7 @@ if [ -n "$missing" ]; then
     say "  Fedora:            sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox"
     say "  Ubuntu, Debian:    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox"
     say "  Arch:              sudo pacman -S gtk4 webkitgtk-6.0 wl-clipboard firefox"
-    say "  AlmaLinux, Rocky:  sudo dnf install epel-release && sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox"
+    say "  AlmaLinux, Rocky:  sudo dnf install epel-release && sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox && sudo dnf upgrade \"gstreamer1*\""
 fi
 
 case ":$PATH:" in *":$BIN:"*) ;; *) say "Add $BIN to your PATH to run whaybench." ;; esac

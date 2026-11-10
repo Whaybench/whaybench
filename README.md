@@ -74,6 +74,7 @@ AlmaLinux and Rocky Linux 10:
 
     sudo dnf install epel-release
     sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox
+    sudo dnf upgrade "gstreamer1*"   # webkitgtk6.0 from EPEL needs GStreamer 1.26
 
 The release brings its own Alacritty for the terminal tabs. LibreOffice is optional, for Word and spreadsheet
 templates.
