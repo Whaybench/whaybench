@@ -493,8 +493,8 @@ fn new_project(s_: &Shared) {
                 let pid = new_project_id(&p.st, &name);
                 p.st.create_project(&pid, &name, "", "", Vec::new(), false)?;
                 if let Some(src) = &source {
-                    let (nodes, title) = mi::read(&d2, src).ok_or_else(|| wb_core::i18n::t("import-failed-no-map").to_string())?;
-                    let path = mi::keep(&d2, &nodes, &title).map_err(|e| e.to_string())?;
+                    let (nodes, title, from) = mi::read(&d2, src).ok_or_else(|| wb_core::i18n::t("import-failed-no-map").to_string())?;
+                    let path = mi::keep(&d2, &nodes, &title, &from).map_err(|e| e.to_string())?;
                     p.st.map_from_nodes(&pid, &nodes, &title, &path.to_string_lossy())?;
                 }
                 Ok(pid)

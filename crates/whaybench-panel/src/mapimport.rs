@@ -61,40 +61,53 @@ fn below(nodes: &[Value], root: &str) -> Vec<Value> {
     }).collect()
 }
 
-/// The nodes and title of a source.
-pub fn read(d: &Data, source: &Source) -> Option<(Vec<Value>, String)> {
+/// The nodes, title and session (the one it came from, or "") of a source.
+pub fn read(d: &Data, source: &Source) -> Option<(Vec<Value>, String, String)> {
     match source {
         Source::File(p) => {
             let v: Value = serde_json::from_str(&fs::read_to_string(p).ok()?).ok()?;
             let title = if s(&v, "title").is_empty() { p.file_stem()?.to_string_lossy().to_string() } else { s(&v, "title").to_string() };
-            Some((v.get("nodes")?.as_array()?.clone(), title))
+            Some((v.get("nodes")?.as_array()?.clone(), title, s(&v, "from").to_string()))
         }
         Source::Session(id, root) => {
             let map = sessions::map_of(d, id)?;
             let nodes = map.get("nodes")?.as_array()?.clone();
             match root {
-                None => Some((nodes, sessions::session_name(d, id))),
+                None => Some((nodes, sessions::session_name(d, id), id.clone())),
                 Some(r) => {
                     let title = nodes.iter().find(|n| s(n, "id") == r).map(|n| s(n, "label").to_string())?;
-                    Some((below(&nodes, r), title))
+                    Some((below(&nodes, r), title, id.clone()))
                 }
             }
         }
     }
 }
 
-fn safe_name(title: &str) -> String {
-    let t: String = title.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).take(40).collect();
-    let t = t.trim_matches('-').to_string();
-    if t.is_empty() { "map".to_string() } else { t }
+/// A saved map's file name: what it is and the minutes of its first and last change, never its title (a title is
+/// in the person's language; it is kept inside the file). `map-<first>-<last>`, `branch-<node id>-<first>-<last>`.
+pub fn file_name(nodes: &[Value], root: Option<&str>, prefix: &str) -> String {
+    let times: Vec<i64> = nodes.iter().flat_map(|n| ["opened", "changed", "closed"].map(|k| n.get(k).and_then(|v| v.get("at")).and_then(Value::as_i64).unwrap_or(0))).filter(|a| *a > 0).collect();
+    let now = chrono::Local::now().timestamp_millis();
+    let minute = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%Y%m%d-%H%M").to_string()).unwrap_or_default();
+    let (first, last) = (times.iter().min().copied().unwrap_or(now), times.iter().max().copied().unwrap_or(now));
+    let kind = match root {
+        None => "map".to_string(),
+        Some(r) => { let id: String = r.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect(); format!("branch-{}", if id.is_empty() { "node" } else { &id }) }
+    };
+    format!("{prefix}{kind}-{}-{}", minute(first), minute(last))
 }
 
-/// Keeps a copy as a file of its own. Its path.
-pub fn keep(d: &Data, nodes: &[Value], title: &str) -> std::io::Result<PathBuf> {
+/// `<name>.json` in the folder, or `<name>-2.json` and on when that is taken: the same map kept twice keeps both.
+pub fn free_path(dir: &Path, name: &str) -> PathBuf {
+    (1..).map(|i| dir.join(if i == 1 { format!("{name}.json") } else { format!("{name}-{i}.json") })).find(|p| !p.exists()).unwrap_or_default()
+}
+
+/// Keeps a copy as a file of its own, with the session it came from (for its related answers). Its path.
+pub fn keep(d: &Data, nodes: &[Value], title: &str, from: &str) -> std::io::Result<PathBuf> {
     fs::create_dir_all(imported_dir(d))?;
-    let now = chrono::Local::now();
-    let path = imported_dir(d).join(format!("{}-{}.json", safe_name(title), now.format("%Y%m%d-%H%M%S-%3f")));
-    fs::write(&path, json!({"format": "whaybench-map", "title": title, "imported": now.format("%Y-%m-%d %H:%M").to_string(), "nodes": nodes}).to_string())?;
+    let path = free_path(&imported_dir(d), &file_name(nodes, None, ""));
+    let imported = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+    fs::write(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": nodes}).to_string())?;
     Ok(path)
 }
 
@@ -121,8 +134,8 @@ pub fn show(d: &Data, path: &Path, title: &str, node: Option<&str>) {
 
 /// Brings a source in: kept as a file, shown in a read-only panel.
 pub fn bring_in(d: &Data, source: &Source) {
-    let Some((nodes, title)) = read(d, source) else { status::say(d, i18n::t("import-failed-no-map"), 6); return };
-    match keep(d, &nodes, &title) {
+    let Some((nodes, title, from)) = read(d, source) else { status::say(d, i18n::t("import-failed-no-map"), 6); return };
+    match keep(d, &nodes, &title, &from) {
         Ok(path) => {
             show(d, &path, &title, None);
             status::say(d, &i18n::f("imported-map-opened", &[("title", title.chars().take(30).collect::<String>()), ("n", nodes.len().to_string())]), 8);
@@ -189,14 +202,16 @@ mod tests {
         fs::create_dir_all(d.root.join("sessions")).unwrap();
         fs::write(d.root.join("sessions/s1.json"), r#"{"id":"s1","firstPrompt":"q"}"#).unwrap();
         fs::write(d.root.join("s1.json"), r#"{"nodes":[{"id":"a","label":"top"},{"id":"b","parent":"a","label":"bottom"},{"id":"z","label":"other"}]}"#).unwrap();
-        let (nodes, title) = read(&d, &Source::Session("s1".into(), Some("a".into()))).unwrap();
-        assert_eq!((nodes.len(), title.as_str()), (2, "top"));
+        let (nodes, title, from) = read(&d, &Source::Session("s1".into(), Some("a".into()))).unwrap();
+        assert_eq!((nodes.len(), title.as_str(), from.as_str()), (2, "top", "s1"));
         assert!(nodes[0].get("parent").is_none());
         let groups = other_sessions(&d);
         assert_eq!(groups.len(), 1);
-        let path = keep(&d, &nodes, &title).unwrap();
-        let (again, t2) = read(&d, &Source::File(path.clone())).unwrap();
-        assert_eq!((again.len(), t2.as_str()), (2, "top"));
+        let path = keep(&d, &nodes, &title, &from).unwrap();
+        assert!(path.file_name().unwrap().to_string_lossy().starts_with("map-"), "named by the rule, not by the title");
+        let (again, t2, f2) = read(&d, &Source::File(path.clone())).unwrap();
+        assert_eq!((again.len(), t2.as_str(), f2.as_str()), (2, "top", "s1"), "the copy keeps where it came from");
+        assert_ne!(keep(&d, &nodes, &title, &from).unwrap(), path, "kept twice, two files");
         assert!(exported(&d).is_empty(), "kept copies are not exported files");
     }
     #[test]
