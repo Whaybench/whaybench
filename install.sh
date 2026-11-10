@@ -34,7 +34,7 @@ tar xzf "$tmp/$NAME.tar.gz" -C "$tmp"
 
 mkdir -p "$LIB" "$BIN"
 cp "$tmp/$NAME"/whaybench* "$LIB"/
-cp "$tmp/$NAME"/LICENSE "$tmp/$NAME"/NOTICE "$tmp/$NAME"/*LICENSE* "$LIB"/
+cp "$tmp/$NAME"/NOTICE "$tmp/$NAME"/*LICENSE* "$LIB"/
 # Alacritty, for the terminal tabs, comes with the release.
 cp "$tmp/$NAME"/alacritty "$LIB"/
 ln -sf "$LIB/whaybench" "$BIN/whaybench"
