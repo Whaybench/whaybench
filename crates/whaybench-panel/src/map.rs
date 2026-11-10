@@ -111,7 +111,7 @@ pub fn reflect_request(pid: Option<&str>, work: Option<&str>, flow: &[String], l
     t
 }
 
-fn maps_dir(d: &Data) -> std::path::PathBuf { d.root.join("maps") }
+fn maps_dir(d: &Data) -> std::path::PathBuf { d.maps() }
 
 fn safe_name(title: &str) -> String {
     let mut out = String::new();

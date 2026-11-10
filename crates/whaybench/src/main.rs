@@ -99,6 +99,7 @@ fn fail(message: &str) -> ! {
 
 fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), String> {
     std::fs::create_dir_all(data.cache()).map_err(|e| format!("cannot use {}: {e}", data.root.display()))?;
+    let _ = std::fs::create_dir_all(data.maps());
     // Conversations, answers and the view panel's sign-ins are in here: only this account may read it.
     {
         use std::os::unix::fs::PermissionsExt;

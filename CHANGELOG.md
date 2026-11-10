@@ -6,6 +6,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The data directory has its `maps` folder from the start, so Open map shows it before any map was saved.
+
 ## [0.1.1] - 2026-11-10
 
 ### Changed

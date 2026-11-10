@@ -28,6 +28,8 @@ impl Data {
     pub fn log_detail(&self) -> PathBuf { self.logs().join("detail.json") }
     /// Things that can be made again. Deleting this loses nothing of the user's.
     pub fn cache(&self) -> PathBuf { self.root.join("cache") }
+    /// Saved conversation maps; made at start, so opening a map finds it even before anything was saved.
+    pub fn maps(&self) -> PathBuf { self.root.join("maps") }
     pub fn layout(&self) -> PathBuf { self.root.join("layout.json") }
     /// The running compositor: its process, socket and run.
     pub fn instance(&self) -> PathBuf { self.cache().join("instance.json") }
