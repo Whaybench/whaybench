@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Third-party licences</title>
+<style>body{font:14px/1.5 sans-serif;max-width:60em;margin:2em auto;padding:0 1em}pre{white-space:pre-wrap;background:#f4f4f4;padding:1em}</style>
+</head><body>
+<h1>Third-party licences</h1>
+<p>The programs in this release are built from these crates. Each licence below applies to the crates listed with it. The source of every crate, at the version named, is on <a href="https://crates.io">crates.io</a>.</p>
+<ul>{{#each overview}}<li><a href="#{{id}}">{{name}}</a> ({{count}})</li>{{/each}}</ul>
+{{#each licenses}}
+<h2 id="{{id}}">{{name}}</h2>
+<p>Used by: {{#each used_by}}{{crate.name}} {{crate.version}}{{#unless @last}}, {{/unless}}{{/each}}</p>
+<pre>{{text}}</pre>
+{{/each}}
+</body></html>

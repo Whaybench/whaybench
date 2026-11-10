@@ -13,15 +13,30 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libxkbcommon-dev libwayland-dev libegl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libxkbcommon-dev libwayland-dev libegl-dev pkg-config cmake g++ libfontconfig1-dev libfreetype-dev libxcb-xfixes0-dev python3
       - uses: dtolnay/rust-toolchain@stable
       - run: tools/fetch-smithay.sh
       - run: cargo build --release --locked
+      # Alacritty, for the terminal tabs: not every distribution packages it, so the release brings it.
+      - name: Alacritty
+        run: |
+          git clone --quiet --depth 1 --branch "v$ALACRITTY" https://github.com/alacritty/alacritty alacritty-src
+          cargo build --release --locked --manifest-path alacritty-src/Cargo.toml -p alacritty
+        env:
+          ALACRITTY: 0.17.0
+      - name: Third-party licences
+        run: |
+          cargo install cargo-about --locked --features cli
+          cargo about generate -c tools/about.toml tools/about.hbs -o THIRD-PARTY-LICENSES.html
+          (cd alacritty-src && cargo about generate -c ../tools/about.toml ../tools/about.hbs -o ../ALACRITTY-THIRD-PARTY-LICENSES.html)
       - name: Package
         run: |
           dir=whaybench-x86_64-linux
           mkdir "$dir"
           cp target/release/{whaybench,whaybench-panel,whaybench-term,whaybench-view,whaybench-project,whaybench-files} LICENSE NOTICE README.md "$dir"/
+          cp alacritty-src/target/release/alacritty THIRD-PARTY-LICENSES.html ALACRITTY-THIRD-PARTY-LICENSES.html "$dir"/
+          cp alacritty-src/LICENSE-APACHE "$dir"/ALACRITTY-LICENSE-APACHE
+          cp alacritty-src/LICENSE-MIT "$dir"/ALACRITTY-LICENSE-MIT
           tar czf "$dir.tar.gz" "$dir"
           sha256sum "$dir.tar.gz" > "$dir.tar.gz.sha256"
       - name: Release notes from the changelog

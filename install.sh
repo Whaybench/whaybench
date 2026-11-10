@@ -34,7 +34,9 @@ tar xzf "$tmp/$NAME.tar.gz" -C "$tmp"
 
 mkdir -p "$LIB" "$BIN"
 cp "$tmp/$NAME"/whaybench* "$LIB"/
-cp "$tmp/$NAME"/LICENSE "$tmp/$NAME"/NOTICE "$LIB"/
+cp "$tmp/$NAME"/LICENSE "$tmp/$NAME"/NOTICE "$tmp/$NAME"/*LICENSE* "$LIB"/
+# Alacritty, for the terminal tabs, comes with the release.
+cp "$tmp/$NAME"/alacritty "$LIB"/
 ln -sf "$LIB/whaybench" "$BIN/whaybench"
 say "Installed $("$LIB/whaybench" --version 2>/dev/null || echo whaybench) in $LIB"
 
@@ -48,13 +50,15 @@ fi
 
 # What the programs need from the system.
 missing=""
-for c in alacritty wl-paste firefox; do command -v "$c" >/dev/null || missing="$missing $c"; done
+for c in wl-paste firefox; do command -v "$c" >/dev/null || missing="$missing $c"; done
+[ -x "$LIB/alacritty" ] || command -v alacritty >/dev/null || missing="$missing alacritty"
 for l in libgtk-4.so.1 libwebkitgtk-6.0.so.4; do ldconfig -p 2>/dev/null | grep -q "$l" || missing="$missing $l"; done
 if [ -n "$missing" ]; then
     say "Missing:$missing. Install them with one of:"
-    say "  Fedora:         sudo dnf install gtk4 webkitgtk6.0 alacritty wl-clipboard firefox"
-    say "  Ubuntu, Debian: sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 alacritty wl-clipboard firefox"
-    say "  Arch:           sudo pacman -S gtk4 webkitgtk-6.0 alacritty wl-clipboard firefox"
+    say "  Fedora:            sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox"
+    say "  Ubuntu, Debian:    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox"
+    say "  Arch:              sudo pacman -S gtk4 webkitgtk-6.0 wl-clipboard firefox"
+    say "  AlmaLinux, Rocky:  sudo dnf install epel-release && sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox"
 fi
 
 case ":$PATH:" in *":$BIN:"*) ;; *) say "Add $BIN to your PATH to run whaybench." ;; esac

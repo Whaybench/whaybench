@@ -54,23 +54,29 @@ login and keeps everything in one folder on your computer.
 ## Install
 
 Whaybench runs on Linux (x86_64) in a Wayland desktop session: Fedora 39, Ubuntu 24.04, Debian 13 or newer, or
-another distribution with GTK 4.12 or newer. You need Claude Code or Codex CLI, installed and signed in.
+another distribution with GTK 4.12 or newer (AlmaLinux and Rocky Linux 10 with EPEL). You need Claude Code or Codex CLI, installed and signed in.
 
 ### 1. System packages
 
 Fedora:
 
-    sudo dnf install gtk4 webkitgtk6.0 alacritty wl-clipboard firefox
+    sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox
 
 Ubuntu and Debian:
 
-    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 alacritty wl-clipboard firefox
+    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox
 
 Arch:
 
-    sudo pacman -S gtk4 webkitgtk-6.0 alacritty wl-clipboard firefox
+    sudo pacman -S gtk4 webkitgtk-6.0 wl-clipboard firefox
 
-LibreOffice is optional, for Word and spreadsheet templates.
+AlmaLinux and Rocky Linux 10:
+
+    sudo dnf install epel-release
+    sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox
+
+The release brings its own Alacritty for the terminal tabs. LibreOffice is optional, for Word and spreadsheet
+templates.
 
 ### 2. Whaybench
 
@@ -99,7 +105,7 @@ To update, run the install command again. To remove Whaybench, delete `~/.local/
 ### Build from source
 
 You need Rust 1.87 or newer ([rustup](https://rustup.rs)), Git and the development packages:
-`gtk4-devel webkitgtk6.0-devel` on Fedora, `libgtk-4-dev libwebkitgtk-6.0-dev` on Ubuntu and Debian.
+`gtk4-devel webkitgtk6.0-devel` on Fedora, `libgtk-4-dev libwebkitgtk-6.0-dev` on Ubuntu and Debian, and Alacritty.
 
     git clone https://github.com/whaybench/whaybench
     cd whaybench

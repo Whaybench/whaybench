@@ -35,7 +35,9 @@ pub fn find_program(name: &str, path: &str, home: Option<&Path>) -> Option<PathB
 }
 
 fn probe(program: &str, args: &[&str]) -> String {
-    let path = std::env::var("PATH").unwrap_or_default();
+    // The apps find a program next to this one first (start::spawn_app), such as the Alacritty a release brings.
+    let here = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_string_lossy().to_string())).unwrap_or_default();
+    let path = format!("{here}:{}", std::env::var("PATH").unwrap_or_default());
     let home = std::env::var("HOME").ok();
     let Some(p) = find_program(program, &path, home.as_deref().map(Path::new)) else { return MISSING.into() };
     match Command::new(p).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output() {

@@ -3,6 +3,12 @@ Copyright 2026 The Whaybench Authors
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
+The release archives also contain:
+- Alacritty (https://github.com/alacritty/alacritty), Copyright The Alacritty Project, used under the Apache
+  License, Version 2.0 (ALACRITTY-LICENSE-APACHE; also offered under the MIT License, ALACRITTY-LICENSE-MIT).
+- The Rust crates the programs are built from, under their own licences: THIRD-PARTY-LICENSES.html and
+  ALACRITTY-THIRD-PARTY-LICENSES.html.
+
 crates/whaybench started from the "smallvil" example of Smithay, and patches/smithay-winit-ime.patch changes Smithay itself. Smithay is licensed as follows:
 
 MIT License
