@@ -10,8 +10,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libxkbcommon-dev libwayland-dev libegl-dev pkg-config
+      # Kept in GitHub's cache: the same list in CI and Release, so a release on a tag finds what main stored.
+      - uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+        with:
+          packages: libgtk-4-dev libwebkitgtk-6.0-dev libxkbcommon-dev libwayland-dev libegl-dev pkg-config cmake g++ libfontconfig1-dev libfreetype-dev libxcb-xfixes0-dev python3
+          version: 1
       - uses: dtolnay/rust-toolchain@stable
       - run: tools/fetch-smithay.sh
+      - uses: Swatinem/rust-cache@v2.9.3
       - run: cargo test --workspace --locked

@@ -12,8 +12,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libxkbcommon-dev libwayland-dev libegl-dev pkg-config cmake g++ libfontconfig1-dev libfreetype-dev libxcb-xfixes0-dev python3
+      # Kept in GitHub's cache: the same list in CI and Release, so a release on a tag finds what main stored.
+      - uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+        with:
+          packages: libgtk-4-dev libwebkitgtk-6.0-dev libxkbcommon-dev libwayland-dev libegl-dev pkg-config cmake g++ libfontconfig1-dev libfreetype-dev libxcb-xfixes0-dev python3
+          version: 1
       - uses: dtolnay/rust-toolchain@stable
       - run: tools/fetch-smithay.sh
       - run: cargo build --release --locked
@@ -26,9 +29,14 @@ jobs:
           ALACRITTY: 0.17.0
       - name: Third-party licences
         run: |
-          cargo install cargo-about --locked --features cli
+          curl -fsSL -o about.tgz "https://github.com/EmbarkStudios/cargo-about/releases/download/$ABOUT/cargo-about-$ABOUT-x86_64-unknown-linux-musl.tar.gz"
+          echo "$ABOUT_SHA256  about.tgz" | sha256sum -c -
+          tar xzf about.tgz --strip-components=1 -C ~/.cargo/bin "cargo-about-$ABOUT-x86_64-unknown-linux-musl/cargo-about"
           cargo about generate -c tools/about.toml tools/about.hbs -o THIRD-PARTY-LICENSES.html
           (cd alacritty-src && cargo about generate -c ../tools/about.toml ../tools/about.hbs -o ../ALACRITTY-THIRD-PARTY-LICENSES.html)
+        env:
+          ABOUT: 0.9.3
+          ABOUT_SHA256: 3ad1e94ea1e63d69d1961f4fb15ccbbe9575d906111f96d2cb4dce6df48f71b4
       - name: Package
         run: |
           dir=whaybench-x86_64-linux
