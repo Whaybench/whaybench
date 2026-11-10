@@ -1,0 +1,53 @@
+name: Bug or install problem
+description: Something does not install, start or work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message
+      description: |
+        The output of the install command or of `whaybench` started from a terminal.
+        Panels that do not show print their errors there too.
+      render: text
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and version
+      placeholder: Fedora 44, Ubuntu 24.04, AlmaLinux 10.1
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop
+      placeholder: GNOME 49, KDE Plasma 6.5, Sway
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Whaybench version
+      description: The output of `whaybench --version`.
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      options:
+        - Claude Code
+        - Codex CLI
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: |
+        The last lines of the newest file in `~/.local/share/whaybench/logs/run/`.
+        Logs can hold folder names and conversation titles: look them over before you paste.
+      render: text

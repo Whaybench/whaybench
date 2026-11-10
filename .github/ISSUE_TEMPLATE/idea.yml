@@ -1,0 +1,11 @@
+name: Idea
+description: A feature or a change you would like.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What you would like Whaybench to do, and the situation where you need it.
+    validations:
+      required: true
