@@ -10,6 +10,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).
+- The map of a conversation Claude Code no longer keeps (it deletes old ones, after 30 days by default) is saved
+  once to the maps folder as `auto-map-…`, titled with the session's name.
 - Related answers from a node of an imported map, when the answers of the session it was saved from are kept
   in this data directory.
 

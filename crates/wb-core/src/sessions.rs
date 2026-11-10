@@ -272,6 +272,34 @@ pub fn all(d: &Data) -> Vec<Value> {
 
 pub fn map_of(d: &Data, id: &str) -> Option<Value> { read_json(&d.root.join(format!("{id}.json"))) }
 
+/// Claude Code deletes old conversations (after 30 days unless set otherwise); their maps stay but the sessions
+/// leave the list. Each such map is saved once to the maps folder, as `auto-map-…` titled with the session's name.
+/// Only the last number of a conversation: an earlier one that carried on under another holds part of its map.
+pub fn save_lost_maps(d: &Data) -> usize {
+    let file = d.root.join("auto-saved.json");
+    let mut done: Vec<String> = read_json(&file).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+    let all = all(d);
+    let mut saved = 0;
+    for r in &all {
+        let Some(id) = r.get("id").and_then(Value::as_str) else { continue };
+        let moved = r.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty() && m != id);
+        if moved || done.iter().any(|x| x == id) || !ghost(d, &all, id) { continue; }
+        let Some(map) = map_of(d, id) else { continue };
+        let nodes = map.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+        if nodes.is_empty() { continue; }
+        let path = crate::map::free_path(&d.maps(), &crate::map::file_name(&nodes, None, "auto-"));
+        let body = serde_json::json!({"format": "whaybench-map", "version": map.get("version"), "title": session_name(d, id),
+            "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": id, "auto": true, "nodes": nodes});
+        if fs::create_dir_all(d.maps()).and_then(|_| fs::write(&path, body.to_string())).is_ok() {
+            record::decide("session", "map saved", "its conversation is no longer kept", &[("session", id.to_string()), ("file", path.display().to_string())]);
+            done.push(id.to_string());
+            saved += 1;
+        }
+    }
+    if saved > 0 { let _ = write_atomic(&file, &Value::from(done).to_string()); }
+    saved
+}
+
 /// A node label as a name: the part before ' → ' (the topic, not its conclusion).
 fn short(label: &str, n: usize) -> String {
     let head = label.split(" → ").next().unwrap_or("").trim();
@@ -596,6 +624,22 @@ mod tests {
         fs::create_dir_all(alive_dir(&d)).unwrap();
         fs::write(alive_dir(&d).join("b"), "1").unwrap();
         assert!(!ghost(&d, &all, "b"), "a running one is no ghost");
+    }
+    #[test]
+    fn the_map_of_a_conversation_no_longer_kept_is_saved_once_from_its_last_number() {
+        let d = data("lost-maps");
+        rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b"}));
+        rec(&d, "b", serde_json::json!({"id":"b"}));
+        let map = |label: &str| serde_json::json!({"nodes":[{"id":"n","label":label,"opened":{"at":1_790_000_000_000_i64}}]}).to_string();
+        fs::write(d.root.join("a.json"), map("early")).unwrap();
+        fs::write(d.root.join("b.json"), map("whole")).unwrap();
+        assert_eq!(save_lost_maps(&d), 1, "only the last number");
+        let files: Vec<_> = fs::read_dir(d.maps()).unwrap().flatten().map(|f| f.path()).collect();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].file_name().unwrap().to_string_lossy().starts_with("auto-map-"));
+        let v = read_json(&files[0]).unwrap();
+        assert_eq!((v["from"].as_str(), v["auto"].as_bool(), v["nodes"][0]["label"].as_str()), (Some("b"), Some(true), Some("whole")));
+        assert_eq!(save_lost_maps(&d), 0, "once");
     }
     #[test]
     fn a_move_that_did_not_hold_is_taken_back() {

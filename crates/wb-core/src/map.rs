@@ -1,7 +1,7 @@
 //! The conversation map file of a session: read it, or merge a change into it. Every agent
 //! writes through here, so the rules of a change — merge by id, subtrees removed together, stamps the
 //! program records, no broken references — are kept in one place.
-use std::{collections::HashSet, fs, io, path::Path, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashSet, fs, io, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
 
 use serde_json::{Value, json};
 
@@ -193,6 +193,25 @@ pub fn take_over(data: &Path, sid: &str, source: &Value) -> Result<Value> {
         "turn":source.get("turn").and_then(Value::as_u64).unwrap_or(0), "version":2, "updatedAt":now_ms()});
     write_json(&path, &map)?;
     Ok(map)
+}
+
+/// A saved map's file name: what it is and the minutes of its first and last change, never its title (a title is
+/// in the person's language; it is kept inside the file). `map-<first>-<last>`, `branch-<node id>-<first>-<last>`.
+pub fn file_name(nodes: &[Value], root: Option<&str>, prefix: &str) -> String {
+    let times: Vec<i64> = nodes.iter().flat_map(|n| ["opened", "changed", "closed"].map(|k| n.get(k).and_then(|v| v.get("at")).and_then(Value::as_i64).unwrap_or(0))).filter(|a| *a > 0).collect();
+    let now = chrono::Local::now().timestamp_millis();
+    let minute = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%Y%m%d-%H%M").to_string()).unwrap_or_default();
+    let (first, last) = (times.iter().min().copied().unwrap_or(now), times.iter().max().copied().unwrap_or(now));
+    let kind = match root {
+        None => "map".to_string(),
+        Some(r) => { let id: String = r.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect(); format!("branch-{}", if id.is_empty() { "node" } else { &id }) }
+    };
+    format!("{prefix}{kind}-{}-{}", minute(first), minute(last))
+}
+
+/// `<name>.json` in the folder, or `<name>-2.json` and on when that is taken: the same map kept twice keeps both.
+pub fn free_path(dir: &Path, name: &str) -> PathBuf {
+    (1..).map(|i| dir.join(if i == 1 { format!("{name}.json") } else { format!("{name}-{i}.json") })).find(|p| !p.exists()).unwrap_or_default()
 }
 
 #[cfg(test)]

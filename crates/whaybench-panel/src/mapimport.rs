@@ -83,29 +83,10 @@ pub fn read(d: &Data, source: &Source) -> Option<(Vec<Value>, String, String)> {
     }
 }
 
-/// A saved map's file name: what it is and the minutes of its first and last change, never its title (a title is
-/// in the person's language; it is kept inside the file). `map-<first>-<last>`, `branch-<node id>-<first>-<last>`.
-pub fn file_name(nodes: &[Value], root: Option<&str>, prefix: &str) -> String {
-    let times: Vec<i64> = nodes.iter().flat_map(|n| ["opened", "changed", "closed"].map(|k| n.get(k).and_then(|v| v.get("at")).and_then(Value::as_i64).unwrap_or(0))).filter(|a| *a > 0).collect();
-    let now = chrono::Local::now().timestamp_millis();
-    let minute = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%Y%m%d-%H%M").to_string()).unwrap_or_default();
-    let (first, last) = (times.iter().min().copied().unwrap_or(now), times.iter().max().copied().unwrap_or(now));
-    let kind = match root {
-        None => "map".to_string(),
-        Some(r) => { let id: String = r.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect(); format!("branch-{}", if id.is_empty() { "node" } else { &id }) }
-    };
-    format!("{prefix}{kind}-{}-{}", minute(first), minute(last))
-}
-
-/// `<name>.json` in the folder, or `<name>-2.json` and on when that is taken: the same map kept twice keeps both.
-pub fn free_path(dir: &Path, name: &str) -> PathBuf {
-    (1..).map(|i| dir.join(if i == 1 { format!("{name}.json") } else { format!("{name}-{i}.json") })).find(|p| !p.exists()).unwrap_or_default()
-}
-
 /// Keeps a copy as a file of its own, with the session it came from (for its related answers). Its path.
 pub fn keep(d: &Data, nodes: &[Value], title: &str, from: &str) -> std::io::Result<PathBuf> {
     fs::create_dir_all(imported_dir(d))?;
-    let path = free_path(&imported_dir(d), &file_name(nodes, None, ""));
+    let path = wb_core::map::free_path(&imported_dir(d), &wb_core::map::file_name(nodes, None, ""));
     let imported = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
     fs::write(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": nodes}).to_string())?;
     Ok(path)

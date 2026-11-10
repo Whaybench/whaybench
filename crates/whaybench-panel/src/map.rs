@@ -126,7 +126,7 @@ fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str)
             v
         }
     };
-    let path = mapimport::free_path(&maps_dir(d), &mapimport::file_name(&nodes, root, prefix));
+    let path = wb_core::map::free_path(&maps_dir(d), &wb_core::map::file_name(&nodes, root, prefix));
     let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": data.get("sessionId"), "nodes": nodes});
     std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default())?;
     Ok(path)
@@ -792,9 +792,9 @@ mod tests {
     fn a_saved_map_is_named_by_kind_and_its_first_and_last_change() {
         let at = |y: i32, mo: u32, da: u32, h: u32, mi: u32| chrono::TimeZone::with_ymd_and_hms(&chrono::Local, y, mo, da, h, mi, 0).unwrap().timestamp_millis();
         let nodes = vec![json!({"id":"a","opened":{"at":at(2026,11,3,14,22)}}), json!({"id":"b","opened":{"at":at(2026,11,5,9,0)},"closed":{"at":at(2026,11,11,1,35)}})];
-        assert_eq!(mapimport::file_name(&nodes, None, ""), "map-20261103-1422-20261111-0135");
-        assert_eq!(mapimport::file_name(&nodes, Some("pub-front"), "deleted-"), "deleted-branch-pub-front-20261103-1422-20261111-0135");
-        assert!(mapimport::file_name(&nodes, Some("\u{d55c}"), "").starts_with("branch-node-"));
+        assert_eq!(wb_core::map::file_name(&nodes, None, ""), "map-20261103-1422-20261111-0135");
+        assert_eq!(wb_core::map::file_name(&nodes, Some("pub-front"), "deleted-"), "deleted-branch-pub-front-20261103-1422-20261111-0135");
+        assert!(wb_core::map::file_name(&nodes, Some("\u{d55c}"), "").starts_with("branch-node-"));
     }
     #[test]
     fn marks_by_state() {
