@@ -240,6 +240,17 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
         refer.menu.append_submenu(Some(wb_core::i18n::t("reflect-in-project")), &sub.menu);
         items.menu.append_section(None, &refer.menu);
     }
+    let whole = items.sub();
+    {
+        let (d2, s2, p2, t2, data2) = (d.clone(), session.clone(), path.to_string(), title.to_string(), data.clone());
+        whole.add(wb_core::i18n::t("take-as-reference-whole-map"), session.is_some(), move || {
+            let Some(t) = &s2 else { return };
+            let text = mapimport::whole_reference_request(&p2, &t2, &data2);
+            if sessions::queue_prompt(&d2, t, &text) { status::say(&d2, &wb_core::i18n::f("reference-request-sent", &[("title", cut(&t2, 20)), ("head", wb_core::i18n::t("whole-map").to_string()), ("session", cut(t, 8))]), 8); }
+            else { status::say(&d2, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(t, 8))]), 8); }
+        });
+    }
+    items.menu.append_section(None, &whole.menu);
     let keep = items.sub();
     {
         let (d2, p2, t2) = (d.clone(), path.to_string(), title.to_string());

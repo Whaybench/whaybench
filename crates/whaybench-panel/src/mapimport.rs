@@ -156,6 +156,17 @@ pub fn reference_request(path: &str, title: &str, node: &Value, flow: &[String],
     i18n::f("import-reference-request", &[("title", title.to_string()), ("head", s(node, "label").to_string()), ("flow", upper), ("lines", lines.iter().take(60).cloned().collect::<Vec<_>>().join("\n")), ("source", source)])
 }
 
+/// The request that hands a whole imported map to a session: its file, its size and its top branches; the session
+/// reads the file for what it needs, since a whole map can be far too long to send.
+pub fn whole_reference_request(path: &str, title: &str, data: &Value) -> String {
+    let nodes = data.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+    let ids: std::collections::HashSet<&str> = nodes.iter().map(|n| s(n, "id")).collect();
+    let open = nodes.iter().filter(|n| n.get("isOpen").and_then(Value::as_bool).unwrap_or(false)).count();
+    let tops: Vec<String> = nodes.iter().filter(|n| !ids.contains(s(n, "parent"))).take(60).map(|n| format!("- {}", s(n, "label"))).collect();
+    let source = json!({"file": path, "node": "", "title": title}).to_string();
+    i18n::f("import-reference-whole-request", &[("title", title.to_string()), ("path", path.to_string()), ("count", nodes.len().to_string()), ("open", open.to_string()), ("lines", tops.join("\n")), ("source", source)])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +175,13 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Data::new(dir)
+    }
+    #[test]
+    fn a_whole_map_is_sent_as_its_file_size_and_top_branches() {
+        let data = json!({"nodes":[{"id":"a","label":"top","isOpen":true},{"id":"b","parent":"a","label":"under"},{"id":"z","label":"other"}]});
+        let t = whole_reference_request("/m/x.json", "X", &data);
+        assert!(t.contains("/m/x.json") && t.contains("3 nodes, 1 open"));
+        assert!(t.contains("- top") && t.contains("- other") && !t.contains("- under"));
     }
     #[test]
     fn a_branch_comes_with_what_is_under_it_and_a_copy_is_kept() {

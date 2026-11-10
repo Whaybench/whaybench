@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
+  (this branch).
+
 ### Fixed
 
 - The data directory has its `maps` folder from the start, so Open map shows it before any map was saved.
