@@ -48,6 +48,6 @@ body:
     attributes:
       label: Log (optional)
       description: |
-        The last lines of the newest file in `~/.local/share/whaybench/logs/run/`.
+        The newest folder in `~/.local/share/whaybench/logs/run/` holds one log per program of the last start.
         Logs can hold folder names and conversation titles: look them over before you paste.
       render: text
