@@ -139,7 +139,6 @@ command, `whaybench`, so the files are the same whichever agent wrote them.
 
 ## Known issues
 
-- The session panel's menu sometimes comes out in GTK's dark look after it was opened several times.
 - With the Black theme a large dark rectangle sometimes shows around a panel.
 - Signing in to Claude inside the view panel's Firefox can stop on its progress page; sign in outside Whaybench.
 - Ctrl+wheel zooms the panels but not the terminal tabs.

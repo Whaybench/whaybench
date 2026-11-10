@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Menus in the panels no longer take the look of the desktop's GTK theme (such as Breeze on KDE), which
+  sometimes showed a menu in other colours with a frame around it.
+
 ## [0.1.0] - 2026-11-10
 
 ### Added

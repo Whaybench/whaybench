@@ -140,6 +140,9 @@ pub fn follow_theme(d: &Data) {
             // parts (a menu now and then) come out dark.
             #[allow(deprecated)]
             if s.is_gtk_application_prefer_dark_theme() != dark { s.set_gtk_application_prefer_dark_theme(dark); }
+            // GTK's own theme, never the desktop's: a desktop GTK theme (Breeze on KDE) styles menus its own way, and a
+            // menu now and then came out in its colours with a frame around it.
+            if s.gtk_theme_name().as_deref() != Some("Default") { s.set_gtk_theme_name(Some("Default")); }
         }
         let css = style_sheet(&t);
         if *shown.borrow() != css {
