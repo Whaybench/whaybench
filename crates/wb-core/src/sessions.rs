@@ -272,6 +272,18 @@ pub fn all(d: &Data) -> Vec<Value> {
 
 pub fn map_of(d: &Data, id: &str) -> Option<Value> { read_json(&d.root.join(format!("{id}.json"))) }
 
+/// A conversation's numbers: this one and every number that moved on into it (/resume, /background).
+fn chain(all: &[Value], last: &str) -> Vec<String> {
+    let (mut ids, mut i) = (vec![last.to_string()], 0);
+    while i < ids.len() {
+        let here = ids[i].clone();
+        let before = all.iter().filter(|s| s.get("movedTo").and_then(Value::as_str) == Some(&here)).filter_map(|s| s["id"].as_str().map(String::from));
+        for b in before.collect::<Vec<_>>() { if !ids.contains(&b) { ids.push(b); } }
+        i += 1;
+    }
+    ids
+}
+
 /// How long conversation records are kept: `keep_days` and `keep_mb` in the data directory's settings.json. Missing
 /// or 0 means no limit, the default.
 pub fn retention(d: &Data) -> (u64, u64) {
@@ -303,16 +315,11 @@ pub fn prune(d: &Data) -> usize {
     if days == 0 && mb == 0 { return 0; }
     let all = all(d);
     // Each conversation is its last number with the numbers that moved on into it; most recently active first.
-    let mut convs: Vec<(i64, Vec<String>)> = all.iter().filter(|r| r.get("movedTo").and_then(Value::as_str).is_none_or(str::is_empty)).filter_map(|r| {
-        let last = r.get("id")?.as_str()?.to_string();
-        let (mut ids, mut i) = (vec![last], 0);
-        while i < ids.len() {
-            let here = ids[i].clone();
-            ids.extend(all.iter().filter(|s| s.get("movedTo").and_then(Value::as_str) == Some(&here)).filter_map(|s| s["id"].as_str().map(String::from)).filter(|x| *x != here));
-            i += 1;
-        }
-        Some((r.get("lastActive").and_then(Value::as_i64).unwrap_or(0), ids))
-    }).collect();
+    let mut convs: Vec<(i64, Vec<String>)> = all.iter().filter(|r| r.get("movedTo").and_then(Value::as_str).is_none_or(str::is_empty))
+        .filter_map(|r| Some((r.get("lastActive").and_then(Value::as_i64).unwrap_or(0), chain(&all, r.get("id")?.as_str()?)))).collect();
+    // A kept conversation that took its map from another reads that one's answers for those nodes: it stays.
+    let inherited: Value = read_json(&d.root.join("forks/inherited.json")).unwrap_or(Value::Null);
+    let parents: Vec<&str> = inherited.as_object().into_iter().flatten().filter(|(child, _)| record_of(d, child).is_some()).filter_map(|(_, p)| p.as_str()).collect();
     convs.sort_by_key(|c| std::cmp::Reverse(c.0));
     let now = chrono::Local::now().timestamp_millis();
     let sizes: Vec<u64> = convs.iter().map(|c| c.1.iter().flat_map(|id| session_paths(d, id)).map(|p| size_of(&p)).sum()).collect();
@@ -321,7 +328,7 @@ pub fn prune(d: &Data) -> usize {
     for (i, (at, ids)) in convs.iter().enumerate().rev() {
         let old = days > 0 && now - at > days as i64 * 86_400_000;
         let over = mb > 0 && total > mb * 1024 * 1024;
-        if !(old || over) || ids.iter().any(|id| alive(d, id)) { continue; }
+        if !(old || over) || ids.iter().any(|id| alive(d, id) || parents.contains(&id.as_str())) { continue; }
         for p in ids.iter().flat_map(|id| session_paths(d, id)) { let _ = if p.is_dir() { fs::remove_dir_all(&p) } else { fs::remove_file(&p) }; }
         record::decide("session", "records dropped", if old { "older than the kept days" } else { "over the kept size" }, &[("session", ids[0].clone()), ("numbers", ids.len().to_string())]);
         total = total.saturating_sub(sizes[i]);
@@ -335,10 +342,13 @@ pub fn prune(d: &Data) -> usize {
 /// conversation, are that one's), then to now.
 pub fn span(d: &Data, id: &str, nodes: &[Value]) -> (i64, i64) {
     let rec = record_of(d, id).unwrap_or(Value::Null);
+    let all = all(d);
+    // /resume makes a new record; the conversation began with the first of its numbers.
+    let started = chain(&all, id).iter().filter_map(|n| all.iter().find(|r| r["id"].as_str() == Some(n.as_str()))?["started"].as_i64()).min();
     let answers: Vec<i64> = if id.is_empty() { Vec::new() } else { crate::records::answers_of(d, &crate::records::lineage(d, id)).iter().filter_map(|r| r["at"].as_i64()).collect() };
     let nodes = crate::map::node_span(nodes);
     let now = chrono::Local::now().timestamp_millis();
-    let first = rec["started"].as_i64().or(answers.iter().min().copied()).or(nodes.map(|n| n.0)).unwrap_or(now);
+    let first = started.or(answers.iter().min().copied()).or(nodes.map(|n| n.0)).unwrap_or(now);
     let last = rec["lastActive"].as_i64().or(answers.iter().max().copied()).or(nodes.map(|n| n.1)).unwrap_or(now);
     (first, last.max(first))
 }
@@ -354,7 +364,9 @@ pub fn save_lost_maps(d: &Data) -> usize {
     for r in &all {
         let Some(id) = r.get("id").and_then(Value::as_str) else { continue };
         let moved = r.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty() && m != id);
-        if moved || done.iter().any(|x| x == id) || !ghost(d, &all, id) { continue; }
+        // Without a first prompt nothing was asked: a tab opened on a carried map and closed again holds only a copy.
+        let asked = r.get("firstPrompt").and_then(Value::as_str).is_some_and(|p| !p.is_empty());
+        if moved || !asked || done.iter().any(|x| x == id) || !ghost(d, &all, id) { continue; }
         let Some(map) = map_of(d, id) else { continue };
         let nodes = map.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
         if nodes.is_empty() { continue; }
@@ -699,12 +711,14 @@ mod tests {
     #[test]
     fn the_map_of_a_conversation_no_longer_kept_is_saved_once_from_its_last_number() {
         let d = data("lost-maps");
-        rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b"}));
-        rec(&d, "b", serde_json::json!({"id":"b"}));
+        rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b","firstPrompt":"q"}));
+        rec(&d, "b", serde_json::json!({"id":"b","firstPrompt":"q"}));
+        rec(&d, "tab", serde_json::json!({"id":"tab"}));
         let map = |label: &str| serde_json::json!({"nodes":[{"id":"n","label":label,"opened":{"at":1_790_000_000_000_i64}}]}).to_string();
         fs::write(d.root.join("a.json"), map("early")).unwrap();
         fs::write(d.root.join("b.json"), map("whole")).unwrap();
-        assert_eq!(save_lost_maps(&d), 1, "only the last number");
+        fs::write(d.root.join("tab.json"), map("carried copy")).unwrap();
+        assert_eq!(save_lost_maps(&d), 1, "only the last number, and not a tab where nothing was asked");
         let files: Vec<_> = fs::read_dir(d.maps()).unwrap().flatten().map(|f| f.path()).collect();
         assert_eq!(files.len(), 1);
         assert!(files[0].file_name().unwrap().to_string_lossy().starts_with("auto-map-"));
@@ -732,6 +746,22 @@ mod tests {
         assert!(d.root.join("c.json").exists() && record_of(&d, "c").is_some());
     }
     #[test]
+    fn over_the_size_the_oldest_go_first_and_a_map_another_took_stays() {
+        let d = data("prune-size");
+        let now = chrono::Local::now().timestamp_millis();
+        fs::create_dir_all(d.root.join("forks")).unwrap();
+        for (id, age) in [("p", 4), ("x", 3), ("y", 2), ("child", 1)] {
+            rec(&d, id, serde_json::json!({"id": id, "lastActive": now - age * 1000}));
+            fs::write(d.root.join(format!("{id}.json")), vec![b' '; 300 * 1024]).unwrap();
+        }
+        fs::write(d.root.join("forks/inherited.json"), r#"{"child":"p"}"#).unwrap();
+        fs::write(d.root.join("settings.json"), r#"{"keep_mb":1}"#).unwrap();
+        assert_eq!(prune(&d), 1);
+        assert!(d.root.join("p.json").exists(), "child took its map: kept");
+        assert!(!d.root.join("x.json").exists(), "the oldest of the others");
+        assert!(d.root.join("y.json").exists() && d.root.join("child.json").exists(), "under the size again: stops");
+    }
+    #[test]
     fn a_conversation_spans_from_its_start_not_from_a_map_it_carried_over() {
         let d = data("span");
         let nodes = vec![serde_json::json!({"id":"n","opened":{"at":100}})];
@@ -739,6 +769,9 @@ mod tests {
         assert_eq!(span(&d, "s", &nodes), (5000, 9000));
         rec(&d, "old", serde_json::json!({"id":"old","lastActive":9000}));
         assert_eq!(span(&d, "old", &nodes), (100, 9000), "no start kept: the map's own stamps");
+        rec(&d, "r1", serde_json::json!({"id":"r1","started":2000,"movedTo":"r2"}));
+        rec(&d, "r2", serde_json::json!({"id":"r2","started":7000,"lastActive":9500}));
+        assert_eq!(span(&d, "r2", &nodes), (2000, 9500), "resumed under a new number: the first number's start");
     }
     #[test]
     fn a_move_that_did_not_hold_is_taken_back() {

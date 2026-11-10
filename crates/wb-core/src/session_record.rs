@@ -31,7 +31,8 @@ pub fn touch(data: &Path, sid: &str, t: Touch) -> Result<Value> {
     let first = keep("firstPrompt").or(t.prompt.map(|p| json!(p)));
     let last = t.prompt.map(|p| json!(p)).or(keep("lastPrompt"));
     let tab = match t.tab { Some(x) => Some(json!(safe_id(x)?)), None => keep("tab") };
-    let started = keep("started").or(Some(json!(now_ms())));
+    // Only a new record starts now; one from before starts were kept leaves it to its answers.
+    let started = keep("started").or(old.is_null().then(|| json!(now_ms())));
     for (k, v) in [("cwd", cwd), ("firstPrompt", first), ("lastPrompt", last), ("started", started), ("lastActive", Some(json!(now_ms()))), ("tab", tab)] {
         if let Some(v) = v { r[k] = v; }
     }
@@ -114,6 +115,18 @@ pub fn carry_from(data: &Path, sid: &str, from: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn only_a_new_record_takes_now_as_its_start() -> Result<()> {
+        let d = std::env::temp_dir().join(format!("wb-started-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("sessions"))?;
+        let none = Touch { prompt: Some("q"), tab: None, cwd: None, agent: None };
+        assert!(touch(&d, "new", none)?["started"].is_i64());
+        write_json(&d.join("sessions/old.json"), &json!({"id":"old","lastActive":1}))?;
+        let none = Touch { prompt: Some("q"), tab: None, cwd: None, agent: None };
+        assert!(touch(&d, "old", none)?.get("started").is_none(), "a record from before keeps falling back to its answers");
+        Ok(())
+    }
     #[test]
     fn touch_keeps_the_first_prompt_and_the_move_and_drops_past_states() -> Result<()> {
         let dir = tempfile::tempdir()?;

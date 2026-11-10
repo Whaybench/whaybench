@@ -211,7 +211,7 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
         {
             let from = s(data, "from").to_string();
             let at = records::node_time(n);
-            let kept = !from.is_empty() && !records::answers_of(d, &records::lineage(d, &from)).is_empty();
+            let kept = !from.is_empty() && records::lineage(d, &from).iter().any(|n| d.root.join("answer-log").join(format!("{n}.jsonl")).exists());
             let (d2, id2) = (d.clone(), id.clone());
             items.add(wb_core::i18n::t("related-answers-3"), at.is_some() && kept, move || status::send(&d2, "answer", json!({"session": from, "node": id2, "at": at.unwrap_or(0)})));
         }
