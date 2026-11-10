@@ -1,0 +1,1 @@
+libgtk-4-dev libwebkitgtk-6.0-dev libxkbcommon-dev libwayland-dev libegl-dev pkg-config cmake g++ libfontconfig1-dev libfreetype-dev libxcb-xfixes0-dev python3

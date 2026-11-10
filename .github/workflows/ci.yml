@@ -10,11 +10,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      # Kept in GitHub's cache: the same list in CI and Release, so a release on a tag finds what main stored.
-      - uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+      # The packages' .deb files are kept in GitHub's cache (saved only when the job succeeds), so a slow or broken
+      # Ubuntu mirror costs one download, not every run. One list for CI and Release: a tag finds what main stored.
+      - uses: actions/cache@v4
         with:
-          packages: libgtk-4-dev libwebkitgtk-6.0-dev libxkbcommon-dev libwayland-dev libegl-dev pkg-config cmake g++ libfontconfig1-dev libfreetype-dev libxcb-xfixes0-dev python3
-          version: 1
+          path: ~/apt-debs
+          key: apt-debs-${{ hashFiles('.github/apt-packages.txt') }}
+      - name: System packages
+        run: |
+          mkdir -p ~/apt-debs/partial
+          get() { sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=3 -o Dir::Cache::Archives="$HOME/apt-debs" $(cat .github/apt-packages.txt); }
+          get || { sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|' /etc/apt/apt-mirrors.txt; get; }
+          sudo chown -R "$USER" ~/apt-debs
       - uses: dtolnay/rust-toolchain@stable
       - run: tools/fetch-smithay.sh
       - uses: Swatinem/rust-cache@v2.9.3
