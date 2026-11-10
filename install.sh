@@ -1,12 +1,12 @@
 #!/bin/sh
 # Installs the latest Whaybench release for this user:
-#   curl -fsSL https://github.com/whaybench/whaybench/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/Whaybench/whaybench/releases/latest/download/install.sh | sh
 # With whaybench-x86_64-linux.tar.gz (and its .sha256) already in the current folder, that file is installed instead.
 # The programs go to ~/.local/lib/whaybench, the command to ~/.local/bin/whaybench. When Claude Code is installed, its
 # Whaybench plugin is installed too. System packages are only checked: their install command is shown.
 set -eu
 
-REPO="${WHAYBENCH_REPO:-https://github.com/whaybench/whaybench}"
+REPO="${WHAYBENCH_REPO:-https://github.com/Whaybench/whaybench}"
 NAME=whaybench-x86_64-linux
 LIB="$HOME/.local/lib/whaybench"
 BIN="$HOME/.local/bin"
@@ -41,9 +41,14 @@ ln -sf "$LIB/whaybench" "$BIN/whaybench"
 say "Installed $("$LIB/whaybench" --version 2>/dev/null || echo whaybench) in $LIB"
 
 if command -v claude >/dev/null; then
-    claude plugin marketplace add whaybench/whaybench >/dev/null 2>&1 || true
+    # An existing marketplace makes add fail; only a failed install is reported, with the reason.
+    added=$(claude plugin marketplace add Whaybench/whaybench 2>&1)
     if claude plugin install context-map@whaybench >/dev/null 2>&1; then say "Claude Code plugin context-map installed"
-    else say "Claude Code plugin: run  claude plugin install context-map@whaybench"; fi
+    else
+        say "Claude Code plugin was not installed:"
+        printf '%s\n' "$added" | sed 's/^/    /'
+        say "Then run:  claude plugin marketplace add Whaybench/whaybench && claude plugin install context-map@whaybench"
+    fi
 else
     say "Claude Code was not found. With Codex CLI start Whaybench with --agent codex."
 fi
