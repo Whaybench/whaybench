@@ -27,6 +27,7 @@ Whaybench puts all of this on one surface and keeps it in step with the conversa
 **A conversation map the agent keeps for you.** In every turn the agent updates a tree of the conversation:
 topics, open questions, settled decisions written as "question → conclusion (reason)", and the parts of what is
 being built with their state. You see where the conversation is and what was decided without scrolling back.
+Open a node and its related answers come up: the replies from the turns where that topic was discussed.
 When the agent reads a file, the decisions about it come along, so they survive a compacted context.
 
 **Sessions that do not get lost.** Every conversation is listed with a name taken from its map, its state

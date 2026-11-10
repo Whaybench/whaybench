@@ -1,0 +1,8 @@
+# The components this release was tested with. Whaybench compares them at start
+# and writes any difference to its log; it never stops for one.
+[components]
+"Claude Code" = "2.1.322 (Claude Code)"
+"Alacritty" = "alacritty 0.17.0"
+"Firefox" = "Mozilla Firefox 159.0"
+"GTK" = "4.22.5"
+"wl-clipboard" = "wl-clipboard 2.2.1"

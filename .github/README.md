@@ -28,6 +28,10 @@ curl -fsSL https://github.com/Whaybench/whaybench/releases/latest/download/insta
 topics, open questions, and every decision written as *question → conclusion (reason)*. An hour later,
 the answer to "why did we do it this way?" is one glance away, not three hundred lines up.
 
+**From a decision straight to the answer behind it.** Open a node on the map and its related answers come up:
+the replies from the turns where that topic was discussed, one after another. The reasoning is never lost in
+the scrollback.
+
 **Context that survives compaction.** When the agent opens a file again, the decisions made about it come
 with it. A compacted context no longer means a forgotten agreement.
 

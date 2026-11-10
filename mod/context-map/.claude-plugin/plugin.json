@@ -1,1 +1,1 @@
-{"name": "context-map", "version": "0.1.0", "description": "Conversation map of the branches and the current point, and the session record for Whaybench", "types": "./types/index.d.ts"}
+{"name": "context-map", "version": "0.1.1", "description": "Conversation map of the branches and the current point, and the session record for Whaybench", "types": "./types/index.d.ts"}
