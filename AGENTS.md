@@ -56,5 +56,5 @@ A release:
 
 - `cargo test --workspace` passes.
 - A change on screen is checked by running Whaybench and taking a screenshot
-  (`whaybench ctl shot --out a.png`).
+  (`whaybench ctl shot --out /tmp/a.png`, outside the repository: a screenshot holds the conversation on screen).
 - Test results are reported as they are.

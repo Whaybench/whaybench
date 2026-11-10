@@ -1,2 +1,4 @@
 target/
 third_party/smithay/
+# Screenshots and other pictures taken while working; the README picture is in docs/images.
+/*.png
