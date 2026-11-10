@@ -116,6 +116,7 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     record::open(&data, "whaybench", &run_id, if std::env::var_os(ENV_AGAIN).is_some() { "again" } else { "first" });
     record::install_panic_hook();
     wb_core::sessions::save_lost_maps(&data);
+    wb_core::sessions::prune(&data);
 
     let again = std::env::args().skip(1).collect::<Vec<_>>();
     let result = start::prepare().and_then(|_| serve(&data, &run_id, apps, no_session));

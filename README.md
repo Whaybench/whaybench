@@ -119,7 +119,11 @@ You need Rust 1.87 or newer ([rustup](https://rustup.rs)), Git and the developme
 
 Everything is in one folder, the first of `--data-dir DIR`, `WHAYBENCH_DATA_DIR`, `$XDG_DATA_HOME/whaybench`
 and `~/.local/share/whaybench`. Copy it to move your setup to another account. It holds the sign-ins of the view panel's browser, so only your
-account can read it and you should not share a copy. Its `cache` folder can be deleted at any time. Claude Code and Codex keep their own conversations where they always do.
+account can read it and you should not share a copy. Its `cache` folder can be deleted at any time. Conversations are kept without limit; to drop old ones, put `"keep_days"` (days since a conversation was last
+active) or `"keep_mb"` (the size all of them may take) in its `settings.json`, for example `{"keep_days": 365}`.
+A whole conversation goes at once, at the next start; saved maps in `maps` stay. Claude Code deletes its own
+conversations after 30 days unless its `cleanupPeriodDays` setting says otherwise; Whaybench then saves the map
+to `maps` as `auto-map-…`. Claude Code and Codex keep their own conversations where they always do.
 
 ## Make it yours
 

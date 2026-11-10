@@ -272,6 +272,64 @@ pub fn all(d: &Data) -> Vec<Value> {
 
 pub fn map_of(d: &Data, id: &str) -> Option<Value> { read_json(&d.root.join(format!("{id}.json"))) }
 
+/// How long conversation records are kept: `keep_days` and `keep_mb` in the data directory's settings.json. Missing
+/// or 0 means no limit, the default.
+pub fn retention(d: &Data) -> (u64, u64) {
+    let s = read_json(&d.root.join("settings.json")).unwrap_or(Value::Null);
+    (s["keep_days"].as_u64().unwrap_or(0), s["keep_mb"].as_u64().unwrap_or(0))
+}
+
+/// What the program keeps of one session number: its map, record, answers, files read and changed, pages shown.
+fn session_paths(d: &Data, id: &str) -> Vec<PathBuf> {
+    let mut out = vec![d.root.join(format!("{id}.json")), sessions_dir(d).join(format!("{id}.json")), d.root.join("answers").join(format!("{id}.json")),
+        d.root.join("answer-log").join(format!("{id}.jsonl")), d.root.join("node-files").join(format!("{id}.json")), d.root.join("show").join(id)];
+    out.extend(fs::read_dir(d.root.join("files")).into_iter().flatten().flatten().map(|f| f.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(id))));
+    out
+}
+
+fn size_of(p: &Path) -> u64 {
+    match fs::metadata(p) {
+        Ok(m) if m.is_dir() => fs::read_dir(p).into_iter().flatten().flatten().map(|e| size_of(&e.path())).sum(),
+        Ok(m) => m.len(),
+        Err(_) => 0,
+    }
+}
+
+/// Drops whole conversations (every number of one, so its map and answers go together) older than `keep_days`,
+/// then the oldest until all of them fit in `keep_mb`. Running ones stay; saved maps (the maps folder) are not
+/// conversation records and stay too. The number of conversations dropped.
+pub fn prune(d: &Data) -> usize {
+    let (days, mb) = retention(d);
+    if days == 0 && mb == 0 { return 0; }
+    let all = all(d);
+    // Each conversation is its last number with the numbers that moved on into it; most recently active first.
+    let mut convs: Vec<(i64, Vec<String>)> = all.iter().filter(|r| r.get("movedTo").and_then(Value::as_str).is_none_or(str::is_empty)).filter_map(|r| {
+        let last = r.get("id")?.as_str()?.to_string();
+        let (mut ids, mut i) = (vec![last], 0);
+        while i < ids.len() {
+            let here = ids[i].clone();
+            ids.extend(all.iter().filter(|s| s.get("movedTo").and_then(Value::as_str) == Some(&here)).filter_map(|s| s["id"].as_str().map(String::from)).filter(|x| *x != here));
+            i += 1;
+        }
+        Some((r.get("lastActive").and_then(Value::as_i64).unwrap_or(0), ids))
+    }).collect();
+    convs.sort_by_key(|c| std::cmp::Reverse(c.0));
+    let now = chrono::Local::now().timestamp_millis();
+    let sizes: Vec<u64> = convs.iter().map(|c| c.1.iter().flat_map(|id| session_paths(d, id)).map(|p| size_of(&p)).sum()).collect();
+    let mut total: u64 = sizes.iter().sum();
+    let mut dropped = 0;
+    for (i, (at, ids)) in convs.iter().enumerate().rev() {
+        let old = days > 0 && now - at > days as i64 * 86_400_000;
+        let over = mb > 0 && total > mb * 1024 * 1024;
+        if !(old || over) || ids.iter().any(|id| alive(d, id)) { continue; }
+        for p in ids.iter().flat_map(|id| session_paths(d, id)) { let _ = if p.is_dir() { fs::remove_dir_all(&p) } else { fs::remove_file(&p) }; }
+        record::decide("session", "records dropped", if old { "older than the kept days" } else { "over the kept size" }, &[("session", ids[0].clone()), ("numbers", ids.len().to_string())]);
+        total = total.saturating_sub(sizes[i]);
+        dropped += 1;
+    }
+    dropped
+}
+
 /// When a conversation went on, in ms: from its start to its last activity. Records from before the start was
 /// kept fall back to its answers, then to its map's own stamps (which, in a map carried over from another
 /// conversation, are that one's), then to now.
@@ -653,6 +711,25 @@ mod tests {
         let v = read_json(&files[0]).unwrap();
         assert_eq!((v["from"].as_str(), v["auto"].as_bool(), v["nodes"][0]["label"].as_str()), (Some("b"), Some(true), Some("whole")));
         assert_eq!(save_lost_maps(&d), 0, "once");
+    }
+    #[test]
+    fn old_conversations_go_whole_and_only_when_a_limit_is_set() {
+        let d = data("prune");
+        let day = 86_400_000_i64;
+        let now = chrono::Local::now().timestamp_millis();
+        rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b"}));
+        rec(&d, "b", serde_json::json!({"id":"b","lastActive": now - 40 * day}));
+        rec(&d, "c", serde_json::json!({"id":"c","lastActive": now - day}));
+        for id in ["a", "b", "c"] {
+            fs::write(d.root.join(format!("{id}.json")), "{}").unwrap();
+            fs::create_dir_all(d.root.join("answer-log")).unwrap();
+            fs::write(d.root.join("answer-log").join(format!("{id}.jsonl")), "x\n").unwrap();
+        }
+        assert_eq!(prune(&d), 0, "no limit by default");
+        fs::write(d.root.join("settings.json"), r#"{"keep_days":30}"#).unwrap();
+        assert_eq!(prune(&d), 1);
+        assert!(!d.root.join("a.json").exists() && !d.root.join("answer-log/b.jsonl").exists(), "every number of it, map and answers");
+        assert!(d.root.join("c.json").exists() && record_of(&d, "c").is_some());
     }
     #[test]
     fn a_conversation_spans_from_its_start_not_from_a_map_it_carried_over() {
