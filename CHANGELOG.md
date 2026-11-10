@@ -13,6 +13,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Related answers from a node of an imported map, when the answers of the session it was saved from are kept
   in this data directory.
 
+### Changed
+
+- A saved map's file name no longer takes its title (which is in the interface language): it is
+  `map-<first change>-<last change>.json`, or `branch-<node id>-…` for a branch, to the minute.
+
 ### Fixed
 
 - The data directory has its `maps` folder from the start, so Open map shows it before any map was saved.

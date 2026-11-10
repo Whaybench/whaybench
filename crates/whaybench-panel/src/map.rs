@@ -113,16 +113,19 @@ pub fn reflect_request(pid: Option<&str>, work: Option<&str>, flow: &[String], l
 
 fn maps_dir(d: &Data) -> std::path::PathBuf { d.maps() }
 
-fn safe_name(title: &str) -> String {
-    let mut out = String::new();
-    for c in title.chars() {
-        if c.is_alphanumeric() || c == '-' || c == '_' { out.push(c); } else if !out.ends_with('-') { out.push('-'); }
-    }
-    let t: String = out.trim_matches('-').chars().take(40).collect();
-    if t.is_empty() { wb_core::i18n::t("map").into() } else { t }
+/// A saved map's file name: what it is and the minutes of its first and last change, never its title (a title is
+/// in the person's language; it is kept inside the file). `map-<first>-<last>`, `branch-<node id>-<first>-<last>`.
+fn file_name(nodes: &[Value], root: Option<&str>, prefix: &str) -> String {
+    let times: Vec<i64> = nodes.iter().flat_map(|n| ["opened", "changed", "closed"].map(|k| n.get(k).and_then(|v| v.get("at")).and_then(Value::as_i64).unwrap_or(0))).filter(|a| *a > 0).collect();
+    let now = chrono::Local::now().timestamp_millis();
+    let minute = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%Y%m%d-%H%M").to_string()).unwrap_or_default();
+    let (first, last) = (times.iter().min().copied().unwrap_or(now), times.iter().max().copied().unwrap_or(now));
+    let kind = match root {
+        None => "map".to_string(),
+        Some(r) => { let id: String = r.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect(); format!("branch-{}", if id.is_empty() { "node" } else { &id }) }
+    };
+    format!("{prefix}{kind}-{}-{}", minute(first), minute(last))
 }
-
-fn stamp() -> String { chrono::Local::now().format("%Y%m%d-%H%M%S").to_string() }
 
 /// Writes the branch, or the whole map, as a file in the data directory; returns its path.
 fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str) -> std::io::Result<std::path::PathBuf> {
@@ -137,7 +140,9 @@ fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str)
             v
         }
     };
-    let path = maps_dir(d).join(format!("{prefix}{}-{}.json", safe_name(title), stamp()));
+    let name = file_name(&nodes, root, prefix);
+    // Saved twice with nothing changed in between: the same name, so a number keeps both.
+    let path = (1..).map(|i| maps_dir(d).join(if i == 1 { format!("{name}.json") } else { format!("{name}-{i}.json") })).find(|p| !p.exists()).unwrap_or_default();
     let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": data.get("sessionId"), "nodes": nodes});
     std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default())?;
     Ok(path)
@@ -799,6 +804,14 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_saved_map_is_named_by_kind_and_its_first_and_last_change() {
+        let at = |y: i32, mo: u32, da: u32, h: u32, mi: u32| chrono::TimeZone::with_ymd_and_hms(&chrono::Local, y, mo, da, h, mi, 0).unwrap().timestamp_millis();
+        let nodes = vec![json!({"id":"a","opened":{"at":at(2026,11,3,14,22)}}), json!({"id":"b","opened":{"at":at(2026,11,5,9,0)},"closed":{"at":at(2026,11,11,1,35)}})];
+        assert_eq!(file_name(&nodes, None, ""), "map-20261103-1422-20261111-0135");
+        assert_eq!(file_name(&nodes, Some("pub-front"), "deleted-"), "deleted-branch-pub-front-20261103-1422-20261111-0135");
+        assert!(file_name(&nodes, Some("\u{d55c}"), "").starts_with("branch-node-"));
+    }
     #[test]
     fn marks_by_state() {
         assert_eq!(glyph(&json!({"id":"a","isOpen":true}), "a"), "●");
