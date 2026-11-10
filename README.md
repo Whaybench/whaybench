@@ -137,10 +137,6 @@ Firefox for views. The agent runs unchanged in the terminal; a small relay betwe
 which session a tab holds. The Claude Code plugin and the Codex hooks write what the panels read through one
 command, `whaybench`, so the files are the same whichever agent wrote them.
 
-## Known issues
-
-- With the Black theme a large dark rectangle sometimes shows around a panel.
-
 ## FAQ
 
 **macOS or Windows?** Not now. Whaybench needs a Linux Wayland desktop.
