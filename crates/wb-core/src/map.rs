@@ -195,13 +195,18 @@ pub fn take_over(data: &Path, sid: &str, source: &Value) -> Result<Value> {
     Ok(map)
 }
 
-/// A saved map's file name: what it is and the minutes of its first and last change, never its title (a title is
-/// in the person's language; it is kept inside the file). `map-<first>-<last>`, `branch-<node id>-<first>-<last>`.
-pub fn file_name(nodes: &[Value], root: Option<&str>, prefix: &str) -> String {
+/// The earliest and latest time stamped on the nodes, in ms; None without any.
+pub fn node_span(nodes: &[Value]) -> Option<(i64, i64)> {
     let times: Vec<i64> = nodes.iter().flat_map(|n| ["opened", "changed", "closed"].map(|k| n.get(k).and_then(|v| v.get("at")).and_then(Value::as_i64).unwrap_or(0))).filter(|a| *a > 0).collect();
-    let now = chrono::Local::now().timestamp_millis();
+    Some((*times.iter().min()?, *times.iter().max()?))
+}
+
+/// A saved map's file name: what it is and the minutes its conversation began and was last active (`span`, ms),
+/// never its title (a title is in the person's language; it is kept inside the file).
+/// `map-<first>-<last>`, `branch-<node id>-<first>-<last>`.
+pub fn file_name(span: (i64, i64), root: Option<&str>, prefix: &str) -> String {
     let minute = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%Y%m%d-%H%M").to_string()).unwrap_or_default();
-    let (first, last) = (times.iter().min().copied().unwrap_or(now), times.iter().max().copied().unwrap_or(now));
+    let (first, last) = span;
     let kind = match root {
         None => "map".to_string(),
         Some(r) => { let id: String = r.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect(); format!("branch-{}", if id.is_empty() { "node" } else { &id }) }

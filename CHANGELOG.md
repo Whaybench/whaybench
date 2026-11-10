@@ -19,7 +19,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 - A saved map's file name, and that of the copy kept when a map is imported, no longer takes its title (which
   is in the interface language): it is `map-<first change>-<last change>.json`, or `branch-<node id>-…` for a
-  branch, to the minute. The imported copy also keeps the session the map came from.
+  branch. The times are when the conversation began and was last active, to the minute (session records now
+  keep their start). The imported copy also keeps the session the map came from.
 
 ### Fixed
 

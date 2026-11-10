@@ -272,6 +272,19 @@ pub fn all(d: &Data) -> Vec<Value> {
 
 pub fn map_of(d: &Data, id: &str) -> Option<Value> { read_json(&d.root.join(format!("{id}.json"))) }
 
+/// When a conversation went on, in ms: from its start to its last activity. Records from before the start was
+/// kept fall back to its answers, then to its map's own stamps (which, in a map carried over from another
+/// conversation, are that one's), then to now.
+pub fn span(d: &Data, id: &str, nodes: &[Value]) -> (i64, i64) {
+    let rec = record_of(d, id).unwrap_or(Value::Null);
+    let answers: Vec<i64> = if id.is_empty() { Vec::new() } else { crate::records::answers_of(d, &crate::records::lineage(d, id)).iter().filter_map(|r| r["at"].as_i64()).collect() };
+    let nodes = crate::map::node_span(nodes);
+    let now = chrono::Local::now().timestamp_millis();
+    let first = rec["started"].as_i64().or(answers.iter().min().copied()).or(nodes.map(|n| n.0)).unwrap_or(now);
+    let last = rec["lastActive"].as_i64().or(answers.iter().max().copied()).or(nodes.map(|n| n.1)).unwrap_or(now);
+    (first, last.max(first))
+}
+
 /// Claude Code deletes old conversations (after 30 days unless set otherwise); their maps stay but the sessions
 /// leave the list. Each such map is saved once to the maps folder, as `auto-map-…` titled with the session's name.
 /// Only the last number of a conversation: an earlier one that carried on under another holds part of its map.
@@ -287,7 +300,7 @@ pub fn save_lost_maps(d: &Data) -> usize {
         let Some(map) = map_of(d, id) else { continue };
         let nodes = map.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
         if nodes.is_empty() { continue; }
-        let path = crate::map::free_path(&d.maps(), &crate::map::file_name(&nodes, None, "auto-"));
+        let path = crate::map::free_path(&d.maps(), &crate::map::file_name(span(d, id, &nodes), None, "auto-"));
         let body = serde_json::json!({"format": "whaybench-map", "version": map.get("version"), "title": session_name(d, id),
             "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": id, "auto": true, "nodes": nodes});
         if fs::create_dir_all(d.maps()).and_then(|_| fs::write(&path, body.to_string())).is_ok() {
@@ -640,6 +653,15 @@ mod tests {
         let v = read_json(&files[0]).unwrap();
         assert_eq!((v["from"].as_str(), v["auto"].as_bool(), v["nodes"][0]["label"].as_str()), (Some("b"), Some(true), Some("whole")));
         assert_eq!(save_lost_maps(&d), 0, "once");
+    }
+    #[test]
+    fn a_conversation_spans_from_its_start_not_from_a_map_it_carried_over() {
+        let d = data("span");
+        let nodes = vec![serde_json::json!({"id":"n","opened":{"at":100}})];
+        rec(&d, "s", serde_json::json!({"id":"s","started":5000,"lastActive":9000}));
+        assert_eq!(span(&d, "s", &nodes), (5000, 9000));
+        rec(&d, "old", serde_json::json!({"id":"old","lastActive":9000}));
+        assert_eq!(span(&d, "old", &nodes), (100, 9000), "no start kept: the map's own stamps");
     }
     #[test]
     fn a_move_that_did_not_hold_is_taken_back() {

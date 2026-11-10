@@ -86,7 +86,7 @@ pub fn read(d: &Data, source: &Source) -> Option<(Vec<Value>, String, String)> {
 /// Keeps a copy as a file of its own, with the session it came from (for its related answers). Its path.
 pub fn keep(d: &Data, nodes: &[Value], title: &str, from: &str) -> std::io::Result<PathBuf> {
     fs::create_dir_all(imported_dir(d))?;
-    let path = wb_core::map::free_path(&imported_dir(d), &wb_core::map::file_name(nodes, None, ""));
+    let path = wb_core::map::free_path(&imported_dir(d), &wb_core::map::file_name(sessions::span(d, from, nodes), None, ""));
     let imported = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
     fs::write(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": nodes}).to_string())?;
     Ok(path)

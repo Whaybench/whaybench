@@ -31,7 +31,8 @@ pub fn touch(data: &Path, sid: &str, t: Touch) -> Result<Value> {
     let first = keep("firstPrompt").or(t.prompt.map(|p| json!(p)));
     let last = t.prompt.map(|p| json!(p)).or(keep("lastPrompt"));
     let tab = match t.tab { Some(x) => Some(json!(safe_id(x)?)), None => keep("tab") };
-    for (k, v) in [("cwd", cwd), ("firstPrompt", first), ("lastPrompt", last), ("lastActive", Some(json!(now_ms()))), ("tab", tab)] {
+    let started = keep("started").or(Some(json!(now_ms())));
+    for (k, v) in [("cwd", cwd), ("firstPrompt", first), ("lastPrompt", last), ("started", started), ("lastActive", Some(json!(now_ms()))), ("tab", tab)] {
         if let Some(v) = v { r[k] = v; }
     }
     if let Some(a) = t.agent { r["agent"] = json!(a); }
