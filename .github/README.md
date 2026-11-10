@@ -1,5 +1,7 @@
 <h1 align="center">Whaybench</h1>
 
+<p align="center"><i>/ˈwaɪ.bɛntʃ/, said like "why bench"</i></p>
+
 <p align="center"><b>Long conversations with your coding agent, without losing the thread.</b></p>
 
 <p align="center">Claude Code and Codex CLI in one Linux workspace that remembers what was decided,<br>
