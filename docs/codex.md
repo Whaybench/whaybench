@@ -1,5 +1,7 @@
 # Codex CLI
 
+> Codex CLI support is experimental. Some parts may not work yet; reports are welcome in [Issues](https://github.com/Whaybench/whaybench/issues).
+
 Run `whaybench --agent codex` and Codex CLI is the agent of that run. One run does not mix Claude Code and Codex.
 Without `--agent` the agent is Claude Code, and nothing on that path changes.
 

@@ -4,7 +4,7 @@
 
 <p align="center"><b>Long conversations with your coding agent, without losing the thread.</b></p>
 
-<p align="center">Claude Code and Codex CLI in one Linux workspace that remembers what was decided,<br>
+<p align="center">Claude Code (and Codex CLI, experimental) in one Linux workspace that remembers what was decided,<br>
 which session did what, and everything the agent showed you.</p>
 
 <p align="center">
@@ -94,7 +94,7 @@ Settings → Language. Share it back as a pull request and everyone gets it.
 
    ```sh
    whaybench                  # with Claude Code
-   whaybench --agent codex    # with Codex CLI
+   whaybench --agent codex    # with Codex CLI (experimental)
    ```
 
 Ask your agent something and watch the map grow.
@@ -102,7 +102,7 @@ Ask your agent something and watch the map grow.
 ## Learn more
 
 - [Full install guide, data folder and FAQ](/README.md)
-- [Using Codex CLI](/docs/codex.md)
+- [Using Codex CLI (experimental)](/docs/codex.md)
 - [Add-on guides](/README.md#make-it-yours)
 - [Report a bug or suggest an idea](https://github.com/Whaybench/whaybench/issues)
 - [Contributing](/AGENTS.md)

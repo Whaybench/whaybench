@@ -1,7 +1,7 @@
 <h1 align="center">Whaybench</h1>
 
 <p align="center"><b>Keep the thread of long conversations with your coding agent.</b><br>
-A Linux desktop workspace for Claude Code and Codex CLI: the conversation, its map, your sessions,<br>
+A Linux desktop workspace for Claude Code (Codex CLI experimental): the conversation, its map, your sessions,<br>
 the answers and everything the agent shows, side by side in one window.</p>
 
 <p align="center">
@@ -90,13 +90,13 @@ packages, and, when Claude Code is installed, installs its Whaybench plugin. To 
     claude plugin marketplace add whaybench/whaybench
     claude plugin install context-map@whaybench
 
-With Codex CLI there is nothing more to install. Start with `--agent codex`, then open `/hooks` in the Codex tab once
+Codex CLI support is experimental: some parts may not work yet. With Codex CLI there is nothing more to install. Start with `--agent codex`, then open `/hooks` in the Codex tab once
 and trust the Whaybench hooks. See [docs/codex.md](docs/codex.md).
 
 ### 3. Run
 
     whaybench                  # with Claude Code
-    whaybench --agent codex    # with Codex CLI
+    whaybench --agent codex    # with Codex CLI (experimental)
 
 A conversation tab opens with the agent; ask it something and the map starts to grow. Settings → Language
 switches the interface language.
