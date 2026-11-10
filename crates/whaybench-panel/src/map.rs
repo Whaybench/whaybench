@@ -217,6 +217,14 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
         let mut lines = Vec::new();
         outline(&tree, n, 0, &mut lines);
         let flow = flow_of(data, &id);
+        // Related answers of the session the map was saved from: dimmed when its answers are not on this computer.
+        {
+            let from = s(data, "from").to_string();
+            let at = records::node_time(n);
+            let kept = !from.is_empty() && !records::answers_of(d, &records::lineage(d, &from)).is_empty();
+            let (d2, id2) = (d.clone(), id.clone());
+            items.add(wb_core::i18n::t("related-answers-3"), at.is_some() && kept, move || status::send(&d2, "answer", json!({"session": from, "node": id2, "at": at.unwrap_or(0)})));
+        }
         {
             let (d2, s2, n2, p2, t2, f2, l2) = (d.clone(), session.clone(), n.clone(), path.to_string(), title.to_string(), flow.clone(), lines.clone());
             refer.add(wb_core::i18n::t("take-as-reference-this-node"), session.is_some(), move || {

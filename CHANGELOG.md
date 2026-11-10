@@ -10,6 +10,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).
+- Related answers from a node of an imported map, when the answers of the session it was saved from are kept
+  in this data directory.
 
 ### Fixed
 
