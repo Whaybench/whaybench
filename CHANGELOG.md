@@ -15,6 +15,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
   a state means done). A memory id (`memid`) on every new node, kept through a regrouping. Times and conditions:
   `at`, `due`, and `requires` / `assumes` over node ids with ∧ ∨ ¬, checked when written. A `resolves` link closes
   the problem it settles and what is still open under it. The important mark is the person's only.
+- Memory: files a session reads, changes or attaches to a node are recorded as `file.touched` events with the
+  node, so every session's nodes about a file can be found by its path (`whaybench record SESSION file …`).
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).

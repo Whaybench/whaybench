@@ -20,7 +20,7 @@ pub fn map(data: &Data, words: &[String]) -> Result<(), String> {
 
 /// `whaybench record SESSION ...`: the session's record, state, heartbeat and answers (wb_core::session_record).
 pub fn record(data: &Data, words: &[String]) -> Result<(), String> {
-    let usage = "record SESSION touch [--prompt TEXT] [--tab TAB] [--cwd DIR] | state working|waiting|done [--note TEXT] | alive | off | answer < ANSWER.json | moved TO [--empty-carried ID] | carry-from OLD";
+    let usage = "record SESSION touch [--prompt TEXT] [--tab TAB] [--cwd DIR] | state working|waiting|done [--note TEXT] | alive | off | answer < ANSWER.json | moved TO [--empty-carried ID] | carry-from OLD | file read|edit|attach PATH [--node ID]";
     let (Some(id), Some(op)) = (words.first(), words.get(1)) else { return Err(usage.into()) };
     let rest = &words[2..];
     // --name VALUE pairs after the words an operation takes.
@@ -45,6 +45,7 @@ pub fn record(data: &Data, words: &[String]) -> Result<(), String> {
         }
         "moved" => { let to = rest.first().ok_or(usage)?; rec::moved(root, id, to, opt(1, "--empty-carried")?) }
         "carry-from" if rest.len() == 1 => rec::carry_from(root, id, &rest[0]),
+        "file" if rest.len() >= 2 => wb_core::memory::file_touched(root, id, &rest[0], &rest[1], opt(2, "--node")?.filter(|n| !n.is_empty())),
         _ => return Err(usage.into()),
     };
     done.map_err(|e| e.to_string())

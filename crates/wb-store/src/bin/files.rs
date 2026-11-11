@@ -37,6 +37,7 @@ fn run(mut args: Vec<String>, data: &Data) -> Result<(), String> {
         Some("attach") if args.len() >= 3 => {
             let mut set: BTreeSet<String> = listed(table.get(&args[1])).into_iter().collect();
             set.extend(args[2..].iter().map(|p| absolute(p)));
+            for p in &args[2..] { let _ = wb_core::memory::file_touched(&data.root, &session, "attach", &absolute(p), Some(&args[1])); }
             table.insert(args[1].clone(), json!(set));
         }
         Some("detach") if args.len() >= 2 => {

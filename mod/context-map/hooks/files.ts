@@ -4,6 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { decisionsFor, toldDecisions } from './decisions'
 import { currentNode } from './map-data'
 import { FILES } from './paths'
+import { record } from './session-record'
 
 type On = Parameters<Register>[0]
 export type FileTouch = { path: string; op: 'read' | 'edit'; at: number; node?: string }
@@ -28,6 +29,8 @@ export async function noteFile($: EngineInterface, path: string, op: FileTouch['
   // The shared copy of the map, not the atom: outside drawing the atom can still hold its first value.
   const touch: FileTouch = { path, op, at: Date.now(), node: await currentNode($) }
   await $.fs.write(file, JSON.stringify([...old, touch].slice(-1000)))
+  // The memory keeps every session's touches by path; this session's file above is the files panel's view.
+  await record($, id, ['file', op, path, ...(touch.node ? ['--node', touch.node] : [])]).catch(() => undefined)
 }
 
 // Files Claude read or changed in this session that changed on disk afterwards: the person (or

@@ -45,6 +45,15 @@ pub fn record(data: &Path, at: i64, events: &[Value]) -> Result<()> {
     Ok(())
 }
 
+/// A file the session read, changed or attached to a node: `file.touched`, so every session's nodes that dealt with a
+/// file can be found by its path.
+pub fn file_touched(data: &Path, sid: &str, op: &str, path: &str, node: Option<&str>) -> Result<()> {
+    if !["read", "edit", "attach"].contains(&op) { return Err(format!("file touch must be read, edit or attach: {op}").into()); }
+    let at = chrono::Local::now().timestamp_millis();
+    let subject = format!("{sid}/{}", node.unwrap_or(""));
+    record(data, at, &[event(&format!("session/{sid}"), "file.touched", &subject, at, json!({"path": path, "op": op}))])
+}
+
 fn links(node: &Value) -> Vec<(String, String)> {
     node.get("links").and_then(Value::as_array).into_iter().flatten()
         .filter_map(|l| Some((l.get("to")?.as_str()?.to_string(), l.get("rel")?.as_str()?.to_string()))).collect()
@@ -101,6 +110,16 @@ mod tests {
         assert!(ev[0]["data"].get("closed").is_none(), "the program's stamps are not followed");
         assert_eq!((ev[0]["subject"].as_str(), ev[0]["specversion"].as_str()), (Some("s/a"), Some("1.0")));
         assert_ne!(ev[0]["id"], ev[1]["id"]);
+    }
+
+    #[test]
+    fn a_file_touch_is_an_event_by_path() {
+        let dir = tempfile::tempdir().unwrap();
+        file_touched(dir.path(), "s", "edit", "/w/a.rs", Some("n1")).unwrap();
+        assert!(file_touched(dir.path(), "s", "delete", "/w/a.rs", None).is_err());
+        let line = fs::read_dir(dir.path().join("memory/events")).unwrap().flatten().map(|f| fs::read_to_string(f.path()).unwrap()).collect::<String>();
+        let e: Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!((e["type"].as_str(), e["subject"].as_str(), e["data"]["path"].as_str()), (Some("file.touched"), Some("s/n1"), Some("/w/a.rs")));
     }
 
     #[test]
