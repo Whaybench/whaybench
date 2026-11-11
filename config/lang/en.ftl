@@ -68,7 +68,7 @@ changed-after-ai-work-saved-by = {"\u000A"}Changed after AI work (saved by user)
 no-read-permission = {"\u000A"}No read permission
 sent = Sent
 input-enter-to-send-shift-enter = Input  (Enter to send · Shift+Enter for a new line)  · Session { $a1 }
-request-not-sent-session-is-off = Request not sent · Session { $a1 } is off · Start the session and retry
+request-not-sent-session-is-off = Request not sent · No conversation tab open
 menu = Menu
 project = Project
 conversation-map = Conversation map
@@ -113,7 +113,7 @@ rebuild-the-map-from-the-whole = { $a1 }Bring the map up to date with the whole 
 change = Display style
 change-map-style = Change map style
 change-2 = Display style · { $a1 }
-map-tidy-not-run-no-session = Map tidy not run · No session selected
+map-tidy-not-run-no-session = Request not sent · No conversation tab open
 map-update-request-sent-session = Map update request sent{ $a1 } · Session { $a2 }
 map-export-failed-no-map = Map save failed · No map
 question = Question
@@ -211,9 +211,9 @@ request-rework-from-the-earlier-version = [Request rework from the earlier versi
 itembeforeafter = <table width='100%'><tr><th width='14%'>Item</th><th>Before</th><th>After</th></tr>{ $rows }</table>
 no-copy-past-retention = <p class='m'>No copy (past retention)</p>
 nbsp-beforeafter = <hr><h3>{ $a1 }</h3><p>{ $a2 } &nbsp; { $a3 }</p><table width='100%'><tr><th width='50%'>Before</th><th>After</th></tr><tr><td valign='top'>{ $a4 }</td><td valign='top'>{ $a5 }</td></tr></table>
-request-not-sent-no-session-selected = Request not sent · No session selected
+request-not-sent-no-session-selected = Request not sent · No conversation tab open
 request-sent-selected-session = Request sent · Selected session
-request-not-sent-session-is-off-2 = Request not sent · Session is off · Start the session and retry
+request-not-sent-session-is-off-2 = Request not sent · No conversation tab open
 send = Send
 document = + Document
 add-a-document-template-add-on = Add a document template (add-on) to the project

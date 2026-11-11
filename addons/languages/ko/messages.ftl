@@ -68,7 +68,7 @@ changed-after-ai-work-saved-by = {"\u000A"}AI 작업 후 변경됨 (사용자 �
 no-read-permission = {"\u000A"}읽기 권한 없음
 sent = 전송 완료
 input-enter-to-send-shift-enter = 입력  (Enter 전송 · Shift+Enter 줄바꿈)  · 세션 { $a1 }
-request-not-sent-session-is-off = 요청 미전송 · 세션 { $a1 } 종료 상태 · 세션 실행 후 재시도
+request-not-sent-session-is-off = 요청 미전송 · 열린 대화 탭 없음
 menu = 메뉴
 project = 프로젝트
 conversation-map = 대화 지도
@@ -113,7 +113,7 @@ rebuild-the-map-from-the-whole = { $a1 }대화 전체 기준으로 지도를 맞
 change = 표시 방식
 change-map-style = 지도 방식 변경
 change-2 = 표시 방식 · { $a1 }
-map-tidy-not-run-no-session = 지도 정리 미실행 · 선택된 세션 없음
+map-tidy-not-run-no-session = 요청 미전송 · 열린 대화 탭 없음
 map-update-request-sent-session = 지도 갱신 요청 전송 완료{ $a1 } · 세션 { $a2 }
 map-export-failed-no-map = 지도 저장 실패 · 지도 없음
 question = 질문
@@ -211,9 +211,9 @@ request-rework-from-the-earlier-version = [변경 전 기준 재수정 요청]
 itembeforeafter = <table width='100%'><tr><th width='14%'>항목</th><th>변경 전</th><th>변경 후</th></tr>{ $rows }</table>
 no-copy-past-retention = <p class='m'>사본 없음(보관 기간 경과)</p>
 nbsp-beforeafter = <hr><h3>{ $a1 }</h3><p>{ $a2 } &nbsp; { $a3 }</p><table width='100%'><tr><th width='50%'>변경 전</th><th>변경 후</th></tr><tr><td valign='top'>{ $a4 }</td><td valign='top'>{ $a5 }</td></tr></table>
-request-not-sent-no-session-selected = 요청 미전송 · 선택된 세션 없음
+request-not-sent-no-session-selected = 요청 미전송 · 열린 대화 탭 없음
 request-sent-selected-session = 요청 전송 완료 · 선택 세션
-request-not-sent-session-is-off-2 = 요청 미전송 · 세션 종료 상태 · 세션 실행 후 재시도
+request-not-sent-session-is-off-2 = 요청 미전송 · 열린 대화 탭 없음
 send = 전송
 document = + 문서
 add-a-document-template-add-on = 문서 양식(add-on) 선택 후 프로젝트에 추가
