@@ -20,23 +20,22 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Memory list: Claude Code sees, with its first prompt and after a compaction, its own open nodes and the related
   and recent nodes of other sessions (one line each, up to 100), and on later prompts only what changed for it
   since. `whaybench memory list | changes | show | search`.
-- Alerts panel: nodes with a time or due date, the person's marked ones, what changed since they last looked, AI
-  suggestions, held nodes and the trash. Right click: done, drop, hold, reopen, move to trash, mark important,
+- Alerts panel: Due, Marked, Changed (since the person last looked), To approve (AI suggestions), Focus (the open
+  nodes of the conversation on show), On hold and Deleted. Right click: done, drop, hold, reopen, delete, mark important,
   open the session. The person's choices are written to that session's map and recorded as theirs.
 - Map nodes: kinds `task`, `appointment`, `problem`, `fact` and `rule`, and a `detail` field for what does not fit
   the short label (shown on hover in the map and alerts panels, searched by `whaybench memory search`). Claude is
   told a label rule per kind.
-- Trash: deleting from the map menu, or moving to the trash from the alerts panel, keeps the nodes in the alerts
-  panel's trash instead of a `maps/deleted-…` copy. Restore puts back what that one deletion changed (nodes changed
-  since stay as they are, and you are told); delete for good or empty the trash by hand, or after `trash_days`
-  (180 by default) at start. Claude does not see the trash, and a regrouping of its map leaves it alone.
+- Deleted nodes: deleting from the map menu or the alerts panel keeps the nodes in the alerts panel's Deleted
+  section instead of a `maps/deleted-…` copy. Restore puts back what that one deletion changed (nodes changed
+  since stay as they are, and you are told); delete them for good by hand, or after `trash_days`
+  (180 by default) at start. Claude does not see deleted nodes, and a regrouping of its map leaves them alone.
 - A session takes the person's changes to its map (alerts panel, map menu) into its own view at the next prompt.
 - Map styles: Route and Timeline are drawn from the event log, in the order and turn nodes were made and changed;
   Route shows a step back into an earlier branch as "Back". Kanban has an On hold column and shows dropped nodes
   crossed out under Done. Questions shows ideas, and a decision that resolves a question as its answer. Focus and
   the other styles count dropped nodes as closed.
 - Map marks: ✕ for a dropped node and ‖ for one on hold, in the map panel, its styles and Claude's map text.
-- Alerts panel: a section with the open nodes of the conversation on show, so any of them can be marked.
 - `whaybench statusline`: a Claude Code status line showing context and the 5-hour and weekly plan usage with
   their reset times; the same numbers appear under the alerts panel. The README shows the setting to add.
 

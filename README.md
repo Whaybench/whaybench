@@ -32,7 +32,7 @@ When the agent reads a file, the decisions about it come along, so they survive 
 
 **One memory across sessions.** Every change to every map is kept as an event, so a session is told what other
 sessions decided about the same problem, and the alerts panel gathers what needs you: due dates, the nodes you
-marked, problems another session settled, what you put on hold, and a trash you can restore from.
+marked, problems another session settled, what you put on hold, and what you deleted, which you can restore.
 
 **Sessions that do not get lost.** Every conversation is listed with a name taken from its map, its state
 (working, waiting for you, done) and a search over names, questions and answers. Close the window and the
@@ -137,8 +137,8 @@ active) or `"keep_mb"` (the size all of them may take) in its `settings.json`, f
 A whole conversation goes at once, at the next start; saved maps in `maps` stay. Claude Code deletes its own
 conversations after 30 days unless its `cleanupPeriodDays` setting says otherwise; Whaybench then saves the map
 to `maps` as `auto-map-…`. Claude Code and Codex keep their own conversations where they always do.
-Map nodes you delete wait in the trash of the alerts panel, where they can be restored as they were; after 180 days
-they go for good at the next start (`"trash_days"` in `settings.json`, `0` to empty it only by hand).
+Map nodes you delete wait in the Deleted section of the alerts panel, where they can be restored as they were; after
+180 days they go for good at the next start (`"trash_days"` in `settings.json`, `0` to delete them for good only by hand).
 
 ## Make it yours
 
