@@ -175,14 +175,25 @@ pub fn search(data: &Path, words: &[String], limit: usize) -> Vec<String> {
 
 /// The alert panel's sections (3.19): nodes with a time or due date, the person's marked ones, what changed since the
 /// person last looked, held ones and the trash. Each item is `{session, node, line}`; a carried node shows once.
+/// One node as the person reads it: `label · state · due · session name` (no ids).
+fn person_line(name: &str, n: &Value) -> String {
+    let mut parts = vec![n["label"].as_str().unwrap_or("").to_string()];
+    if let Some(s) = n.get("state").and_then(Value::as_str) { parts.push(s.to_string()); }
+    if let Some(d) = n.get("due").or_else(|| n.get("at")).and_then(Value::as_str) { parts.push(d.to_string()); }
+    parts.push(name.chars().take(30).collect());
+    parts.join(" · ")
+}
+
 pub fn board(data: &Path) -> Value {
     let all = maps(data);
+    let d = crate::paths::Data::new(data.to_path_buf());
+    let names: std::collections::HashMap<&str, String> = all.iter().map(|m| (m.0.as_str(), crate::sessions::session_name(&d, &m.0))).collect();
     let (mut due, mut marked, mut held, mut trash, mut seen) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), std::collections::HashSet::new());
     for (s, nodes, _) in &all {
         for n in nodes {
             let key = n.get("memid").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("{s}/{}", n["id"]));
             if !seen.insert(key) { continue; }
-            let item = json!({"session": s, "node": n, "line": line(s, n)});
+            let item = json!({"session": s, "node": n, "line": person_line(&names[s.as_str()], n)});
             if n["state"] == "removed" { trash.push(item); continue; }
             if n["state"] == "postponed" { held.push(item.clone()); }
             if !is_open(n) { continue; }

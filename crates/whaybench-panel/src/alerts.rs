@@ -18,7 +18,8 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let sig = format!("{}{}", board, view.borrow().trash_open);
     if !force && view.borrow().shown == sig { return; }
     view.borrow_mut().shown = sig;
-    while let Some(c) = list.first_child() { list.remove(&c); }
+    // Rows only: an open right-click menu is the list's child too, and removing it loops forever.
+    while let Some(r) = list.row_at_index(0) { list.remove(&r); }
     for (key, title) in SECTIONS {
         let items = board[key].as_array().cloned().unwrap_or_default();
         let closed = key == "trash" && !view.borrow().trash_open;
