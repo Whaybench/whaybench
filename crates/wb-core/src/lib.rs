@@ -11,5 +11,6 @@ pub mod session_record;
 pub mod sessions;
 pub mod status;
 pub mod theme;
+pub mod usage;
 pub mod versions;
 pub mod view;

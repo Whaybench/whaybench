@@ -451,3 +451,6 @@ alerts-purge = Delete for good
 alerts-empty-trash = Empty the trash
 alerts-restored = Restored
 alerts-restored-kept = Restored · { $n } nodes changed since were left as they are
+usage-context = Context { $p }%
+usage-five-hour = 5h { $p }% resets { $at }
+usage-seven-day = 7d { $p }% resets { $at }

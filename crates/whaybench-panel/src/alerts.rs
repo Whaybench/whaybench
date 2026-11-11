@@ -105,8 +105,14 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     scroll.set_child(Some(&list));
     scroll.set_vexpand(true);
     let body = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    // Under the sections: context, and the plan's 5-hour and weekly use with when they reset (from the status line).
+    let usage = gtk::Label::new(None);
+    usage.set_xalign(0.0);
+    usage.set_wrap(true);
+    usage.add_css_class("dim");
     body.append(&seen);
     body.append(&scroll);
+    body.append(&usage);
     win.set_child(Some(&body));
     let view = Rc::new(RefCell::new(View { shown: String::new(), trash_open: false }));
     {
@@ -176,6 +182,12 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     }
     list.add_controller(click);
     redraw(&d, &list, &view, true);
+    let show_usage = { let d = d.clone(); move || {
+        let text = wb_core::usage::latest(&d.root, wb_core::sessions::target(&d).as_deref()).map(|u| wb_core::usage::line(&u)).unwrap_or_default();
+        if usage.text() != text { usage.set_text(&text); }
+        usage.set_visible(!text.is_empty());
+    } };
+    show_usage();
     let (d2, l2, v2) = (d.clone(), list.clone(), view.clone());
-    every(2000, move || redraw(&d2, &l2, &v2, false));
+    every(2000, move || { redraw(&d2, &l2, &v2, false); show_usage(); });
 }

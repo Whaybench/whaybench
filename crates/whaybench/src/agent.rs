@@ -66,6 +66,14 @@ pub fn memory(data: &Data, words: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Claude Code's status line command: the line it shows, and the numbers kept for the alerts panel. Never fails,
+/// so a bad input only leaves the line empty.
+pub fn statusline(data: &Data) -> Result<(), String> {
+    let input: serde_json::Value = serde_json::from_reader(io::stdin().lock()).unwrap_or_default();
+    println!("{}", wb_core::usage::record(&data.root, &input));
+    Ok(())
+}
+
 pub fn hook(data: &Data, words: &[String]) -> Result<(), String> {
     if words != ["codex"] { return Err("hook codex".into()); }
     let event = serde_json::from_reader(io::stdin().lock()).map_err(|e| e.to_string())?;

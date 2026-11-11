@@ -30,6 +30,10 @@ being built with their state. You see where the conversation is and what was dec
 Open a node and its related answers come up: the replies from the turns where that topic was discussed.
 When the agent reads a file, the decisions about it come along, so they survive a compacted context.
 
+**One memory across sessions.** Every change to every map is kept as an event, so a session is told what other
+sessions decided about the same problem, and the alerts panel gathers what needs you: due dates, the nodes you
+marked, problems another session settled, what you put on hold, and a trash you can restore from.
+
 **Sessions that do not get lost.** Every conversation is listed with a name taken from its map, its state
 (working, waiting for you, done) and a search over names, questions and answers. Close the window and the
 tabs come back as they were; a session moved to the background or to a new number keeps its tab, map and history.
@@ -100,6 +104,15 @@ and trust the Whaybench hooks. See [docs/codex.md](docs/codex.md).
 
 A conversation tab opens with the agent; ask it something and the map starts to grow. Settings → Language
 switches the interface language.
+
+To see context and plan usage (5-hour and weekly, with when they reset) in Claude Code's status line and under
+the alerts panel, add this to `~/.claude/settings.json`. Whaybench does not change your settings itself.
+
+```json
+"statusLine": { "type": "command", "command": "~/.local/bin/whaybench statusline" }
+```
+
+If you already have a status line script, pass it the same input: `echo "$input" | ~/.local/bin/whaybench statusline`.
 
 To update, run the install command again. To remove Whaybench, delete `~/.local/lib/whaybench` and
 `~/.local/bin/whaybench`; your data stays (see below).
