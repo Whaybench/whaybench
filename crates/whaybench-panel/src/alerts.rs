@@ -47,7 +47,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
             if let Some(t) = item["node"].get("detail").and_then(Value::as_str) { label.set_tooltip_text(Some(t)); }
             let row = gtk::ListBoxRow::new();
             row.set_child(Some(&label));
-            row.set_widget_name(&format!("{}\t{}\t{}\t{}", item["session"].as_str().unwrap_or(""), item["node"]["id"].as_str().unwrap_or(""), item["node"].get("mark").is_some(), if key == "trash" { item["action"].as_str().unwrap_or("-") } else { "" }));
+            row.set_widget_name(&format!("{}\t{}\t{}\t{}\t{}", item["session"].as_str().unwrap_or(""), item["node"]["id"].as_str().unwrap_or(""), item["node"].get("mark").is_some(), if key == "trash" { item["action"].as_str().unwrap_or("-") } else { "" }, if key == "check" { item["node"]["suggest"]["state"].as_str().unwrap_or("") } else { "" }));
             list.append(&row);
         }
     }
@@ -149,7 +149,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 return;
             }
             let parts: Vec<String> = name.split('\t').map(String::from).collect();
-            let [sid, node, marked, action] = parts.as_slice() else { return };
+            let [sid, node, marked, action, suggested] = parts.as_slice() else { return };
             g.set_state(gtk::EventSequenceState::Claimed);
             if !action.is_empty() {
                 if action != "-" {
@@ -160,6 +160,13 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 item(&menu, &group, "purge", "alerts-purge", move || { purge(&d2, &[(s2.clone(), n2.clone())]); again(); });
                 popup(&list2, &menu, &group, x, y);
                 return;
+            }
+            // From To approve: the agent's suggestion first, approved as the person's own choice or declined.
+            if !suggested.is_empty() {
+                for (name, label, change) in [("approve", "alerts-approve", json!({"state": suggested, "suggest": null})), ("decline", "alerts-decline", json!({"suggest": null}))] {
+                    let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
+                    item(&menu, &group, name, label, move || { choose(&d2, &s2, &n2, change.clone()); again(); });
+                }
             }
             let items: [(&str, &str, Value); 5] = [
                 ("done", "alerts-done", json!({"state": "done"})),

@@ -112,6 +112,9 @@ pub fn validate(map: &Value) -> Result<()> {
         let id = safe_id(text(node, "id")?)?;
         text(node, "label")?;
         if node.get("isOpen").is_some_and(|v| !v.is_boolean()) { return Err("isOpen must be a boolean".into()); }
+        if let Some(sg) = node.get("suggest").filter(|v| !v.is_null()) {
+            if !["done", "dropped"].contains(&sg["state"].as_str().unwrap_or("")) { return Err("suggest.state must be done or dropped".into()); }
+        }
         if !ids.insert(id) { return Err("duplicate node id".into()); }
     }
     for node in nodes {
@@ -157,6 +160,8 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value, person: bool) 
             merged.as_object_mut().unwrap().shift_remove("state");
         }
         merged.as_object_mut().unwrap().shift_remove("isOpen");
+        // A suggestion is about an open node: once it closes, by the person or the agent, there is nothing to approve.
+        if !is_open(&merged) { merged.as_object_mut().unwrap().shift_remove("suggest"); }
         // A new node without a memory id the agent chose starts its own.
         if before.is_none() && merged.get("memid").and_then(Value::as_str).is_none_or(str::is_empty) {
             merged["memid"] = json!(fresh("m"));
@@ -534,6 +539,13 @@ mod tests {
         assert!(is_open(&map["nodes"][0]));
         let map = up(json!({"id":"q","state":""}))?;
         assert!(map["nodes"][0].get("state").is_none(), "an empty state opens with no state");
+        assert!(up(json!({"id":"q","suggest":{"state":"removed","why":"x"}})).is_err(), "only done or dropped can be suggested");
+        let map = up(json!({"id":"q","suggest":{"state":"dropped","why":"settled elsewhere"}}))?;
+        assert!(is_open(&map["nodes"][0]) && map["nodes"][0]["suggest"]["state"] == "dropped", "a suggestion leaves the node open");
+        let map = person(dir.path(), "s", json!([{"id":"q","state":"dropped","suggest":null}]))?;
+        let q = map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "q").unwrap();
+        assert!(!is_open(q) && q.get("suggest").is_none(), "approved: the state is the person's, the suggestion goes");
+        up(json!({"id":"q","state":""}))?;
         let map = command(dir.path(), "s", Some(json!({"upsert": [{"id":"o","label":"option","isOpen":true,"parent":"q"},
             {"id":"d","label":"decided","isOpen":false,"links":[{"to":"q","rel":"resolves"}]}]})))?;
         let get = |id: &str| map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).cloned().unwrap();

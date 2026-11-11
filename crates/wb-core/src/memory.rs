@@ -203,7 +203,7 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
     let all = maps(data);
     let d = crate::paths::Data::new(data.to_path_buf());
     let names: std::collections::HashMap<&str, String> = all.iter().map(|m| (m.0.as_str(), crate::sessions::session_name(&d, &m.0))).collect();
-    let (mut due, mut marked, mut held, mut trash, mut seen) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), std::collections::HashSet::new());
+    let (mut due, mut marked, mut check, mut held, mut trash, mut seen) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), std::collections::HashSet::new());
     for (s, nodes, _) in &all {
         for n in nodes {
             let key = n.get("memid").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("{s}/{}", n["id"]));
@@ -213,6 +213,12 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
             if n["state"] == "postponed" { held.push(item.clone()); }
             if !is_open(n) { continue; }
             if n.get("mark").is_some() { marked.push(item.clone()); }
+            // The agent's suggestion to close it: the person approves or declines.
+            if let Some(sg) = n.get("suggest").filter(|v| v.is_object()) {
+                let to = crate::i18n::t(if sg["state"] == "dropped" { "alerts-dropped" } else { "alerts-done" });
+                let line = format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::f("alerts-suggested", &[("state", to.to_string()), ("why", sg["why"].as_str().unwrap_or("").to_string())]), names[s.as_str()]);
+                check.push(json!({"session": s, "node": n, "line": line}));
+            }
             if n.get("due").or_else(|| n.get("at")).is_some() { due.push(item); }
         }
     }
@@ -251,7 +257,7 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
     }
     let open: Vec<Value> = all.iter().filter(|m| Some(m.0.as_str()) == current).flat_map(|(s, nodes, _)| nodes.iter().filter(|n| is_open(n)).map(move |n| (s, n)))
         .map(|(s, n)| json!({"session": s, "node": n, "line": person_line(&names[s.as_str()], n)})).collect();
-    json!({"due": due, "marked": marked, "changed": changed, "check": [], "open": open, "held": held, "trash": trash})
+    json!({"due": due, "marked": marked, "changed": changed, "check": check, "open": open, "held": held, "trash": trash})
 }
 
 fn links(node: &Value) -> Vec<(String, String)> {
@@ -365,15 +371,17 @@ mod tests {
             {"id":"a","label":"meet","isOpen":true,"at":"2026-11-12 15:00","memid":"1"},
             {"id":"b","label":"key","isOpen":true,"mark":"important","memid":"2"},
             {"id":"c","label":"later","isOpen":true,"state":"postponed","memid":"3"},
+            {"id":"f","label":"maybe gone","suggest":{"state":"dropped","why":"replaced"},"memid":"6"},
             {"id":"d","label":"gone","isOpen":false,"state":"removed","memid":"4"},
             {"id":"e","label":"done","isOpen":false,"state":"done","mark":"important","memid":"5"}]}).to_string()).unwrap();
         let b = board(dir.path(), None);
         let n = |k: &str| b[k].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into()], vec!["c".into()], vec!["d".into()]));
         assert!(n("changed").is_empty(), "nothing settled or freed yet");
+        assert_eq!(n("check"), vec!["f".to_string()], "the agent's suggestion waits for the person");
         assert!(n("open").is_empty(), "no conversation on show");
         let mine = board(dir.path(), Some(s));
-        assert_eq!(mine["open"].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap()).collect::<Vec<_>>(), ["a", "b", "c"], "its open nodes, marked or not");
+        assert_eq!(mine["open"].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap()).collect::<Vec<_>>(), ["a", "b", "c", "f"], "its open nodes, marked or not");
         fs::write(dir.path().join(format!("{s}.json")), json!({"updatedAt": 2, "nodes": [
             {"id":"p","label":"first","isOpen":false,"state":"done","closed":{"at":5}},
             {"id":"q","label":"then","isOpen":true,"requires":"p"},

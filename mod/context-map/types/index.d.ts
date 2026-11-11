@@ -16,6 +16,8 @@ export type MapNode = {
   due?: string
   requires?: string
   assumes?: string
+  // The agent's suggestion to close an open node; the person approves or declines it.
+  suggest?: { state: 'done' | 'dropped'; why: string }
   // Set by the person only: important (!).
   mark?: 'important'
   // Where a node taken up from an imported map came from (Whaybench's continue-from-this-map).
