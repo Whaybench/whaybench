@@ -204,15 +204,28 @@ pub fn board(data: &Path) -> Value {
     let date = |i: &Value| i["node"].get("due").or_else(|| i["node"].get("at")).and_then(Value::as_str).unwrap_or("").to_string();
     due.sort_by_key(date);
     let since: i64 = fs::read_to_string(seen_file(data, "person")).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
-    let changed: Vec<Value> = events(data).into_iter().rev()
-        .filter(|e| e["source"] != "person" && chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since))
-        .filter(|e| (e["type"] == "node.changed" && (e["data"].get("isOpen").is_some() || e["data"].get("state").is_some())) || (e["type"] == "link.added" && e["data"]["rel"] == "resolves"))
-        .take(50).map(|e| {
-            let subject = e["subject"].as_str().unwrap_or("");
-            let (s, id) = subject.split_once('/').unwrap_or((subject, ""));
-            let label = all.iter().find(|m| m.0 == s).and_then(|m| m.1.iter().find(|n| n["id"] == id)).and_then(|n| n["label"].as_str()).unwrap_or(id).to_string();
-            json!({"session": s, "node": {"id": id, "label": label}, "line": format!("{label} · {} · {}", e["type"].as_str().unwrap_or(""), e["data"])})
-        }).collect();
+    let node_of = |s: &str, id: &str| all.iter().find(|m| m.0 == s).and_then(|m| m.1.iter().find(|n| n["id"] == id)).cloned();
+    let mut changed: Vec<Value> = Vec::new();
+    // Settled by a decision since the person last looked: the problem, and the decision that settled it.
+    for e in events(data).into_iter().rev().filter(|e| e["type"] == "link.added" && e["data"]["rel"] == "resolves") {
+        if !chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since) { continue; }
+        let subject = e["subject"].as_str().unwrap_or("");
+        let (s, by) = subject.split_once('/').unwrap_or((subject, ""));
+        let (Some(target), Some(decision)) = (node_of(s, e["data"]["to"].as_str().unwrap_or("")), node_of(s, by)) else { continue };
+        let line = format!("{} · {} · {}", target["label"].as_str().unwrap_or(""), crate::i18n::f("alerts-resolved", &[("by", decision["label"].as_str().unwrap_or("").to_string())]), names[s]);
+        changed.push(json!({"session": s, "node": target, "line": line}));
+    }
+    // What can be done now: an open node whose condition holds since one of its nodes closed after the person last looked.
+    for (s, nodes, _) in &all {
+        for n in nodes.iter().filter(|n| is_open(n)) {
+            let Some(expr) = n.get("requires").and_then(Value::as_str) else { continue };
+            let closed_at = |id: &str| nodes.iter().find(|m| m["id"] == id).filter(|m| !is_open(m)).and_then(|m| m.get("closed")?.get("at")?.as_i64());
+            let late = crate::map::condition_ids(expr).unwrap_or_default().iter().any(|id| closed_at(id).is_some_and(|at| at > since));
+            if late && crate::map::condition_holds(expr, &|id| closed_at(id).is_some()) {
+                changed.push(json!({"session": s, "node": n, "line": format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::t("alerts-unblocked"), names[s.as_str()])}));
+            }
+        }
+    }
     json!({"due": due, "marked": marked, "changed": changed, "check": [], "held": held, "trash": trash})
 }
 
@@ -331,6 +344,13 @@ mod tests {
         let b = board(dir.path());
         let n = |k: &str| b[k].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into()], vec!["c".into()], vec!["d".into()]));
+        assert!(n("changed").is_empty(), "nothing settled or freed yet");
+        fs::write(dir.path().join(format!("{s}.json")), json!({"updatedAt": 2, "nodes": [
+            {"id":"p","label":"first","isOpen":false,"state":"done","closed":{"at":5}},
+            {"id":"q","label":"then","isOpen":true,"requires":"p"},
+            {"id":"r","label":"blocked","isOpen":true,"requires":"p ∧ q"}]}).to_string()).unwrap();
+        let b = board(dir.path());
+        assert_eq!(b["changed"].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap()).collect::<Vec<_>>(), ["q"], "only what its condition now allows");
     }
 
     #[test]

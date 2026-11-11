@@ -438,3 +438,5 @@ alerts-mark = Mark important
 alerts-unmark = Remove mark
 alerts-open-session = Open session
 alerts-not-written = Alert choice not written · { $e }
+alerts-resolved = settled by { $by }
+alerts-unblocked = can be done now

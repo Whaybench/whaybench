@@ -62,6 +62,31 @@ pub fn condition_ids(expr: &str) -> Result<Vec<String>> {
     Ok(ids)
 }
 
+/// Whether a condition holds, a node being true when `done` says so. ¬ binds tighter than ∧, ∧ tighter than ∨.
+pub fn condition_holds(expr: &str, done: &dyn Fn(&str) -> bool) -> bool {
+    let spaced = expr.replace('(', " ( ").replace(')', " ) ").replace('∧', " ∧ ").replace('∨', " ∨ ").replace('¬', " ¬ ");
+    let toks: Vec<&str> = spaced.split_whitespace().collect();
+    fn or(t: &[&str], i: &mut usize, d: &dyn Fn(&str) -> bool) -> bool {
+        let mut v = and(t, i, d);
+        while t.get(*i) == Some(&"∨") { *i += 1; let r = and(t, i, d); v = v || r; }
+        v
+    }
+    fn and(t: &[&str], i: &mut usize, d: &dyn Fn(&str) -> bool) -> bool {
+        let mut v = not(t, i, d);
+        while t.get(*i) == Some(&"∧") { *i += 1; let r = not(t, i, d); v = v && r; }
+        v
+    }
+    fn not(t: &[&str], i: &mut usize, d: &dyn Fn(&str) -> bool) -> bool {
+        match t.get(*i).copied() {
+            Some("¬") => { *i += 1; !not(t, i, d) }
+            Some("(") => { *i += 1; let v = or(t, i, d); *i += 1; v }
+            Some(id) => { *i += 1; d(id) }
+            None => false,
+        }
+    }
+    condition_ids(expr).is_ok() && or(&toks, &mut 0, done)
+}
+
 pub fn validate(map: &Value) -> Result<()> {
     let nodes = map.get("nodes").and_then(Value::as_array).ok_or("map requires nodes array")?;
     let mut ids = HashSet::new();
@@ -357,6 +382,8 @@ mod tests {
     #[test]
     fn conditions_name_nodes_with_and_or_not() -> Result<()> {
         assert_eq!(condition_ids("a ∧ (b ∨ ¬c)")?, ["a", "b", "c"]);
+        let d = |id: &str| id == "a" || id == "b";
+        assert!(condition_holds("a ∧ (b ∨ ¬c)", &d) && !condition_holds("a ∧ c", &d) && condition_holds("¬c ∨ c", &d) && !condition_holds("¬(a ∨ c)", &d));
         for bad in ["a ∧", "(a", "a b", "∧ a", "a)"] { assert!(condition_ids(bad).is_err(), "{bad}"); }
         let dir = tempfile::tempdir()?;
         command(dir.path(), "s", Some(json!({"upsert": [{"id":"a","label":"A","isOpen":true}]})))?;
