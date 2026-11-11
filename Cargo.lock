@@ -2418,6 +2418,7 @@ dependencies = [
 name = "wb-store"
 version = "0.2.0"
 dependencies = [
+ "gio",
  "glob",
  "libc",
  "regex",

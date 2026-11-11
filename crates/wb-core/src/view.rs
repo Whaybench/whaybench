@@ -2,7 +2,7 @@
 //! panel, web pages and PDF too, and goes with a session: each session has its own history, and a view can follow the chosen session, stay on
 //! one session, or stay on one thing. Firefox is a separate app beside it, for the person's own browsing. Files that
 //! need a terminal tool open in a terminal in the same place.
-use std::{path::{Path, PathBuf}, process::{Command, Stdio}, time::{SystemTime, UNIX_EPOCH}};
+use std::{path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
 
 use serde_json::{json, Value};
 
@@ -340,19 +340,6 @@ fn open_to(d: &Data, to: &str, target: &str, page: Option<u32>) -> std::io::Resu
 }
 
 pub fn vim(d: &Data, path: &str) -> std::io::Result<()> { terminal(d, &["vim".to_string(), path.to_string()]) }
-
-/// What the panel's Firefox shows, as text (see config/read-view.py).
-pub fn read_text(d: &Data, all: bool) -> Result<serde_json::Value, String> {
-    let pid = firefox_pid(d).ok_or(crate::i18n::t("no-firefox-in-the-view-panel"))?;
-    let script = d.cache().join("read-view.py");
-    std::fs::write(&script, include_str!("../../../config/read-view.py")).map_err(|e| e.to_string())?;
-    let mut c = Command::new("python3");
-    c.arg("-I").arg(&script).arg(pid.to_string()).stdin(Stdio::null());
-    if all { c.arg("--all"); }
-    let o = c.output().map_err(|e| e.to_string())?;
-    if !o.status.success() { return Err(String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or(crate::i18n::t("read-failed")).to_string()); }
-    serde_json::from_slice(&o.stdout).map_err(|e| e.to_string())
-}
 
 #[cfg(test)]
 mod tests {

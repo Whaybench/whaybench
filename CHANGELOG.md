@@ -16,6 +16,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - The alerts panel shows a node's state in the interface language instead of the stored value.
+- `whaybench-view read --firefox` reads the panel's Firefox through AT-SPI in Rust (GIO's D-Bus client) instead of
+  a Python script, so python3 and PyGObject are no longer needed.
 - The alerts panel's Marked section shows marked nodes that are already done too.
 - The map update button's tooltip says what it does: it no longer mentions the view panel, which it does not send.
 - The map style fill worker is told all twelve node kinds.

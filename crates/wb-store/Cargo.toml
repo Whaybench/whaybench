@@ -13,6 +13,8 @@ similar = "2"
 sha1 = "0.10"
 libc.workspace = true
 glob = "0.3"
+# AT-SPI over D-Bus for whaybench-view read --firefox; the same gio the panels build on.
+gio = "0.22"
 
 [[bin]]
 name = "whaybench-project"

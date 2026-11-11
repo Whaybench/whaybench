@@ -1,4 +1,7 @@
 //! What the AI uses to show things in the view panel and to see what the person sees.
+#[path = "view/a11y.rs"]
+mod a11y;
+
 use std::{io::Read, path::Path, process::Command};
 
 use serde_json::{json, Value};
@@ -131,12 +134,12 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
         Some("edit") => { let a = absolute(args.get(1).ok_or(HELP)?); view::vim(d, &a).map_err(|e| e.to_string()) }
         Some("read") => {
             let all = flag(&args, "--all");
-            print_read(&if flag(&args, "--firefox") { view::read_text(d, all)? } else { view::read_panel(d, view::FIRST_VIEW, all)? });
+            print_read(&if flag(&args, "--firefox") { a11y::read_text(d, all)? } else { view::read_panel(d, view::FIRST_VIEW, all)? });
             Ok(())
         }
         Some("where") => {
             // Only Firefox says which page the person is on; the view panel's PDF viewer does not.
-            let v = view::read_text(d, false).map_err(|e| wb_core::i18n::f("for-the-page-number-open-firefox", &[("e", (e).to_string())]))?;
+            let v = a11y::read_text(d, false).map_err(|e| wb_core::i18n::f("for-the-page-number-open-firefox", &[("e", (e).to_string())]))?;
             let url = v["url"].as_str().unwrap_or("");
             if v.get("page").is_none() { return Err(wb_core::i18n::t("no-pdf-in-firefox-for-the").into()); }
             println!("{}", wb_core::i18n::f("page-2", &[("url", (url).to_string()), ("a1", (v["page"].as_str().unwrap_or("?")).to_string()), ("a2", (v["pages"].as_str().unwrap_or("?")).to_string())]));
