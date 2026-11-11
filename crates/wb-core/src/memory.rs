@@ -87,6 +87,18 @@ pub(crate) fn events(data: &Path) -> Vec<Value> {
     files.iter().flat_map(|f| fs::read_to_string(f).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect::<Vec<Value>>()).collect()
 }
 
+/// One session's node changes in the order they happened: (turn, time in ms, node id, whether it closed).
+pub fn steps(data: &Path, sid: &str) -> Vec<(i64, i64, String, bool)> {
+    let prefix = format!("{sid}/");
+    events(data).into_iter().filter(|e| e["type"] == "node.added" || e["type"] == "node.changed").filter_map(|e| {
+        let id = e["subject"].as_str()?.strip_prefix(&prefix)?.to_string();
+        let at = chrono::DateTime::parse_from_rfc3339(e["time"].as_str()?).ok()?.timestamp_millis();
+        // A change holds [before, after]; a node made closed holds the value itself.
+        let closed = e["data"]["isOpen"][1] == false || (e["type"] == "node.added" && e["data"]["isOpen"] == false);
+        Some((e["turn"].as_i64().unwrap_or(0), at, id, closed))
+    }).collect()
+}
+
 /// The paths a session's events touched.
 fn paths_of(evs: &[Value], sid: &str) -> std::collections::HashSet<String> {
     evs.iter().filter(|e| e["type"] == "file.touched" && e["source"] == format!("session/{sid}")).filter_map(|e| e["data"]["path"].as_str().map(String::from)).collect()

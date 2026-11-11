@@ -1,1 +1,1 @@
-{"format": 1, "name": "Kanban", "version": "1.0", "frame": "columns", "group": "state", "columns": ["idea", "plan", "doing", "done"], "recent_done": 6, "needs": ["state"]}
+{"format": 1, "name": "Kanban", "version": "1.0", "frame": "columns", "group": "state", "columns": ["idea", "plan", "doing", "held", "done"], "recent_done": 6, "needs": ["state"]}

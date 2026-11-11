@@ -157,10 +157,11 @@ in-progress = In progress
 done = Done
 no-kind = No kind
 top-level = Top level
-no-visit-record-showing-the-tree = <p class='sub'>No visit record · Showing the tree path instead</p>
+no-change-record-showing-the-tree = <p class='sub'>No change record · Showing the tree path instead</p>
 start = Start
 destination-current = Destination · Current
 via = Via
+came-back = Back
 no-time-record-recorded-from-when = <p class='sub'>No time record · Recorded from when this was enabled (past nodes are not estimated)</p>
 all = All
 from-the-start-of-the-current = From the start of the current topic

@@ -297,7 +297,10 @@ fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool, a
     let at = stamp["at"].as_i64().unwrap_or(0);
     let source = if person { "person".to_string() } else { format!("session/{sid}") };
     let mut events = crate::memory::diff(&source, sid, at, &before, map["nodes"].as_array().map(Vec::as_slice).unwrap_or(&[]));
-    if let Some(a) = action { for e in &mut events { e["action"] = json!(a); } }
+    for e in &mut events {
+        e["turn"] = stamp["turn"].clone();
+        if let Some(a) = action { e["action"] = json!(a); }
+    }
     if let Err(e) = crate::memory::record(data, at, &events) { crate::log::warn("map", "memory not written", &e.to_string(), &[]); }
     Ok(map)
 }
@@ -450,6 +453,8 @@ mod tests {
             {"id":"b","parent":"a","label":"b","isOpen":false},{"id":"c","parent":"a","label":"c","isOpen":true}]})))?;
         let get = |id: &str| map_nodes(dir.path(), sid).unwrap().into_iter().find(|n| n["id"] == id);
         // Alone: the children move up, and come back under it.
+        let steps = crate::memory::steps(dir.path(), sid);
+        assert_eq!((steps.len(), steps[0].2.as_str(), steps[2].3), (4, "t", true), "the event log gives the order, and which closed");
         let act = trash(dir.path(), sid, "a", false)?;
         assert_eq!((get("a").unwrap()["state"].as_str(), get("b").unwrap()["parent"].as_str()), (Some("removed"), Some("t")));
         assert!(restore(dir.path(), &act)?.is_empty());

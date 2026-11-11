@@ -11,7 +11,21 @@ const LANES: [&str; 10] = ["#1e66f5", "#d20f39", "#8839ef", "#40a02b", "#fe640b"
 
 fn e(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('\'', "&#39;").replace('"', "&quot;") }
 fn cut(t: &str, n: usize) -> String { t.chars().take(n).collect() }
-fn is_open(n: &Value) -> bool { n.get("isOpen") != Some(&Value::Bool(false)) && s(n, "state") != "done" }
+// Open or closed follows the state, as the map file keeps it.
+fn is_open(n: &Value) -> bool { n.get("isOpen") != Some(&Value::Bool(false)) && !["done", "dropped", "removed"].contains(&s(n, "state")) }
+
+/// A node change in the order it happened: turn, time in ms, node id, whether it closed.
+type Step = (i64, i64, String, bool);
+
+/// Without an event log (a map from before it, an imported map): the stamps the nodes keep.
+fn stamp_steps(nodes: &[Value]) -> Vec<Step> {
+    let mut out: Vec<Step> = nodes.iter().flat_map(|n| ["opened", "changed", "closed"].into_iter().filter_map(move |k| {
+        let st = n.get(k).filter(|v| v.is_object())?;
+        Some((st.get("turn")?.as_i64()?, st.get("at").and_then(Value::as_i64).unwrap_or(0), s(n, "id").to_string(), k == "closed"))
+    })).collect();
+    out.sort_by_key(|x| (x.1, x.0));
+    out
+}
 
 fn kind_of(k: &str) -> Option<(&'static str, &'static str)> {
     Some(match k { "question" => (wb_core::i18n::t("question"), "#8839ef"), "option" => (wb_core::i18n::t("option"), "#7c7f93"), "pro" => ("+", "#40a02b"), "con" => ("−", "#d20f39"), "conclusion" => (wb_core::i18n::t("conclusion"), "#1e66f5"), "note" => (wb_core::i18n::t("note"), "#9ca0b0"), "idea" => (wb_core::i18n::t("idea"), "#ea76cb"), "task" => (wb_core::i18n::t("kind-task"), "#fe640b"), "appointment" => (wb_core::i18n::t("kind-appointment"), "#179299"), "problem" => (wb_core::i18n::t("kind-problem"), "#e64553"), "fact" => (wb_core::i18n::t("kind-fact"), "#5c5f77"), "rule" => (wb_core::i18n::t("kind-rule"), "#df8e1d"), _ => return None })
@@ -85,7 +99,7 @@ fn frame_focus(nodes: &[Value], current: &str) -> String {
 /// Open questions first with their options and arguments, settled ones as one line, the rest folded.
 fn frame_questions(nodes: &[Value], current: &str) -> String {
     let t = tree_of(nodes);
-    let discuss = |n: &Value| ["question", "option", "pro", "con", "conclusion"].contains(&s(n, "kind"));
+    let discuss = |n: &Value| ["question", "option", "pro", "con", "conclusion", "idea"].contains(&s(n, "kind"));
     fn branch(n: &Value, t: &Tree, current: &str, discuss: &dyn Fn(&Value) -> bool) -> String {
         let (class, line) = label_line(n, current, true);
         let kids = t.kids.get(s(n, "id")).cloned().unwrap_or_default();
@@ -105,10 +119,14 @@ fn frame_questions(nodes: &[Value], current: &str) -> String {
         false
     };
     let groups: Vec<&Value> = nodes.iter().filter(|n| open_q.contains(s(n, "id")) && !under_open(n)).collect();
-    let settled: Vec<&Value> = nodes.iter().filter(|n| !is_open(n) && !under_open(n) && (s(n, "kind") == "question" || (s(n, "kind") == "conclusion" && t.by.get(s(n, "parent")).is_none_or(|p| s(p, "kind") != "question")))).collect();
+    let answers_elsewhere = |n: &Value| arr(n, "links").iter().any(|l| s(l, "rel") == "resolves" && t.by.get(s(l, "to")).is_some_and(|q| s(q, "kind") == "question"));
+    let settled: Vec<&Value> = nodes.iter().filter(|n| !is_open(n) && !under_open(n) && (s(n, "kind") == "question" || (s(n, "kind") == "conclusion" && !answers_elsewhere(n) && t.by.get(s(n, "parent")).is_none_or(|p| s(p, "kind") != "question")))).collect();
     let rest: Vec<&Value> = nodes.iter().filter(|n| !discuss(n)).collect();
     let settled_line = |n: &&Value| {
-        let answers: Vec<String> = t.kids.get(s(n, "id")).into_iter().flatten().filter(|c| s(c, "kind") == "conclusion").map(|c| e(s(c, "label"))).collect();
+        // Its answers: conclusions under it, and decisions anywhere that say they resolve it.
+        let resolves = |c: &Value| arr(c, "links").iter().any(|l| s(l, "rel") == "resolves" && s(l, "to") == s(n, "id"));
+        let mut answers: Vec<String> = t.kids.get(s(n, "id")).into_iter().flatten().filter(|c| s(c, "kind") == "conclusion").map(|c| e(s(c, "label"))).collect();
+        answers.extend(nodes.iter().filter(|c| resolves(c) && s(c, "parent") != s(n, "id")).map(|c| e(s(c, "label"))));
         let tail = if s(n, "kind") == "question" && !answers.is_empty() { format!(" → {}", answers.join(" / ")) } else { String::new() };
         format!("<li class='shut'><span class='g'>✓</span><span class='t' data-n='{}'>{}{tail}</span></li>", e(s(n, "id")), e(s(n, "label")))
     };
@@ -117,10 +135,10 @@ fn frame_questions(nodes: &[Value], current: &str) -> String {
 
 fn state_column(n: &Value) -> &'static str {
     let open = n.get("isOpen") != Some(&Value::Bool(false));
-    match s(n, "state") { "doing" => "doing", "plan" if open => "plan", "done" | "changed" => "done", _ if !open => "done", _ => "idea" }
+    match s(n, "state") { "doing" => "doing", "plan" if open => "plan", "postponed" => "held", "done" | "changed" | "dropped" => "done", _ if !open => "done", _ => "idea" }
 }
 
-fn column_name(id: &str) -> &str { match id { "idea" => wb_core::i18n::t("idea"), "plan" => wb_core::i18n::t("planned"), "doing" => wb_core::i18n::t("in-progress"), "done" => wb_core::i18n::t("done"), o => o } }
+fn column_name(id: &str) -> &str { match id { "idea" => wb_core::i18n::t("idea"), "plan" => wb_core::i18n::t("planned"), "doing" => wb_core::i18n::t("in-progress"), "done" => wb_core::i18n::t("done"), "held" => wb_core::i18n::t("alerts-held"), o => o } }
 
 fn frame_columns(nodes: &[Value], current: &str, style: &Style) -> String {
     let t = tree_of(nodes);
@@ -147,36 +165,42 @@ fn frame_columns(nodes: &[Value], current: &str, style: &Style) -> String {
     let body: String = cols.iter().map(|(name, cards)| {
         let rows: String = cards.iter().map(|n| {
             let path = t.by.get(s(n, "parent")).map_or(wb_core::i18n::t("top-level").to_string(), |p| format!("{} ›", e(&cut(s(p, "label"), 28))));
-            format!("<div class='card{}' data-n='{}'><div class='path'>{path}</div>{}</div>", if s(n, "id") == current { " here" } else { "" }, e(s(n, "id")), e(s(n, "label")))
+            let class = if s(n, "id") == current { " here" } else if s(n, "state") == "dropped" { " dropped" } else { "" };
+            format!("<div class='card{class}' data-n='{}'><div class='path'>{path}</div>{}</div>", e(s(n, "id")), e(s(n, "label")))
         }).collect();
         format!("<section class='col'><h3>{} <span class='n'>{}</span></h3>{rows}</section>", e(if by == "state" { column_name(name) } else { name }), cards.len())
     }).collect();
     format!("<div class='cols' style='grid-template-columns:repeat({},minmax(130px,1fr))'>{body}</div>", cols.len().max(1))
 }
 
-fn numbers(n: &Value, k: &str) -> Vec<i64> { arr(n, k).iter().filter_map(Value::as_i64).collect() }
-
-fn frame_route(nodes: &[Value], current: &str) -> String {
+/// The order the nodes were made and changed in. A step into another branch first shows that step's parent as
+/// "back" (A → B → C → A (back) → D); going back only in talk, without a change to the map, does not show.
+fn frame_route(nodes: &[Value], current: &str, steps: &[Step]) -> String {
     let t = tree_of(nodes);
-    let mut visits: Vec<(i64, &str)> = nodes.iter().flat_map(|n| numbers(n, "visits").into_iter().map(move |v| (v, s(n, "id")))).collect();
-    visits.sort();
-    let mut stops: Vec<String> = Vec::new();
-    for (_, id) in visits { if stops.last().map(String::as_str) != Some(id) { stops.push(id.to_string()); } }
+    let mut stops: Vec<(String, bool)> = Vec::new();
+    for (_, _, id, _) in steps {
+        let Some(n) = t.by.get(id.as_str()) else { continue };
+        let last = stops.last().map(|x| x.0.as_str());
+        if last == Some(id.as_str()) { continue; }
+        let parent = s(n, "parent");
+        if let Some(prev) = last { if t.by.contains_key(parent) && parent != prev && stops.iter().any(|x| x.0 == parent) { stops.push((parent.to_string(), true)); } }
+        stops.push((id.clone(), false));
+    }
     let mut note = String::new();
-    if t.by.contains_key(current) && stops.last().map(String::as_str) != Some(current) {
+    if t.by.contains_key(current) && stops.last().map(|x| x.0.as_str()) != Some(current) {
         if stops.is_empty() {
-            note = wb_core::i18n::t("no-visit-record-showing-the-tree").to_string();
-            stops = mapstyles::path_to(nodes, current).iter().map(|n| s(n, "id").to_string()).collect();
-        } else { stops.push(current.to_string()); }
+            note = wb_core::i18n::t("no-change-record-showing-the-tree").to_string();
+            stops = mapstyles::path_to(nodes, current).iter().map(|n| (s(n, "id").to_string(), false)).collect();
+        } else { stops.push((current.to_string(), false)); }
     }
     let last = stops.len().saturating_sub(1);
     let mut rows = String::new();
-    for (i, id) in stops.iter().enumerate() {
+    for (i, (id, back)) in stops.iter().enumerate() {
         let Some(n) = t.by.get(id.as_str()) else { continue };
         let dest = id == current && i == last;
-        let role = if i == 0 { wb_core::i18n::t("start") } else if dest { wb_core::i18n::t("destination-current") } else { wb_core::i18n::t("via") };
-        if i > 0 { rows += &format!("<div class='why'>↓{}</div>", if s(n, "reason").is_empty() { String::new() } else { format!(" {}", e(s(n, "reason"))) }); }
-        rows += &format!("<div class='stop {}' data-n='{}'><small>{role}</small>{}</div>", if i == 0 { "s" } else if dest { "d" } else { "" }, e(id), e(s(n, "label")));
+        let role = if i == 0 { wb_core::i18n::t("start") } else if dest { wb_core::i18n::t("destination-current") } else if *back { wb_core::i18n::t("came-back") } else { wb_core::i18n::t("via") };
+        if i > 0 { rows += &format!("<div class='why'>↓{}</div>", if *back || s(n, "reason").is_empty() { String::new() } else { format!(" {}", e(s(n, "reason"))) }); }
+        rows += &format!("<div class='stop {}' data-n='{}'><small>{role}</small>{}</div>", if i == 0 { "s" } else if dest { "d" } else if *back { "b" } else { "" }, e(id), e(s(n, "label")));
     }
     format!("{note}<div class='route'>{rows}</div>")
 }
@@ -184,7 +208,8 @@ fn frame_route(nodes: &[Value], current: &str) -> String {
 #[derive(Default)]
 struct Moment { decided: bool, at: Option<i64>, labels: Vec<String> }
 
-fn frame_time(nodes: &[Value], current: &str, style: &Style) -> String {
+/// Lanes per top branch, a column per turn in which its nodes were made or changed (from the event log).
+fn frame_time(nodes: &[Value], current: &str, style: &Style, steps: &[Step]) -> String {
     let t = tree_of(nodes);
     let roots: Vec<&Value> = t.kids.get("").cloned().unwrap_or_default();
     let tops: Vec<&Value> = if roots.len() == 1 { t.kids.get(s(roots[0], "id")).cloned().unwrap_or_else(|| roots.clone()) } else { roots.clone() };
@@ -194,16 +219,12 @@ fn frame_time(nodes: &[Value], current: &str, style: &Style) -> String {
         let mut under = Vec::new();
         subtree(n, &t, &mut under);
         let mut events: HashMap<i64, Moment> = HashMap::new();
-        for m in &under {
-            for key in ["opened", "changed", "closed"] {
-                let Some(stamp) = m.get(key).filter(|v| v.is_object()) else { continue };
-                let Some(turn) = stamp.get("turn").and_then(Value::as_i64) else { continue };
-                let ev = events.entry(turn).or_default();
-                if key == "closed" && (s(m, "kind") == "conclusion" || s(m, "kind").is_empty()) { ev.decided = true; }
-                if ev.at.is_none() { ev.at = stamp.get("at").and_then(Value::as_i64); }
-                ev.labels.push(s(m, "label").to_string());
-            }
-            for v in numbers(m, "visits") { events.entry(v).or_default(); }
+        for (turn, at, id, closed) in steps {
+            let Some(m) = under.iter().find(|m| s(m, "id") == id.as_str()) else { continue };
+            let ev = events.entry(*turn).or_default();
+            if *closed && (s(m, "kind") == "conclusion" || s(m, "kind").is_empty()) { ev.decided = true; }
+            if ev.at.is_none() && *at > 0 { ev.at = Some(*at); }
+            ev.labels.push(s(m, "label").to_string());
         }
         let here = under.iter().any(|m| s(m, "id") == current);
         lanes.push((n, events, here));
@@ -247,14 +268,20 @@ fn frame_time(nodes: &[Value], current: &str, style: &Style) -> String {
     wb_core::i18n::f("range-decision-return", &[("show", (show).to_string()), ("radios", (radios).to_string()), ("labels", (labels).to_string()), ("views", (views).to_string())])
 }
 
+/// This map's changes from the event log; a map without any (older, or imported) falls back to its nodes' stamps.
+fn steps_of(d: &Data, data: &Value, nodes: &[Value]) -> Vec<Step> {
+    let logged = if s(data, "sessionId").is_empty() { Vec::new() } else { wb_core::memory::steps(&d.root, s(data, "sessionId")) };
+    if logged.is_empty() { stamp_steps(nodes) } else { logged }
+}
+
 /// The whole page. `picked` is the node the file panel is filtered on, marked as on the tree.
 pub fn page(d: &Data, data: &Value, style: &Style, root: Option<&str>, picked: Option<&str>) -> String {
     let nodes = mapstyles::scoped(data, root);
     let current = s(data, "current");
     let body = match style.frame() {
         Some("columns") => frame_columns(&nodes, current, style),
-        Some("route") => frame_route(&nodes, current),
-        Some("time") => frame_time(&nodes, current, style),
+        Some("route") => frame_route(&nodes, current, &steps_of(d, data, &nodes)),
+        Some("time") => frame_time(&nodes, current, style, &steps_of(d, data, &nodes)),
         Some("questions") => frame_questions(&nodes, current),
         _ => frame_tree(&nodes, current, style),
     };
@@ -271,10 +298,10 @@ ul.tree,ul.tree ul{{list-style:none;margin:0;padding-left:16px}} ul.tree{{paddin
 .g{{display:inline-block;width:1.3em}} li.shut>.g,li.shut>.t,li.shut>.k{{opacity:.5}} li.here{{font-weight:700}} li.fold{{opacity:.5;font-size:11.5px}}
 .k{{font-size:10px;font-weight:700;border-radius:4px;padding:0 5px;margin-right:4px;color:#fff}}
 .cols{{display:grid;gap:8px;align-items:start}} .col{{background:var(--panel);border-radius:8px;padding:6px}} .col h3{{font-size:12.5px;margin:2px 4px 6px}}
-.n{{float:right;opacity:.5;font-weight:400}} .card{{background:var(--bg);border-radius:6px;padding:4px 7px;margin-bottom:5px}} .card.here{{outline:2px solid var(--accent)}}
+.n{{float:right;opacity:.5;font-weight:400}} .card{{background:var(--bg);border-radius:6px;padding:4px 7px;margin-bottom:5px}} .card.here{{outline:2px solid var(--accent)}} .card.dropped{{opacity:.45;text-decoration:line-through}}
 .path{{opacity:.5;font-size:10.5px}}
 .route{{display:flex;flex-direction:column;gap:3px}} .stop{{background:var(--panel);border-radius:7px;padding:5px 9px;border-left:4px solid #df8e1d}}
-.stop.s{{border-color:#40a02b}} .stop.d{{border-color:var(--accent);font-weight:600}} .stop small{{display:block;opacity:.5;font-size:10px}}
+.stop.s{{border-color:#40a02b}} .stop.b{{border-color:#7c7f93;opacity:.75}} .stop.d{{border-color:var(--accent);font-weight:600}} .stop small{{display:block;opacity:.5;font-size:10px}}
 .why{{opacity:.6;font-size:11.5px;padding-left:14px}}
 input{{display:none}} .bar label{{display:inline-block;background:var(--panel);border-radius:5px;padding:2px 9px;margin:0 3px 6px 0;cursor:pointer;font-size:12px}}
 .view{{display:none;overflow-x:auto}} table{{border-collapse:collapse}} th{{font-weight:400;opacity:.6;font-size:10.5px;padding:0 3px 3px;min-width:56px;text-align:left}}
@@ -320,23 +347,33 @@ mod tests {
         assert!(html.contains("card here"));
         assert_eq!(state_column(&json!({"isOpen":false})), "done");
         assert_eq!(state_column(&json!({"isOpen":true})), "idea");
+        assert_eq!((state_column(&json!({"state":"postponed"})), state_column(&json!({"state":"dropped","isOpen":false}))), ("held", "done"));
     }
     #[test]
-    fn route_goes_by_visits_and_falls_back_to_the_path() {
-        let html = frame_route(&nodes(), "b");
+    fn route_goes_by_changes_comes_back_and_falls_back_to_the_path() {
+        let step = |id: &str| (0, 0, id.to_string(), false);
+        let html = frame_route(&nodes(), "b", &[step("c"), step("b")]);
         assert!(html.find("conclusion").unwrap() < html.find("choice").unwrap() && html.contains("why it moved") && html.contains("Destination · Current"));
+        // A → B → C → A (back) → D
+        let tree = vec![json!({"id":"A","label":"A"}), json!({"id":"B","parent":"A","label":"B"}), json!({"id":"C","parent":"B","label":"C"}), json!({"id":"D","parent":"A","label":"D"})];
+        let html = frame_route(&tree, "D", &[step("A"), step("B"), step("C"), step("D")]);
+        let order: Vec<usize> = ["data-n='A'><small>Start", "data-n='C'", "data-n='A'><small>Back", "data-n='D'"].iter().map(|x| html.find(x).unwrap_or_else(|| panic!("{x}: {html}"))).collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]));
         let plain = vec![json!({"id":"a","label":"top"}), json!({"id":"z","parent":"a","label":"bottom"})];
-        assert!(frame_route(&plain, "z").contains("No visit record"));
+        assert!(frame_route(&plain, "z", &[]).contains("No change record"));
     }
     #[test]
     fn time_has_ranges_or_says_there_is_nothing() {
-        let html = frame_time(&nodes(), "b", &style(json!({"frame":"time"})));
+        let html = frame_time(&nodes(), "b", &style(json!({"frame":"time"})), &stamp_steps(&nodes()));
         assert!(html.contains("Range:") && html.contains("id='topic' checked") && html.contains("Turn 3"));
-        assert!(frame_time(&[json!({"id":"a","label":"x"})], "a", &style(json!({}))).contains("No time record"));
+        assert!(frame_time(&[json!({"id":"a","label":"x"})], "a", &style(json!({})), &[]).contains("No time record"));
     }
     #[test]
     fn questions_group_open_and_settled() {
         let html = frame_questions(&nodes(), "b");
         assert!(html.contains("Open questions 1") && html.contains("Notes, tasks, no kind 1"));
+        let resolved = vec![json!({"id":"q","label":"which?","isOpen":false,"kind":"question","state":"done"}), json!({"id":"x","label":"this one","isOpen":false,"kind":"conclusion","links":[{"to":"q","rel":"resolves"}]})];
+        let html = frame_questions(&resolved, "");
+        assert!(html.contains("which? → this one") && html.contains("Settled 1"), "{html}");
     }
 }

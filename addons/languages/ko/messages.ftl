@@ -157,10 +157,11 @@ in-progress = 진행 중
 done = 완료
 no-kind = 종류 없음
 top-level = 최상위
-no-visit-record-showing-the-tree = <p class='sub'>방문 기록 없음 · 트리 경로로 대체 표시</p>
+no-change-record-showing-the-tree = <p class='sub'>변경 기록 없음 · 트리 경로로 대체 표시</p>
 start = 출발
 destination-current = 목적지 · 현재
 via = 경유
+came-back = 다시 옴
 no-time-record-recorded-from-when = <p class='sub'>시각 기록 없음 · 기능 적용 후부터 기록 (지난 노드는 추정하지 않음)</p>
 all = 전체
 from-the-start-of-the-current = 현재 주제 시작부터

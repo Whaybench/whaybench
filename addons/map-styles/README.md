@@ -52,17 +52,21 @@ Unknown keys are ignored. A file that is not valid JSON is not listed.
 | `time` | Time flow by branch | `range`: `all`, `topic` (from the start of the current topic), `decision` (from the last decision) |
 | `questions` | Open questions grouped | None |
 
-With `group: state`, the `columns` values are `idea`, `plan`, `doing`, `done`.
+With `group: state`, the `columns` values are `idea`, `plan`, `doing`, `held` (postponed), `done` (dropped nodes show
+there crossed out). Nodes in the trash are never drawn.
+
+The `route` and `time` frames are drawn from the memory's event log: the order and turn in which nodes were made and
+changed. A map without events (older, or imported) falls back to the stamps its nodes keep.
 
 ## `needs`: node data
 
 | Value | Content | When empty |
 |---|---|---|
-| `kind` | question, option, pro, con, conclusion, note | A side worker fills it from the transcript |
+| `kind` | question, option, pro, con, conclusion, task, appointment, problem, idea, fact, rule, note | A side worker fills it from the transcript |
 | `reason` | Why the conversation moved to this node | A side worker fills it (nodes on the route only) |
 | `links` | Relations to nodes of other branches | A side worker fills it |
-| `state` | plan, doing, done, changed | The AI writes it during the conversation |
-| `opened`, `visits` | Creation time, visits | The mod records them (past nodes stay empty) |
+| `state` | plan, doing, done, changed, dropped, postponed | The AI writes it during the conversation |
+| `opened` | Creation time | The program records it (past nodes stay empty) |
 
 The side worker calls a small model (haiku) once. It does not appear in the conversation.
 

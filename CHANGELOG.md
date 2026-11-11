@@ -31,6 +31,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   since stay as they are, and you are told); delete for good or empty the trash by hand, or after `trash_days`
   (180 by default) at start. Claude does not see the trash, and a regrouping of its map leaves it alone.
 - A session takes the person's changes to its map (alerts panel, map menu) into its own view at the next prompt.
+- Map styles: Route and Timeline are drawn from the event log, in the order and turn nodes were made and changed;
+  Route shows a step back into an earlier branch as "Back". Kanban has an On hold column and shows dropped nodes
+  crossed out under Done. Questions shows ideas, and a decision that resolves a question as its answer. Focus and
+  the other styles count dropped nodes as closed.
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).
