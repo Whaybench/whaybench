@@ -52,7 +52,6 @@ fn describe(d: &Data, info: &Value) -> (String, String) {
         (_, Some("done")) => wb_core::i18n::t("answered").into(),
         _ => wb_core::i18n::t("running").into(),
     }, ago(info.get("lastActive").and_then(Value::as_i64).unwrap_or(0))];
-    if let Some(c) = sessions::context_percent(d, id) { parts.push(wb_core::i18n::f("context", &[("c", (c).to_string())])); }
     if let Some(m) = sessions::map_of(d, id) {
         let nodes = m.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
         let here = nodes.iter().find(|n| n.get("id") == m.get("current")).map(|n| text(n, "label").to_string());
@@ -92,7 +91,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let (query, show_hidden) = { let v = view.borrow(); (v.query.clone(), v.show_hidden) };
     let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{:?}{:?}", open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
         let id = sid(s);
-        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), sessions::context_percent(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)))
+        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)))
     }).collect::<Vec<_>>());
     if !force && view.borrow().signature == signature { return; }
     view.borrow_mut().signature = signature;

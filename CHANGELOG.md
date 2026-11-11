@@ -6,6 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The map update button's tooltip says what it does: it no longer mentions the view panel, which it does not send.
+- The map style fill worker is told all twelve node kinds.
+
+### Removed
+
+- The context percentage in the sessions panel: nothing wrote it. Context and plan usage show in Claude Code's
+  status line and under the alerts panel.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

@@ -489,7 +489,6 @@ pub fn unend(d: &Data, id: &str) {
 
 pub fn state_of(d: &Data, id: &str) -> Option<String> { read_json(&state_dir(d).join(format!("{id}.json")))?.get("state")?.as_str().map(String::from) }
 
-pub fn context_percent(d: &Data, id: &str) -> Option<i64> { fs::read_to_string(d.cache().join("context").join(id)).ok()?.trim().parse().ok() }
 
 pub fn clear_focus(d: &Data) { let _ = fs::remove_file(focus_file(d)); }
 
