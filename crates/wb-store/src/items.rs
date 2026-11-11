@@ -75,8 +75,8 @@ impl Store {
     pub fn map_from_nodes(&self, pid: &str, nodes: &[Value], title: &str, file: &str) -> Res<Value> {
         let ids: Vec<&str> = nodes.iter().map(|n| s(n, "id")).collect();
         let items: Vec<Value> = nodes.iter().map(|n| {
-            let open = n.get("isOpen") != Some(&json!(false));
-            let stage = match s(n, "state") { "doing" => "doing", "plan" if open => "decided", "done" | "changed" => "done", _ if !open => "resolved", _ => "idea" };
+            let open = wb_core::map::is_open(n);
+            let stage = match s(n, "state") { "doing" => "doing", "plan" if open => "decided", "done" | "changed" => "done", "dropped" => "dropped", _ if !open => "resolved", _ => "idea" };
             let mut item = json!({"id": s(n, "id"), "area": "imported", "text": s(n, "label"), "stage": stage, "origin": [{"imported": file, "node": s(n, "id"), "label": s(n, "label"), "title": title}]});
             if ids.contains(&s(n, "parent")) { item["parent"] = json!(s(n, "parent")); }
             if !s(n, "reason").is_empty() { item["reason"] = json!(s(n, "reason")); }
@@ -94,14 +94,14 @@ mod map_from_nodes_tests {
     fn a_conversation_map_starts_a_project_map() {
         let st = scratch("mf");
         st.create_project("p", "Test", "", "", Vec::new(), false).unwrap();
-        let nodes = vec![json!({"id":"a","label":"top","isOpen":true}), json!({"id":"b","parent":"a","label":"bottom","isOpen":false,"reason":"why"}), json!({"id":"c","parent":"outside","label":"apart","state":"doing"})];
+        let nodes = vec![json!({"id":"a","label":"top","isOpen":true}), json!({"id":"b","parent":"a","label":"bottom","state":"dropped","reason":"why"}), json!({"id":"c","parent":"outside","label":"apart","state":"doing"})];
         st.map_from_nodes("p", &nodes, "title", "/x.json").unwrap();
         let m = st.project_map("p");
         assert_eq!(s(&arr(&m, "areas")[0], "title"), "title");
         let items = arr(&m, "items");
         assert_eq!(items.len(), 3);
         let of = |id: &str| items.iter().find(|i| s(i, "id") == id).unwrap();
-        assert_eq!((s(of("a"), "stage"), s(of("b"), "stage"), s(of("c"), "stage")), ("idea", "resolved", "doing"));
+        assert_eq!((s(of("a"), "stage"), s(of("b"), "stage"), s(of("c"), "stage")), ("idea", "dropped", "doing"));
         assert_eq!(s(of("b"), "parent"), "a");
         assert_eq!(s(of("c"), "parent"), "", "a parent outside the map is dropped");
         assert_eq!(s(&arr(of("a"), "origin")[0], "imported"), "/x.json");

@@ -3,6 +3,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { ContextMap, MapNode, OtherView, Stamp, StoredMap } from '../types'
+import { isOpen } from './map-text'
 import { PREFIX, SHARE_DIR, WHAYBENCH } from './paths'
 
 const map = atom({ plugin: 'context-map', key: 'map' } as const, { nodes: [] } as ContextMap, {
@@ -45,7 +46,7 @@ export function carriedSummary(m: ContextMap, from: string) {
   const by = new Map(m.nodes.map(n => [n.id, n]))
   const path: string[] = []
   for (let n = m.current ? by.get(m.current) : undefined; n; n = n.parent ? by.get(n.parent) : undefined) path.unshift(n.label)
-  const open = (n: MapNode) => n.isOpen !== false && n.state !== 'done'
+  const open = isOpen
   const pick = (f: (n: MapNode) => boolean, cap: number) => m.nodes.filter(f).slice(-cap)
   const questions = pick(n => open(n) && n.state !== 'plan' && n.state !== 'doing', 20)
   const later = pick(n => open(n) && n.state === 'plan', 10)
@@ -72,7 +73,7 @@ export async function storedMaps($: EngineInterface) {
 
 export function summary(map: ContextMap) {
   const here = map.nodes.find(n => n.id === map.current)
-  const open = map.nodes.filter(n => n.isOpen).length
+  const open = map.nodes.filter(isOpen).length
   return `${here ? here.label : '(no position)'} · ${open} open`
 }
 

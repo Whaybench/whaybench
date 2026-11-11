@@ -3,6 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { MapNode, StoredMap } from '../types'
 import type { FileTouch } from './files'
+import { isOpen } from './map-text'
 import { FILES, SHARE_DIR } from './paths'
 
 // Decisions are the map's settled nodes of kind conclusion. When Claude reads a file,
@@ -42,7 +43,7 @@ export async function decisionsFor($: EngineInterface, path: string): Promise<st
   if (nodeIds.size === 0 || !(await $.fs.exists(mapFile))) return []
   const nodes = ((JSON.parse(String(await $.fs.read(mapFile))) as StoredMap).nodes ?? []) as MapNode[]
   const byId = new Map(nodes.map(n => [n.id, n]))
-  const isDecision = (n: MapNode) => !n.isOpen && n.kind === 'conclusion'
+  const isDecision = (n: MapNode) => !isOpen(n) && n.kind === 'conclusion'
   const found: MapNode[] = []
   const add = (n?: MapNode) => { if (n && isDecision(n) && !found.includes(n)) found.push(n) }
   for (const id of nodeIds) {

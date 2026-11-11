@@ -61,7 +61,8 @@ pub(crate) fn maps(data: &Path) -> Vec<(String, Vec<Value>, i64)> {
         let name = f.file_name().to_string_lossy().to_string();
         let Some(sid) = name.strip_suffix(".json").filter(|s| s.len() == 36 && s.matches('-').count() == 4) else { continue };
         let Some(map) = fs::read_to_string(f.path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
-        let nodes = map["nodes"].as_array().cloned().unwrap_or_default();
+        let mut nodes = map["nodes"].as_array().cloned().unwrap_or_default();
+        for n in &mut nodes { crate::map::settle_old(n); }
         out.push((sid.to_string(), nodes, map["updatedAt"].as_i64().unwrap_or(0)));
     }
     out.sort_by_key(|m| std::cmp::Reverse(m.2));
@@ -69,7 +70,7 @@ pub(crate) fn maps(data: &Path) -> Vec<(String, Vec<Value>, i64)> {
 }
 
 fn when(n: &Value) -> i64 { ["changed", "opened"].iter().find_map(|k| n.get(*k)?.get("at")?.as_i64()).unwrap_or(0) }
-fn is_open(n: &Value) -> bool { n["isOpen"] != false && n["state"] != "removed" }
+use crate::map::is_open;
 
 /// One node in one line: `memory id · label · state or kind · session · last change`.
 pub fn line(sid: &str, n: &Value) -> String {
@@ -94,7 +95,8 @@ pub fn steps(data: &Path, sid: &str) -> Vec<(i64, i64, String, bool)> {
         let id = e["subject"].as_str()?.strip_prefix(&prefix)?.to_string();
         let at = chrono::DateTime::parse_from_rfc3339(e["time"].as_str()?).ok()?.timestamp_millis();
         // A change holds [before, after]; a node made closed holds the value itself.
-        let closed = e["data"]["isOpen"][1] == false || (e["type"] == "node.added" && e["data"]["isOpen"] == false);
+        let state = if e["type"] == "node.added" { &e["data"]["state"] } else { &e["data"]["state"][1] };
+        let closed = !is_open(&json!({"state": state})) && (e["type"] == "node.added" || is_open(&json!({"state": e["data"]["state"][0]})));
         Some((e["turn"].as_i64().unwrap_or(0), at, id, closed))
     }).collect()
 }
@@ -300,13 +302,13 @@ mod tests {
 
     #[test]
     fn a_change_is_told_as_the_events_it_makes() {
-        let before = vec![json!({"id":"a","label":"A","isOpen":true,"opened":{"at":1}}), json!({"id":"b","label":"B","isOpen":true})];
-        let after = vec![json!({"id":"a","label":"A2","isOpen":false,"opened":{"at":1},"closed":{"at":2},"links":[{"to":"c","rel":"replaces"}]}), json!({"id":"c","label":"C","isOpen":true})];
+        let before = vec![json!({"id":"a","label":"A","opened":{"at":1}}), json!({"id":"b","label":"B"})];
+        let after = vec![json!({"id":"a","label":"A2","state":"done","opened":{"at":1},"closed":{"at":2},"links":[{"to":"c","rel":"replaces"}]}), json!({"id":"c","label":"C"})];
         let ev = diff("session/s", "s", 5, &before, &after);
         let kinds: Vec<&str> = ev.iter().map(|e| e["type"].as_str().unwrap()).collect();
         assert_eq!(kinds, ["node.changed", "link.added", "node.added", "node.purged"]);
         assert_eq!(ev[0]["data"]["label"], json!(["A", "A2"]));
-        assert_eq!(ev[0]["data"]["isOpen"], json!([true, false]));
+        assert_eq!(ev[0]["data"]["state"], json!([null, "done"]), "closing is a change of state");
         assert!(ev[0]["data"].get("closed").is_none(), "the program's stamps are not followed");
         assert_eq!((ev[0]["subject"].as_str(), ev[0]["specversion"].as_str()), (Some("s/a"), Some("1.0")));
         assert_ne!(ev[0]["id"], ev[1]["id"]);

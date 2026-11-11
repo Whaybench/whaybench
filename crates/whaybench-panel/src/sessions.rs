@@ -57,7 +57,7 @@ fn describe(d: &Data, info: &Value) -> (String, String) {
         let nodes = m.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
         let here = nodes.iter().find(|n| n.get("id") == m.get("current")).map(|n| text(n, "label").to_string());
         parts.push(here.map(|h| format!("● {}", cut(&h, 22))).unwrap_or_else(|| wb_core::i18n::t("map-2").into()));
-        parts.push(wb_core::i18n::f("open-5", &[("a1", (nodes.iter().filter(|n| n.get("isOpen") == Some(&Value::Bool(true))).count()).to_string())]));
+        parts.push(wb_core::i18n::f("open-5", &[("a1", (nodes.iter().filter(|n| wb_core::map::is_open(n)).count()).to_string())]));
     }
     let name = sessions::session_name(d, id);
     (if name.is_empty() { wb_core::i18n::t("empty-session").into() } else { cut(&name, 34) }, parts.join(" · "))

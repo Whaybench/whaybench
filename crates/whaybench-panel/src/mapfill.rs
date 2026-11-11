@@ -65,7 +65,7 @@ pub fn run(d: &Data, session: &str, style: &Style, scope: Option<&str>) {
     let wanted: Vec<&String> = need.iter().flat_map(|(_, ids)| ids).collect();
     let listing: Vec<String> = all.iter().filter(|n| wanted.iter().any(|w| w.as_str() == s(n, "id"))).map(|n| {
         let parent = label_of(s(n, "parent"));
-        format!("- {}: {}{}  [{}]", s(n, "id"), s(n, "label"), if parent.is_empty() { String::new() } else { wb_core::i18n::f("parent", &[("parent", (parent).to_string())]) }, if n.get("isOpen") == Some(&Value::Bool(false)) { wb_core::i18n::t("done") } else { wb_core::i18n::t("open-3") })
+        format!("- {}: {}{}  [{}]", s(n, "id"), s(n, "label"), if parent.is_empty() { String::new() } else { wb_core::i18n::f("parent", &[("parent", (parent).to_string())]) }, if !wb_core::map::is_open(n) { wb_core::i18n::t("done") } else { wb_core::i18n::t("open-3") })
     }).collect();
     let asks: Vec<String> = need.iter().map(|(f, ids)| wb_core::i18n::f("nodes", &[("f", (f).to_string()), ("a1", (mapstyles::filled_hint(f)).to_string()), ("a2", (ids.join(", ")).to_string())])).collect();
     let talk = transcript_path(session).and_then(|p| fs::read_to_string(p).ok()).map(|t| transcript_text(&t)).unwrap_or_default();

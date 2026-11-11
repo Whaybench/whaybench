@@ -2,7 +2,6 @@ export type MapNode = {
   id: string
   label: string
   parent?: string
-  isOpen: boolean
   // done, dropped and removed (the trash) close a node; the others, and none, leave it open.
   state?: 'plan' | 'doing' | 'done' | 'changed' | 'dropped' | 'postponed' | 'removed'
   kind?: 'question' | 'option' | 'pro' | 'con' | 'conclusion' | 'task' | 'appointment' | 'problem' | 'idea' | 'fact' | 'rule' | 'note'

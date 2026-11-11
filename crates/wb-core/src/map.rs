@@ -21,6 +21,17 @@ fn fresh(prefix: &str) -> String {
     format!("{prefix}{:x}-{:x}-{n:x}", now_ms(), std::process::id())
 }
 
+/// Open or closed comes from the state alone: done, dropped and removed (the trash) are closed; plan, doing,
+/// changed, postponed and no state are open. Nothing else is stored for it.
+pub fn is_open(n: &Value) -> bool { !CLOSING.contains(&n["state"].as_str().unwrap_or("")) }
+
+/// A node of a map from before open followed the state: a stored `isOpen: false` without a closing state means done.
+/// The field itself goes; a map is put right the next time it is written.
+pub(crate) fn settle_old(n: &mut Value) {
+    let Some(o) = n.as_object_mut() else { return };
+    if o.shift_remove("isOpen") == Some(json!(false)) && !CLOSING.contains(&o.get("state").and_then(Value::as_str).unwrap_or("")) { o.insert("state".into(), json!("done")); }
+}
+
 pub(crate) fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
@@ -132,26 +143,25 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value, person: bool) 
         let id = safe_id(text(raw, "id")?)?;
         let index = nodes.iter().position(|n| n["id"] == id);
         let before = index.map(|i| nodes[i].clone());
-        let mut merged = before.clone().unwrap_or_else(|| json!({"id":id,"label":id,"isOpen":true}));
+        let mut merged = before.clone().unwrap_or_else(|| json!({"id":id,"label":id}));
         for (key, value) in raw.as_object().ok_or("node must be an object")? {
             if STAMPED.contains(&key.as_str()) || (!person && PERSON_ONLY.contains(&key.as_str())) { continue; }
             if value.is_null() && (person || PERSON_ONLY.contains(&key.as_str())) { merged.as_object_mut().unwrap().shift_remove(key); } else { merged[key] = value.clone(); }
         }
-        // Open or closed follows the state: a closing state closes, closing without one means done, reopening
-        // drops a closing state.
+        // Open or closed is the state's. An agent that still says isOpen (an older adapter) is read as a state:
+        // closing without one means done, reopening drops a closing state; isOpen itself is not kept.
         let state = merged.get("state").and_then(Value::as_str).unwrap_or("").to_string();
-        if raw.get("state").is_some() {
-            merged["isOpen"] = json!(!CLOSING.contains(&state.as_str()));
-        } else if raw.get("isOpen") == Some(&json!(false)) && !CLOSING.contains(&state.as_str()) {
+        if raw.get("state").is_none() && raw.get("isOpen") == Some(&json!(false)) && !CLOSING.contains(&state.as_str()) {
             merged["state"] = json!("done");
-        } else if raw.get("isOpen") == Some(&json!(true)) && CLOSING.contains(&state.as_str()) {
+        } else if raw.get("state").is_none() && raw.get("isOpen") == Some(&json!(true)) && CLOSING.contains(&state.as_str()) {
             merged.as_object_mut().unwrap().shift_remove("state");
         }
+        merged.as_object_mut().unwrap().shift_remove("isOpen");
         // A new node without a memory id the agent chose starts its own.
         if before.is_none() && merged.get("memid").and_then(Value::as_str).is_none_or(str::is_empty) {
             merged["memid"] = json!(fresh("m"));
         }
-        for key in ["parent", "reason", "detail"] {
+        for key in ["parent", "reason", "detail", "state"] {
             if merged[key] == "" { merged.as_object_mut().unwrap().shift_remove(key); }
         }
         if let Some(old) = &before {
@@ -162,10 +172,10 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value, person: bool) 
         } else {
             merged["opened"] = stamp.clone();
         }
-        if before.as_ref().is_none_or(|n| n["isOpen"] != false) && merged["isOpen"] == false {
+        if before.as_ref().is_none_or(is_open) && !is_open(&merged) {
             merged["closed"] = stamp.clone();
         }
-        if before.as_ref().is_some_and(|n| n["isOpen"] == false) && merged["isOpen"] == true {
+        if before.as_ref().is_some_and(|n| !is_open(n)) && is_open(&merged) {
             merged.as_object_mut().unwrap().shift_remove("closed");
         }
         if let Some(i) = index { nodes[i] = merged; } else { nodes.push(merged); }
@@ -186,9 +196,8 @@ fn resolve(nodes: &mut [Value], changes: &Value, stamp: &Value) {
         }
         if settle.len() == before { break; }
     }
-    for n in nodes.iter_mut().filter(|n| settle.contains(n["id"].as_str().unwrap_or("")) && n["isOpen"] != false) {
+    for n in nodes.iter_mut().filter(|n| settle.contains(n["id"].as_str().unwrap_or("")) && is_open(n)) {
         n["state"] = json!("done");
-        n["isOpen"] = json!(false);
         n["changed"] = stamp.clone();
         n["closed"] = stamp.clone();
     }
@@ -236,6 +245,7 @@ fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool, a
     }
     let mut map = read_json(&path, json!({"nodes":[],"current":null,"turn":0}))?;
     validate(&map)?;
+    for n in map["nodes"].as_array_mut().into_iter().flatten() { settle_old(n); }
     let before = map["nodes"].as_array().cloned().unwrap_or_default();
     let stamp = json!({"at":now_ms(),"turn":map.get("turn").and_then(Value::as_u64).unwrap_or(0)});
     let mut nodes = if let Some(replacement) = input.get("nodes") {
@@ -451,7 +461,7 @@ mod tests {
         let act = trash(dir.path(), sid, "a", false)?;
         assert_eq!((get("a").unwrap()["state"].as_str(), get("b").unwrap()["parent"].as_str()), (Some("removed"), Some("t")));
         assert!(restore(dir.path(), &act)?.is_empty());
-        assert_eq!((get("a").unwrap().get("state"), get("a").unwrap()["isOpen"].as_bool(), get("b").unwrap()["parent"].as_str()), (None, Some(true), Some("a")));
+        assert_eq!((get("a").unwrap().get("state"), get("a").unwrap().get("isOpen"), get("b").unwrap()["parent"].as_str()), (None, None, Some("a")));
         assert_eq!(get("b").unwrap()["state"], "done", "a closed child keeps its own state");
         // The branch: all of it, and a node changed since stays as it is.
         let act = trash(dir.path(), sid, "a", true)?;
@@ -460,7 +470,7 @@ mod tests {
         assert_eq!(regrouped["nodes"].as_array().unwrap().len(), 4, "a regrouping leaves the trash alone");
         person(dir.path(), sid, json!([{"id":"c","label":"renamed"}]))?;
         assert_eq!(restore(dir.path(), &act)?, vec![format!("{sid}/c")]);
-        assert_eq!((get("a").unwrap()["isOpen"].as_bool(), get("c").unwrap()["state"].as_str()), (Some(true), Some("removed")));
+        assert_eq!((is_open(&get("a").unwrap()), get("c").unwrap()["state"].as_str()), (true, Some("removed")));
         // Emptying: what is outside the trash under a purged node moves to the top level.
         trash(dir.path(), sid, "a", false)?;
         assert_eq!(purge(dir.path(), sid, &["a".into(), "c".into(), "t".into()])?, 2, "only nodes in the trash go");
@@ -488,17 +498,19 @@ mod tests {
         assert!(map["nodes"][0].get("mark").is_none(), "an agent cannot set the mark");
         assert!(map["nodes"][0]["memid"].as_str().is_some_and(|m| !m.is_empty()), "a new node starts its own memory id");
         let map = up(json!({"id":"q","isOpen":false}))?;
-        assert_eq!((map["nodes"][0]["state"].as_str(), map["nodes"][0]["isOpen"].as_bool()), (Some("done"), Some(false)));
+        assert_eq!((map["nodes"][0]["state"].as_str(), map["nodes"][0].get("isOpen")), (Some("done"), None), "an older isOpen is read as the state and not kept");
         let map = up(json!({"id":"q","isOpen":true}))?;
         assert!(map["nodes"][0].get("state").is_none(), "reopening drops the closing state");
         let map = up(json!({"id":"q","state":"dropped"}))?;
-        assert_eq!(map["nodes"][0]["isOpen"], json!(false));
+        assert!(!is_open(&map["nodes"][0]));
         let map = up(json!({"id":"q","state":"postponed"}))?;
-        assert_eq!(map["nodes"][0]["isOpen"], json!(true));
+        assert!(is_open(&map["nodes"][0]));
+        let map = up(json!({"id":"q","state":""}))?;
+        assert!(map["nodes"][0].get("state").is_none(), "an empty state opens with no state");
         let map = command(dir.path(), "s", Some(json!({"upsert": [{"id":"o","label":"option","isOpen":true,"parent":"q"},
             {"id":"d","label":"decided","isOpen":false,"links":[{"to":"q","rel":"resolves"}]}]})))?;
         let get = |id: &str| map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).cloned().unwrap();
-        assert_eq!((get("q")["state"].as_str(), get("o")["isOpen"].as_bool()), (Some("done"), Some(false)), "resolves settles the problem and what is open under it");
+        assert_eq!((get("q")["state"].as_str(), is_open(&get("o"))), (Some("done"), false), "resolves settles the problem and what is open under it");
         let marked = person(dir.path(), "s", json!([{"id":"o","mark":"important"}]))?;
         assert_eq!(marked["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "o").unwrap()["mark"], json!("important"), "the person may mark");
         let unmarked = person(dir.path(), "s", json!([{"id":"o","mark":null}]))?;

@@ -1,6 +1,9 @@
 // The map as text rows: marks, tree prefixes, folding. Used by the map tool's show and the pane.
 import type { ContextMap, MapNode } from '../types'
 
+// Open or closed comes from the state alone, as Whaybench keeps it.
+export const isOpen = (n: MapNode) => !['done', 'dropped', 'removed'].includes(n.state ?? '')
+
 export function asText(map: ContextMap) {
   return rows(map.nodes)
     .map(({ node, prefix }) => `${prefix}${glyph(node, map.current)} ${node.label} [${node.id}]`)
@@ -14,7 +17,7 @@ const STATE_GLYPH: Record<string, string> = { plan: '□', doing: '◐', done: '
 export function glyph(node: MapNode, current?: string) {
   if (node.id === current) return '●'
   if (node.state && STATE_GLYPH[node.state]) return STATE_GLYPH[node.state]
-  return node.isOpen ? '◇' : '✓'
+  return isOpen(node) ? '◇' : '✓'
 }
 
 // Flattens the tree into drawable rows, depth-first in the given order, skipping folded branches.
@@ -47,7 +50,7 @@ export function foldedSet(nodes: MapNode[], current: string | undefined, flipped
   const folded = new Set<string>()
   for (const n of nodes) {
     const sub = below(n.id)
-    if (sub.length && !n.isOpen && sub.every(k => !k.isOpen) && !sub.some(k => k.id === current)) folded.add(n.id)
+    if (sub.length && !isOpen(n) && sub.every(k => !isOpen(k)) && !sub.some(k => k.id === current)) folded.add(n.id)
   }
   for (const id of flipped) folded.has(id) ? folded.delete(id) : folded.add(id)
   return folded

@@ -118,7 +118,7 @@ fn startup_and_every_prompt_provide_localized_map_instructions() {
             assert_eq!(output["hookSpecificOutput"]["hookEventName"], name);
             let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
             assert_eq!(context.contains("automatically from the first question"), lang == "en", "the text is in the session's language");
-            assert!(context.contains("isOpen"));
+            assert!(context.contains("state") && !context.contains("isOpen"));
             assert!(context.contains(" map codex-map-test --write"));
             assert!(!context.contains("{ $"));
         }

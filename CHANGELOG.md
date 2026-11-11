@@ -49,6 +49,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - The `blocks` link is gone: what a node depends on is written as `requires`.
+- Open or closed comes from a node's `state` alone (`done`, `dropped` and `removed` close it); `isOpen` is no
+  longer stored or recorded in events. An agent that still sends it is read as a state, and a stored
+  `isOpen: false` of an older map becomes `done` the next time that map is written. Claude reopens a node with an
+  empty state.
 - A saved map's file name, and that of the copy kept when a map is imported, no longer takes its title (which
   is in the interface language): it is `map-<first change>-<last change>.json`, or `branch-<node id>-…` for a
   branch. The times are when the conversation began and was last active, to the minute (session records now

@@ -2,7 +2,7 @@
 import type { Register } from 'claude-code'
 
 import { flipToggled, mapNow, otherNow, toggledNow } from './map-data'
-import { foldedSet, glyph, rows } from './map-text'
+import { foldedSet, glyph, isOpen, rows } from './map-text'
 // Literal here, not imported: the engine reads hook matchers from the hook's own file.
 const PANE = 'context-map'
 const TOOL = 'mcp__context-map__context_map'
@@ -41,7 +41,7 @@ export function paneHooks(on: On) {
         {rows(nodes, folded, true).map(({ node, prefix, hidden, hasKids }) => {
           const isHere = node.id === current
           const line = (
-            <Text dimColor={!node.isOpen && !isHere} bold={isHere}>
+            <Text dimColor={!isOpen(node) && !isHere} bold={isHere}>
               {prefix}
               {hasKids ? (hidden ? '+ ' : '- ') : '  '}
               {glyph(node, current) + ' '}

@@ -159,7 +159,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 ("done", "alerts-done", json!({"state": "done"})),
                 ("dropped", "alerts-dropped", json!({"state": "dropped"})),
                 ("held", "alerts-hold", json!({"state": "postponed"})),
-                ("reopen", "alerts-reopen", json!({"isOpen": true})),
+                ("reopen", "alerts-reopen", json!({"state": null})),
                 ("mark", if marked == "true" { "alerts-unmark" } else { "alerts-mark" }, json!({"mark": if marked == "true" { Value::Null } else { json!("important") }})),
             ];
             for (name, label, change) in items {

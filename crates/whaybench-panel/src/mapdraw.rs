@@ -11,8 +11,7 @@ const LANES: [&str; 10] = ["#1e66f5", "#d20f39", "#8839ef", "#40a02b", "#fe640b"
 
 fn e(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('\'', "&#39;").replace('"', "&quot;") }
 fn cut(t: &str, n: usize) -> String { t.chars().take(n).collect() }
-// Open or closed follows the state, as the map file keeps it.
-fn is_open(n: &Value) -> bool { n.get("isOpen") != Some(&Value::Bool(false)) && !["done", "dropped", "removed"].contains(&s(n, "state")) }
+use wb_core::map::is_open;
 
 /// A node change in the order it happened: turn, time in ms, node id, whether it closed.
 type Step = (i64, i64, String, bool);
@@ -33,7 +32,7 @@ fn kind_of(k: &str) -> Option<(&'static str, &'static str)> {
 
 fn glyph(n: &Value, current: &str) -> &'static str {
     if s(n, "id") == current { return "●"; }
-    match s(n, "state") { "plan" => "□", "doing" => "◐", "done" => "✓", "changed" => "✎", "dropped" => "✕", "postponed" => "‖", _ => if n.get("isOpen") != Some(&Value::Bool(false)) { "◇" } else { "✓" } }
+    match s(n, "state") { "plan" => "□", "doing" => "◐", "done" => "✓", "changed" => "✎", "dropped" => "✕", "postponed" => "‖", _ => if is_open(n) { "◇" } else { "✓" } }
 }
 
 struct Tree<'a> { kids: HashMap<&'a str, Vec<&'a Value>>, by: HashMap<&'a str, &'a Value> }
@@ -134,7 +133,7 @@ fn frame_questions(nodes: &[Value], current: &str) -> String {
 }
 
 fn state_column(n: &Value) -> &'static str {
-    let open = n.get("isOpen") != Some(&Value::Bool(false));
+    let open = is_open(n);
     match s(n, "state") { "doing" => "doing", "plan" if open => "plan", "postponed" => "held", "done" | "changed" | "dropped" => "done", _ if !open => "done", _ => "idea" }
 }
 
@@ -326,10 +325,10 @@ mod tests {
     fn style(raw: Value) -> Style { Style { id: "x".into(), name: "x".into(), raw, path: "/x".into() } }
     fn nodes() -> Vec<Value> {
         vec![
-            json!({"id":"a","label":"root","isOpen":true,"kind":"question"}),
-            json!({"id":"b","parent":"a","label":"choice <1>","isOpen":true,"kind":"option","state":"doing","reason":"why it moved"}),
-            json!({"id":"c","parent":"a","label":"conclusion","isOpen":false,"kind":"conclusion","closed":{"turn":3,"at":1793900000000i64}}),
-            json!({"id":"d","label":"memo","isOpen":true,"kind":"note","state":"plan"}),
+            json!({"id":"a","label":"root","kind":"question"}),
+            json!({"id":"b","parent":"a","label":"choice <1>","kind":"option","state":"doing","reason":"why it moved"}),
+            json!({"id":"c","parent":"a","label":"conclusion","state":"done","kind":"conclusion","closed":{"turn":3,"at":1793900000000i64}}),
+            json!({"id":"d","label":"memo","kind":"note","state":"plan"}),
         ]
     }
     #[test]
@@ -345,9 +344,9 @@ mod tests {
         let order: Vec<usize> = ["Idea", "Planned", "In progress", "Done"].iter().map(|c| html.find(c).unwrap()).collect();
         assert!(order.windows(2).all(|w| w[0] < w[1]));
         assert!(html.contains("card here"));
-        assert_eq!(state_column(&json!({"isOpen":false})), "done");
-        assert_eq!(state_column(&json!({"isOpen":true})), "idea");
-        assert_eq!((state_column(&json!({"state":"postponed"})), state_column(&json!({"state":"dropped","isOpen":false}))), ("held", "done"));
+        assert_eq!(state_column(&json!({"state":"done"})), "done");
+        assert_eq!(state_column(&json!({})), "idea");
+        assert_eq!((state_column(&json!({"state":"postponed"})), state_column(&json!({"state":"dropped","state":"done"}))), ("held", "done"));
     }
     #[test]
     fn route_goes_by_changes_comes_back_and_falls_back_to_the_path() {
@@ -372,7 +371,7 @@ mod tests {
     fn questions_group_open_and_settled() {
         let html = frame_questions(&nodes(), "b");
         assert!(html.contains("Open questions 1") && html.contains("Notes, tasks, no kind 1"));
-        let resolved = vec![json!({"id":"q","label":"which?","isOpen":false,"kind":"question","state":"done"}), json!({"id":"x","label":"this one","isOpen":false,"kind":"conclusion","links":[{"to":"q","rel":"resolves"}]})];
+        let resolved = vec![json!({"id":"q","label":"which?","state":"done","kind":"question","state":"done"}), json!({"id":"x","label":"this one","state":"done","kind":"conclusion","links":[{"to":"q","rel":"resolves"}]})];
         let html = frame_questions(&resolved, "");
         assert!(html.contains("which? → this one") && html.contains("Settled 1"), "{html}");
     }

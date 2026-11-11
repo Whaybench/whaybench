@@ -21,11 +21,11 @@ pub fn glyph(n: &Value, current: &str) -> &'static str {
         "changed" => "✎",
         "dropped" => "✕",
         "postponed" => "‖",
-        _ => if n.get("isOpen") == Some(&Value::Bool(true)) { "◇" } else { "✓" },
+        _ => if is_open(n) { "◇" } else { "✓" },
     }
 }
 
-fn is_open(n: &Value) -> bool { n.get("isOpen") == Some(&Value::Bool(true)) }
+use wb_core::map::is_open;
 
 pub struct Tree { pub kids: HashMap<String, Vec<Value>> }
 
@@ -792,16 +792,16 @@ mod tests {
     }
     #[test]
     fn marks_by_state() {
-        assert_eq!(glyph(&json!({"id":"a","isOpen":true}), "a"), "●");
-        assert_eq!(glyph(&json!({"id":"a","isOpen":true}), ""), "◇");
-        assert_eq!(glyph(&json!({"id":"a","isOpen":false}), ""), "✓");
-        assert_eq!(glyph(&json!({"id":"a","isOpen":true,"state":"plan"}), ""), "□");
+        assert_eq!(glyph(&json!({"id":"a"}), "a"), "●");
+        assert_eq!(glyph(&json!({"id":"a"}), ""), "◇");
+        assert_eq!(glyph(&json!({"id":"a","state":"done"}), ""), "✓");
+        assert_eq!(glyph(&json!({"id":"a","state":"plan"}), ""), "□");
         assert_eq!(glyph(&json!({"id":"a","state":"doing"}), ""), "◐");
-        assert_eq!(glyph(&json!({"id":"a","isOpen":false,"state":"changed"}), ""), "✎");
-        assert_eq!((glyph(&json!({"id":"a","isOpen":false,"state":"dropped"}), ""), glyph(&json!({"id":"a","isOpen":true,"state":"postponed"}), "")), ("✕", "‖"));
+        assert_eq!(glyph(&json!({"id":"a","state":"changed"}), ""), "✎");
+        assert_eq!((glyph(&json!({"id":"a","state":"dropped"}), ""), glyph(&json!({"id":"a","state":"postponed"}), "")), ("✕", "‖"));
     }
     fn map() -> Value {
-        json!({"current":"d","nodes":[{"id":"t","isOpen":false,"label":"top"},{"id":"a","parent":"t","isOpen":false},{"id":"b","parent":"a","isOpen":false},{"id":"c","parent":"t","isOpen":false},{"id":"d","parent":"c","isOpen":false},{"id":"lost","parent":"none","isOpen":true}]})
+        json!({"current":"d","nodes":[{"id":"t","state":"done","label":"top"},{"id":"a","parent":"t","state":"done"},{"id":"b","parent":"a","state":"done"},{"id":"c","parent":"t","state":"done"},{"id":"d","parent":"c","state":"done"},{"id":"lost","parent":"none"}]})
     }
     #[test]
     fn what_folds_at_first() {

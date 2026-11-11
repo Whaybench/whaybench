@@ -155,7 +155,7 @@ pub fn reference_request(path: &str, title: &str, node: &Value, flow: &[String],
 pub fn whole_reference_request(path: &str, title: &str, data: &Value) -> String {
     let nodes = data.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
     let ids: std::collections::HashSet<&str> = nodes.iter().map(|n| s(n, "id")).collect();
-    let open = nodes.iter().filter(|n| n.get("isOpen").and_then(Value::as_bool).unwrap_or(false)).count();
+    let open = nodes.iter().filter(|n| wb_core::map::is_open(n)).count();
     let tops: Vec<String> = nodes.iter().filter(|n| !ids.contains(s(n, "parent"))).take(60).map(|n| format!("- {}", s(n, "label"))).collect();
     let source = json!({"file": path, "node": "", "title": title}).to_string();
     i18n::f("import-reference-whole-request", &[("title", title.to_string()), ("path", path.to_string()), ("count", nodes.len().to_string()), ("open", open.to_string()), ("lines", tops.join("\n")), ("source", source)])
@@ -172,7 +172,7 @@ mod tests {
     }
     #[test]
     fn a_whole_map_is_sent_as_its_file_size_and_top_branches() {
-        let data = json!({"nodes":[{"id":"a","label":"top","isOpen":true},{"id":"b","parent":"a","label":"under"},{"id":"z","label":"other"}]});
+        let data = json!({"nodes":[{"id":"a","label":"top"},{"id":"b","parent":"a","label":"under","state":"done"},{"id":"z","label":"other","state":"done"}]});
         let t = whole_reference_request("/m/x.json", "X", &data);
         assert!(t.contains("/m/x.json") && t.contains("3 nodes, 1 open"));
         assert!(t.contains("- top") && t.contains("- other") && !t.contains("- under"));
