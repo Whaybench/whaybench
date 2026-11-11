@@ -71,6 +71,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- No more Mesa warnings ("ZINK: failed to choose pdev", "failed to get driver name for fd -1") when apps start
+  inside Whaybench: they are told to draw on the CPU, which they did anyway, since Whaybench does not offer them a
+  GPU device yet.
 - The data directory has its `maps` folder from the start, so Open map shows it before any map was saved.
 
 ## [0.1.1] - 2026-11-10

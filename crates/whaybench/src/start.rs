@@ -157,6 +157,9 @@ pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
         // Inside, Korean and other input methods come through this compositor's text input; a GTK or Qt module of
         // the desktop's input method would talk past it and the apps would get no composed text.
         .env_remove("GTK_IM_MODULE").env_remove("QT_IM_MODULE")
+        // This compositor does not hand its apps a GPU device (no linux-dmabuf yet), so Mesa would look for one, warn
+        // and fall back to drawing on the CPU anyway. shortcut: software drawing inside; drop this once dmabuf is offered.
+        .env("LIBGL_ALWAYS_SOFTWARE", "1")
         .env(paths::ENV_DATA_DIR, Path::new(&data.root))
         .env(record::ENV_RUN, run)
         .spawn();
