@@ -173,6 +173,38 @@ pub fn search(data: &Path, words: &[String], limit: usize) -> Vec<String> {
     hits.iter().take(limit).map(|(s, n)| line(s, n)).collect()
 }
 
+/// The alert panel's sections (3.19): nodes with a time or due date, the person's marked ones, what changed since the
+/// person last looked, held ones and the trash. Each item is `{session, node, line}`; a carried node shows once.
+pub fn board(data: &Path) -> Value {
+    let all = maps(data);
+    let (mut due, mut marked, mut held, mut trash, mut seen) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), std::collections::HashSet::new());
+    for (s, nodes, _) in &all {
+        for n in nodes {
+            let key = n.get("memid").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("{s}/{}", n["id"]));
+            if !seen.insert(key) { continue; }
+            let item = json!({"session": s, "node": n, "line": line(s, n)});
+            if n["state"] == "removed" { trash.push(item); continue; }
+            if n["state"] == "postponed" { held.push(item.clone()); }
+            if !is_open(n) { continue; }
+            if n.get("mark").is_some() { marked.push(item.clone()); }
+            if n.get("due").or_else(|| n.get("at")).is_some() { due.push(item); }
+        }
+    }
+    let date = |i: &Value| i["node"].get("due").or_else(|| i["node"].get("at")).and_then(Value::as_str).unwrap_or("").to_string();
+    due.sort_by_key(date);
+    let since: i64 = fs::read_to_string(seen_file(data, "person")).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    let changed: Vec<Value> = events(data).into_iter().rev()
+        .filter(|e| e["source"] != "person" && chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since))
+        .filter(|e| (e["type"] == "node.changed" && (e["data"].get("isOpen").is_some() || e["data"].get("state").is_some())) || (e["type"] == "link.added" && e["data"]["rel"] == "resolves"))
+        .take(50).map(|e| {
+            let subject = e["subject"].as_str().unwrap_or("");
+            let (s, id) = subject.split_once('/').unwrap_or((subject, ""));
+            let label = all.iter().find(|m| m.0 == s).and_then(|m| m.1.iter().find(|n| n["id"] == id)).and_then(|n| n["label"].as_str()).unwrap_or(id).to_string();
+            json!({"session": s, "node": {"id": id, "label": label}, "line": format!("{label} · {} · {}", e["type"].as_str().unwrap_or(""), e["data"])})
+        }).collect();
+    json!({"due": due, "marked": marked, "changed": changed, "check": [], "held": held, "trash": trash})
+}
+
 fn links(node: &Value) -> Vec<(String, String)> {
     node.get("links").and_then(Value::as_array).into_iter().flatten()
         .filter_map(|l| Some((l.get("to")?.as_str()?.to_string(), l.get("rel")?.as_str()?.to_string()))).collect()
@@ -273,6 +305,21 @@ mod tests {
         assert!(delta(dir.path(), me).is_empty(), "seen once");
         assert_eq!(search(dir.path(), &["store".into()], 5).len(), 2);
         assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn the_board_sorts_nodes_into_its_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = "cccccccc-0000-0000-0000-000000000003";
+        fs::write(dir.path().join(format!("{s}.json")), json!({"updatedAt": 1, "nodes": [
+            {"id":"a","label":"meet","isOpen":true,"at":"2026-11-12 15:00","memid":"1"},
+            {"id":"b","label":"key","isOpen":true,"mark":"important","memid":"2"},
+            {"id":"c","label":"later","isOpen":true,"state":"postponed","memid":"3"},
+            {"id":"d","label":"gone","isOpen":false,"state":"removed","memid":"4"},
+            {"id":"e","label":"done","isOpen":false,"state":"done","mark":"important","memid":"5"}]}).to_string()).unwrap();
+        let b = board(dir.path());
+        let n = |k: &str| b[k].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into()], vec!["c".into()], vec!["d".into()]));
     }
 
     #[test]

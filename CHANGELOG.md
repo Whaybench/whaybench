@@ -20,6 +20,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Memory list: Claude Code sees, with its first prompt and after a compaction, its own open nodes and the related
   and recent nodes of other sessions (one line each, up to 100), and on later prompts only what changed for it
   since. `whaybench memory list | changes | show | search`.
+- Alerts panel: nodes with a time or due date, the person's marked ones, what changed since they last looked, AI
+  suggestions, held nodes and the trash. Right click: done, drop, hold, reopen, move to trash, mark important,
+  open the session. The person's choices are written to that session's map and recorded as theirs.
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).

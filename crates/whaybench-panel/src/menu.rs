@@ -131,6 +131,7 @@ fn panel_menu(d: &Data, k: &Maker) -> gio::Menu {
     toggle(wb_core::i18n::t("answer"), "dev.whaybench.answer", Some(panel_command("answer")));
     toggle(wb_core::i18n::t("input"), "dev.whaybench.input", Some(panel_command("input")));
     toggle(wb_core::i18n::t("project"), "dev.whaybench.project", Some(panel_command("project")));
+    toggle(wb_core::i18n::t("alerts"), "dev.whaybench.alerts", Some(panel_command("alerts")));
     // The first view cannot be closed: its line only brings it up.
     { let d2 = d.clone(); k.check(&sec, wb_core::i18n::t("view-2"), true, move || status::focus_app(&d2, view::VIEW_APP)); }
     toggle(wb_core::i18n::t("browser"), view::FIREFOX_APP, Some(view::firefox_command(d, "")));

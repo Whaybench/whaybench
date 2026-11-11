@@ -1,5 +1,6 @@
 //! The product panels: each runs as its own app inside a panel of the compositor, and they talk through files
 //! `whaybench-panel map | sessions | input | answer | status`.
+mod alerts;
 mod answer;
 mod common;
 mod files;
@@ -35,9 +36,10 @@ fn main() -> glib::ExitCode {
         "input" => ("dev.whaybench.input", wb_core::i18n::t("input")),
         "answer" => ("dev.whaybench.answer", wb_core::i18n::t("answer")),
         "files" => ("dev.whaybench.files", wb_core::i18n::t("files")),
+        "alerts" => ("dev.whaybench.alerts", wb_core::i18n::t("alerts")),
         "status" => ("dev.whaybench.status", wb_core::i18n::t("status-line")),
         "theme" => ("dev.whaybench.theme", wb_core::i18n::t("themeset-title")),
-        other => { eprintln!("whaybench-panel: unknown panel '{other}': map, sessions, input, answer, files, view, status"); return glib::ExitCode::FAILURE; }
+        other => { eprintln!("whaybench-panel: unknown panel '{other}': map, sessions, input, answer, files, alerts, view, status"); return glib::ExitCode::FAILURE; }
     };
     let title = title.to_string();
     let data = common::data();
@@ -62,6 +64,7 @@ fn main() -> glib::ExitCode {
             "input" => input::build(&win, data),
             "answer" => answer::build(&win, data),
             "files" => files::build(&win, data),
+            "alerts" => alerts::build(&win, data),
             "menu" => menu::build(&win, data),
             "project" => project::build(&win, data),
             "theme" => themeset::build(&win, data),

@@ -161,7 +161,7 @@ fn serve(data: &paths::Data, run_id: &str, apps: Vec<String>, no_session: bool) 
         start::spawn_app(app, &state.socket_name, data, run_id);
     }
     if !no_session {
-        for panel in ["menu", "status", "map", "sessions", "files", "answer", "input", "project"] {
+        for panel in ["menu", "status", "map", "sessions", "files", "answer", "input", "project", "alerts"] {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench-panel");
             start::spawn_app(&format!("exec '{}' {panel}", exe.display()), &state.socket_name, data, run_id);
         }

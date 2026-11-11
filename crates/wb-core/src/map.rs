@@ -95,14 +95,15 @@ pub fn validate(map: &Value) -> Result<()> {
     Ok(())
 }
 
-fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value) -> Result<()> {
+fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value, person: bool) -> Result<()> {
     for raw in changes.as_array().ok_or("node changes must be an array")? {
         let id = safe_id(text(raw, "id")?)?;
         let index = nodes.iter().position(|n| n["id"] == id);
         let before = index.map(|i| nodes[i].clone());
         let mut merged = before.clone().unwrap_or_else(|| json!({"id":id,"label":id,"isOpen":true}));
         for (key, value) in raw.as_object().ok_or("node must be an object")? {
-            if !STAMPED.contains(&key.as_str()) && !PERSON_ONLY.contains(&key.as_str()) { merged[key] = value.clone(); }
+            if STAMPED.contains(&key.as_str()) || (!person && PERSON_ONLY.contains(&key.as_str())) { continue; }
+            if value.is_null() && PERSON_ONLY.contains(&key.as_str()) { merged.as_object_mut().unwrap().shift_remove(key); } else { merged[key] = value.clone(); }
         }
         // Open or closed follows the state: a closing state closes, closing without one means done, reopening
         // drops a closing state.
@@ -191,7 +192,12 @@ fn carried(data: &Path, sid: &str, source: &Value) {
     if let Err(e) = crate::memory::record(data, at, &[ev]) { crate::log::warn("map", "memory not written", &e.to_string(), &[]); }
 }
 
-fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> {
+fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> { change_by(data, sid, input, latest, false) }
+
+/// The person's change from the alert panel: it may set the person's fields (the mark), and is recorded as the person's.
+pub fn person(data: &Path, sid: &str, upsert: Value) -> Result<Value> { change_by(data, sid, json!({"upsert": upsert}), false, true) }
+
+fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool) -> Result<Value> {
     let path = data.join(format!("{}.json", safe_id(sid)?));
     if !input.is_object() { return Err("map update must be an object".into()); }
     if !["nodes", "upsert", "remove", "current"].iter().any(|k| input.get(k).is_some()) {
@@ -211,11 +217,11 @@ fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> {
             }
         }
         let mut nodes = Vec::new();
-        upsert(&mut nodes, &replacement, &stamp)?;
+        upsert(&mut nodes, &replacement, &stamp, false)?;
         nodes
     } else { map["nodes"].as_array().unwrap().clone() };
     if let Some(changes) = input.get("upsert") {
-        upsert(&mut nodes, changes, &stamp)?;
+        upsert(&mut nodes, changes, &stamp, person)?;
         resolve(&mut nodes, changes, &stamp);
     }
     let mut gone = HashSet::new();
@@ -255,7 +261,8 @@ fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> {
     if latest { write_json(&data.join("latest.json"), &map)?; }
     // shortcut: every write counts as the session's own; a side worker's fill is not told apart yet.
     let at = stamp["at"].as_i64().unwrap_or(0);
-    let events = crate::memory::diff(&format!("session/{sid}"), sid, at, &before, map["nodes"].as_array().map(Vec::as_slice).unwrap_or(&[]));
+    let source = if person { "person".to_string() } else { format!("session/{sid}") };
+    let events = crate::memory::diff(&source, sid, at, &before, map["nodes"].as_array().map(Vec::as_slice).unwrap_or(&[]));
     if let Err(e) = crate::memory::record(data, at, &events) { crate::log::warn("map", "memory not written", &e.to_string(), &[]); }
     Ok(map)
 }
@@ -336,6 +343,10 @@ mod tests {
             {"id":"d","label":"decided","isOpen":false,"links":[{"to":"q","rel":"resolves"}]}]})))?;
         let get = |id: &str| map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).cloned().unwrap();
         assert_eq!((get("q")["state"].as_str(), get("o")["isOpen"].as_bool()), (Some("done"), Some(false)), "resolves settles the problem and what is open under it");
+        let marked = person(dir.path(), "s", json!([{"id":"o","mark":"important"}]))?;
+        assert_eq!(marked["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "o").unwrap()["mark"], json!("important"), "the person may mark");
+        let unmarked = person(dir.path(), "s", json!([{"id":"o","mark":null}]))?;
+        assert!(unmarked["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "o").unwrap().get("mark").is_none(), "and take it off");
         let memid = get("q")["memid"].clone();
         let map = command(dir.path(), "s", Some(json!({"nodes": [{"id":"q","label":"regrouped","isOpen":true}]})))?;
         let map = json!({"nodes": [map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "q").unwrap()]});
