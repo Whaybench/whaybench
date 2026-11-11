@@ -47,6 +47,11 @@ static LOG: Mutex<Option<Log>> = Mutex::new(None);
 /// A new run's id, or the compositor's when this program was started by it.
 pub fn run_id(data: &Data) -> String {
     if let Some(r) = std::env::var(ENV_RUN).ok().filter(|v| !v.is_empty()) { return r; }
+    new_run_id(data)
+}
+
+/// A run id no folder has yet: the time now, with a number after it when that second is taken.
+fn new_run_id(data: &Data) -> String {
     let base = Local::now().format("%Y%m%d-%H%M%S").to_string();
     let free = |n: &str| !data.log_runs().join(n).exists();
     if free(&base) { return base; }
@@ -254,9 +259,10 @@ mod tests {
     fn runs_in_the_same_second_get_their_own_folder() {
         let d = tmp("same");
         let data = Data::new(d.clone());
-        let a = run_id(&data);
+        // Not `run_id`: inside a Whaybench tab it is the id of the Whaybench that is running.
+        let a = new_run_id(&data);
         fs::create_dir_all(data.log_runs().join(&a)).unwrap();
-        let b = run_id(&data);
+        let b = new_run_id(&data);
         assert_ne!(a, b);
     }
     #[test]
