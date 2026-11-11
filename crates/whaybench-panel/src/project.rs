@@ -4,10 +4,10 @@
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc, time::{Duration, UNIX_EPOCH}};
 
 use gtk::{glib, prelude::*};
-use pulldown_cmark::{html, Options, Parser};
 use regex::Regex;
 use serde_json::{json, Value};
-use wb_core::{log as record, paths::Data, sessions, status, theme};
+use wb_core::{log as record, paths::Data, sessions, status};
+use crate::web::Page;
 use wb_store::{Store, docaddons, history, markdown as md};
 use webkit6::prelude::*;
 
@@ -43,12 +43,7 @@ fn scope_name(v: &str) -> &str {
 }
 
 fn is_open(st: &str) -> bool { matches!(st, "idea" | "decided" | "doing" | "unverified") }
-fn render(text: &str) -> String {
-    let mut out = String::new();
-    let text = crate::common::table_pipes(text);
-    html::push_html(&mut out, Parser::new_ext(&text, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS));
-    out
-}
+fn render(text: &str) -> String { crate::web::markdown(text, crate::web::RawHtml::Kept) }
 
 /// What a document's page leaves out: writing guides and source comments are for the AI.
 struct Hidden { guide: Regex, source: Regex }
@@ -214,13 +209,11 @@ fn change_page(st: &Store, pid: &str, target: &str, event: &str) -> String {
 }
 
 fn style(d: &Data) -> String {
-    let t = theme::load_active(d);
-    let hex = |c: [f32; 4]| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
-    let ink = format!("#{:02x}{:02x}{:02x}", t.ink[0], t.ink[1], t.ink[2]);
-    format!("html,body{{margin:0;background:{};color:{ink};font:14px/1.55 '{f}',sans-serif}} body{{padding:6px 12px}}\
+    let p = Page::of(d);
+    format!("{}body{{padding:6px 12px}}\
       h1{{font-size:16pt;margin:4px 0}} h2{{font-size:14pt;margin:18px 0 6px}} h3{{font-size:12pt;margin:14px 0 4px}} h4,h5,h6{{font-size:11pt;margin:12px 0 3px}}\
       a{{color:{};text-decoration:none}} .m{{opacity:.6;font-size:small}} .ok{{color:#2e7d32;font-size:small}} .warn{{color:#c0392b}} .toc{{font-size:small}}\
-      table{{border-collapse:collapse;margin:4px 0}} td,th{{border:1px solid {};padding:3px 6px}} pre,code{{font-family:'{m}',monospace;font-size:9.5pt}} pre{{white-space:pre-wrap}}", hex(t.panel), hex(t.accent), hex(t.border), f = t.font.replace('\'', ""), m = t.terminal_font.replace('\'', ""))
+      table{{margin:4px 0}} td,th{{padding:3px 6px}} pre,code{{font-size:9.5pt}}", p.base("14px/1.55"), p.accent)
 }
 
 struct P {
@@ -695,9 +688,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     {
         let s2 = s_.clone();
         web.connect_decide_policy(move |_, decision, kind| {
-            if kind != webkit6::PolicyDecisionType::NavigationAction && kind != webkit6::PolicyDecisionType::NewWindowAction { return false; }
-            let Some(nav) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>() else { return false };
-            let uri = nav.navigation_action().and_then(|a| a.request()).and_then(|r| r.uri()).map(|u| u.to_string()).unwrap_or_default();
+            let Some(uri) = crate::web::pressed_link(decision, kind) else { return false };
             if uri.starts_with("wb:") {
                 decision.ignore();
                 let s3 = s2.clone();

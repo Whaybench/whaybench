@@ -11,7 +11,7 @@ mod mapfill;
 mod mapimport;
 mod menu;
 mod project;
-mod markdown;
+mod web;
 mod sessions;
 mod status;
 mod themeset;

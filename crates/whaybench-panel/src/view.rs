@@ -3,9 +3,9 @@
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc, time::UNIX_EPOCH};
 
 use gtk::{gio, glib, prelude::*};
-use pulldown_cmark::{html, Options, Parser};
+use crate::web::{self, escape, Page};
 use serde_json::{json, Value};
-use wb_core::{log as record, paths::Data, sessions, status, theme, view::{self, History, Link}};
+use wb_core::{log as record, paths::Data, sessions, status, view::{self, History, Link}};
 use webkit6::prelude::*;
 
 /// Sent to the page for `whaybench-view read`. `ALL`: the whole page, otherwise only the text inside the window.
@@ -53,18 +53,10 @@ type Shared = Rc<RefCell<V>>;
 
 fn modified(p: &Path) -> Option<u128> { Some(std::fs::metadata(p).ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_nanos()) }
 
-fn escape(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;") }
-
-fn hex(c: [f32; 4]) -> String { format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8) }
-
 fn page_style(d: &Data) -> String {
-    let t = theme::load_active(d);
-    let ink = format!("#{:02x}{:02x}{:02x}", t.ink[0], t.ink[1], t.ink[2]);
-    format!("html,body{{margin:0;background:{};color:{ink};font:15px/1.6 '{f}',sans-serif}}\
-             main{{padding:14px 18px}} .path{{font-size:12px;opacity:.65;padding:8px 18px 0}}\
-             pre{{font:13px/1.5 '{m}',monospace;white-space:pre-wrap;margin:0}}\
-             code{{font-family:'{m}',monospace}} table{{border-collapse:collapse}} td,th{{border:1px solid {};padding:3px 8px}}\
-             img{{max-width:100%}}", hex(t.panel), hex(t.border), f = t.font.replace('\'', ""), m = t.terminal_font.replace('\'', ""))
+    let p = Page::of(d);
+    format!("{}main{{padding:14px 18px}} .path{{font-size:12px;opacity:.65;padding:8px 18px 0}}\
+             pre{{font-size:13px;line-height:1.5;margin:0}} td,th{{padding:3px 8px}} img{{max-width:100%}}", p.base("15px/1.6"))
 }
 
 fn wrapped(d: &Data, path: &str, body: &str) -> String {
@@ -79,10 +71,7 @@ fn text_page(d: &Data, path: &str) -> Option<String> {
     let bytes = match std::fs::read(path) { Ok(b) => b, Err(e) => return Some(wrapped(d, path, &wb_core::i18n::f("read-failed-3", &[("a1", (escape(&e.to_string())).to_string())]))) };
     let text = String::from_utf8_lossy(&bytes[..bytes.len().min(2_000_000)]).to_string();
     if low.ends_with(".md") || low.ends_with(".markdown") {
-        let mut out = String::new();
-        let text = crate::common::table_pipes(&text);
-        html::push_html(&mut out, Parser::new_ext(&text, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS));
-        return Some(wrapped(d, path, &out));
+        return Some(wrapped(d, path, &web::markdown(&text, web::RawHtml::Kept)));
     }
     Some(wrapped(d, path, &format!("<pre>{}</pre>", escape(&text))))
 }

@@ -704,9 +704,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         let f: Rc<dyn Fn(&webkit6::WebView)> = Rc::new(move |view: &webkit6::WebView| {
             let (d, panel, scope, list, stack, web, this2) = (d.clone(), panel.clone(), scope.clone(), list.clone(), stack.clone(), web.clone(), this2.clone());
             view.connect_decide_policy(move |v, decision, kind| {
-                if kind != webkit6::PolicyDecisionType::NavigationAction { return false; }
-                let Some(nav) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>() else { return false };
-                let uri = nav.navigation_action().and_then(|a| a.request()).and_then(|r| r.uri()).map(|u| u.to_string()).unwrap_or_default();
+                let Some(uri) = crate::web::pressed_link(decision, kind) else { return false };
                 let Some(rest) = uri.strip_prefix("wb:") else { return false };
                 decision.ignore();
                 let mut bits = rest.splitn(4, ':');
