@@ -207,7 +207,8 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
     let (mut due, mut marked, mut check, mut held, mut trash, mut seen) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), std::collections::HashSet::new());
     for (s, nodes, _) in &all {
         for n in nodes {
-            let key = n.get("memid").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("{s}/{}", n["id"]));
+            // Same rule as the memory list: a carried copy (memory id and label) once; another node on the problem stays.
+            let key = n.get("memid").and_then(Value::as_str).map(|m| format!("{m}\u{0}{}", n["label"].as_str().unwrap_or(""))).unwrap_or_else(|| format!("{s}/{}", n["id"]));
             if !seen.insert(key) { continue; }
             let item = json!({"session": s, "node": n, "line": person_line(&names[s.as_str()], n)});
             if n["state"] == "removed" { trash.push(item); continue; }
@@ -381,6 +382,10 @@ mod tests {
         assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into()], vec!["c".into()], vec!["d".into()]));
         assert!(n("changed").is_empty(), "nothing settled or freed yet");
         assert_eq!(n("check"), vec!["f".to_string()], "the agent's suggestion waits for the person");
+        // A decision on the same problem in a map written later comes first; the suggestion still shows.
+        let later = "dddddddd-0000-0000-0000-000000000004";
+        fs::write(dir.path().join(format!("{later}.json")), json!({"updatedAt": 9, "nodes": [{"id":"x","label":"decided elsewhere","state":"done","memid":"6"}]}).to_string()).unwrap();
+        assert_eq!(board(dir.path(), None)["check"].as_array().unwrap().len(), 1);
         assert!(n("open").is_empty(), "no conversation on show");
         let mine = board(dir.path(), Some(s));
         assert_eq!(mine["open"].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap()).collect::<Vec<_>>(), ["a", "b", "c", "f"], "its open nodes, marked or not");
