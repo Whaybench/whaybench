@@ -57,7 +57,9 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     }
     // The agent's process is this session from now on: the MCP server, its child too, finds the session by it.
     if name == "SessionStart" || name == "UserPromptSubmit" { note_agent_process(data, sid); }
-    let carried = if name == "SessionStart" { adopt_fork(data, sid, a, event).or_else(|| carry_in(data, sid)) } else { None };
+    // The map a tab started from comes in once, when the agent starts; /clear starts a session in the same process.
+    let starting = event["source"].as_str().is_none_or(|s| s == "startup");
+    let carried = if name == "SessionStart" { adopt_fork(data, sid, a, event).or_else(|| if starting { carry_in(data, sid) } else { None }) } else { None };
     let tool = event["tool_name"].as_str().unwrap_or("");
     match name {
         "Stop" => stop(data, a, sid, event, &mut record)?,
@@ -408,6 +410,24 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_started_from_a_map_takes_it_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let exe = data.join("whaybench");
+        let a = Agent { name: "claude", tab: None, inside: true, exe: &exe };
+        let from = "aaaaaaaa-0000-0000-0000-00000000000f";
+        map::command(data, from, Some(json!({"upsert": [{"id": "t", "label": "Kept"}]}))).unwrap();
+        // shortcut: the process environment is shared by the tests; only this test sets the variable.
+        unsafe { std::env::set_var("WHAYBENCH_MAP_FROM", from) };
+        let (first, cleared) = ("aaaaaaaa-0000-0000-0000-0000000000a1", "aaaaaaaa-0000-0000-0000-0000000000a2");
+        run(data, &a, &ev(first, "SessionStart", json!({"source": "startup"}))).unwrap();
+        run(data, &a, &ev(cleared, "SessionStart", json!({"source": "clear"}))).unwrap();
+        unsafe { std::env::remove_var("WHAYBENCH_MAP_FROM") };
+        assert!(!map_is_empty(data, first), "the tab's first session takes the map");
+        assert!(map_is_empty(data, cleared), "/clear in the same process does not take it again");
+    }
+
+    #[test]
     fn the_session_is_found_by_the_agent_process() {
         let dir = tempfile::tempdir().unwrap();
         assert!(agent_process().is_some(), "a process above the tests");
@@ -529,7 +549,13 @@ pub fn agent_process() -> Option<(u32, u64)> {
 fn agent_file(data: &Path, pid: u32) -> std::path::PathBuf { data.join("cache").join("agent-process").join(format!("{pid}.json")) }
 
 fn note_agent_process(data: &Path, sid: &str) {
-    if let Some((pid, start)) = agent_process() { let _ = write_json(&agent_file(data, pid), &json!({"session": sid, "start": start})); }
+    let Some((pid, start)) = agent_process() else { return };
+    let _ = write_json(&agent_file(data, pid), &json!({"session": sid, "start": start}));
+    // A note outlives its process; a week on, nothing asks for it.
+    let week = std::time::Duration::from_secs(7 * 86_400);
+    for f in fs::read_dir(data.join("cache").join("agent-process")).into_iter().flatten().flatten() {
+        if f.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > week) { let _ = fs::remove_file(f.path()); }
+    }
 }
 
 /// The session of the agent this program runs under, as its hooks last noted it.

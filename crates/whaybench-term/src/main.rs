@@ -337,18 +337,22 @@ impl Relay {
 
     /// Text the program or a panel wants typed into this session: `{"text": "...", "enter": true}`.
     fn requests(&mut self) {
-        // Do not paste a queued prompt into a permission dialog or an active turn, whatever the agent.
-        {
+        // Do not paste a queued prompt into a permission dialog or an active turn, whatever the agent. A command
+        // (/exit when the person ends the session) goes in at once: it must not wait for the turn.
+        let commands_only = {
+            let mut waiting = false;
             if let Some(s) = &self.session {
                 let ready = fs::read_to_string(sessions::state_dir(&self.data).join(format!("{s}.json"))).ok()
                     .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
                     .is_some_and(|v| v["state"] == "done");
-                if !ready { return; }
+                waiting = !ready;
             }
-        }
+            waiting
+        };
         let dir = sessions::tab_inbox(&self.data, &self.tab);
         for f in fs::read_dir(&dir).into_iter().flatten().flatten() {
             let v = fs::read_to_string(f.path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+            if commands_only && !v.as_ref().and_then(|v| v["text"].as_str()).is_some_and(|t| t.trim_start().starts_with('/')) { continue; }
             let _ = fs::remove_file(f.path());
             let Some(v) = v else { continue };
             if !self.running { continue; }

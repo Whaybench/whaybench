@@ -39,7 +39,7 @@ fn hook_config(exe: &Path) -> Result<Value> {
     let command = format!("{} hook codex", shell_quote(exe)?);
     let mut hooks = serde_json::Map::new();
     for event in EVENTS {
-        hooks.insert(event.into(), json!([{"hooks":[{"type":"command","command":command,"timeout":3}]}]));
+        hooks.insert(event.into(), json!([{"hooks":[{"type":"command","command":command,"timeout":10}]}]));
     }
     Ok(json!({"hooks":hooks}))
 }
