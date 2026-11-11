@@ -272,6 +272,16 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
             let d2 = d.clone();
             items.add(wb_core::i18n::t("open-source-imported"), true, move || open_node_source(&d2, &src));
         }
+        // The person's important mark, written to this map as theirs.
+        if let Some(sid) = data.get("sessionId").and_then(Value::as_str).map(String::from) {
+            let marked = n.get("mark").is_some();
+            let (d2, id2) = (d.clone(), id.clone());
+            items.add(wb_core::i18n::t(if marked { "alerts-unmark" } else { "alerts-mark" }), true, move || {
+                if let Err(e) = wb_core::map::person(&d2.root, &sid, json!([{"id": id2, "mark": if marked { Value::Null } else { json!("important") }}])) {
+                    status::say(&d2, &wb_core::i18n::f("alerts-not-written", &[("e", e.to_string())]), 8);
+                }
+            });
+        }
         {
             let (id2, label2) = (id.clone(), label.clone());
             items.add(wb_core::i18n::t("open-branch-in-a-new-panel"), true, move || {
@@ -523,7 +533,7 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
                 });
             }
             area.append(&arrow);
-            let text = format!("{} {}{}", glyph(n, current), escape(s(n, "label")), if here { wb_core::i18n::t("current") } else { "" });
+            let text = format!("{} {}{}{}", glyph(n, current), if n.get("mark").is_some() { "! " } else { "" }, escape(s(n, "label")), if here { wb_core::i18n::t("current") } else { "" });
             let label = gtk::Label::new(None);
             label.set_markup(&text);
             label.set_xalign(0.0);

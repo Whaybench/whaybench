@@ -25,7 +25,7 @@ export async function memoryNote($: EngineInterface): Promise<string[]> {
   const lines = run.stdout.trim()
   if (!lines) return []
   return [whole
-    ? 'Memory list: your open nodes, then related and recent nodes of other sessions (memory id · label · state or kind · session · last change). ' +
+    ? 'Memory list: your open nodes, then related and recent nodes of other sessions (memory id · label · state or kind · session · last change; a decision adds its first reason). ' +
       'Give a node about the same problem as one here its memory id (memid); when a decision settles one, link it with resolves. ' +
       'An open node of yours that looks finished or no longer needed (for one, a node elsewhere with its memory id settled it): ' +
       'close it if sure, else give it suggest; the person approves it in the alerts panel, so no need to ask first. ' +

@@ -78,7 +78,10 @@ pub fn line(sid: &str, n: &Value) -> String {
     let what = n.get("state").or_else(|| n.get("kind")).and_then(Value::as_str).unwrap_or(if is_open(n) { "open" } else { "closed" });
     let day = chrono::DateTime::from_timestamp_millis(when(n)).map(|t| t.with_timezone(&chrono::Local).format("%m-%d").to_string()).unwrap_or_default();
     let due = n.get("due").or_else(|| n.get("at")).and_then(Value::as_str).map(|d| format!(" · due {d}")).unwrap_or_default();
-    format!("{key} · {} · {what} · {} · {day}{due}", n["label"].as_str().unwrap_or(""), &sid[..4.min(sid.len())])
+    // A decision's reason travels with it: a new session misses the why more than the what.
+    let why = n.get("detail").and_then(Value::as_str).filter(|_| n["kind"] == "conclusion")
+        .map(|d| format!(" · why: {}", d.split(['.', '。', '\n']).next().unwrap_or("").trim().chars().take(60).collect::<String>())).unwrap_or_default();
+    format!("{key} · {} · {what} · {} · {day}{due}{why}", n["label"].as_str().unwrap_or(""), &sid[..4.min(sid.len())])
 }
 
 /// Every event in the log, oldest first. shortcut: reads all month files each time; keep an index when the log grows large.
@@ -192,8 +195,9 @@ pub fn search(data: &Path, words: &[String], limit: usize) -> Vec<String> {
 /// person last looked, held ones and the trash. Each item is `{session, node, line}`; a carried node shows once.
 /// One node as the person reads it: `label · state · due · session name` (no ids).
 fn person_line(name: &str, n: &Value) -> String {
-    let mut parts = vec![n["label"].as_str().unwrap_or("").to_string()];
-    if let Some(s) = n.get("state").and_then(Value::as_str) { parts.push(s.to_string()); }
+    let mark = if n.get("mark").is_some() { "! " } else { "" };
+    let mut parts = vec![format!("{mark}{}", n["label"].as_str().unwrap_or(""))];
+    if let Some(s) = n.get("state").and_then(Value::as_str) { parts.push(crate::i18n::t(&format!("state-{s}")).to_string()); }
     if let Some(d) = n.get("due").or_else(|| n.get("at")).and_then(Value::as_str) { parts.push(d.to_string()); }
     parts.push(name.chars().take(30).collect());
     parts.join(" · ")
@@ -344,9 +348,11 @@ mod tests {
         fs::write(dir.path().join(format!("{me}.json")), map(json!([{"id":"q","label":"Pick a store","isOpen":true,"memid":"m1"},{"id":"x","label":"old","isOpen":false}]))).unwrap();
         fs::write(dir.path().join(format!("{other}.json")), map(json!([{"id":"a","label":"Store choice","isOpen":true,"memid":"m1","opened":{"at":1}},{"id":"copy","label":"Pick a store","memid":"m1"},
             {"id":"b","label":"unrelated","detail":"the long sentence about a Warehouse","isOpen":true,"memid":"m9","opened":{"at":now}}]))).unwrap();
+        fs::write(dir.path().join("eeeeeeee-0000-0000-0000-000000000005.json"), map(json!([{"id":"d","label":"Store → SQLite","kind":"conclusion","state":"done","detail":"One file is enough. Postgres was too much.","memid":"m1","opened":{"at":now}}]))).unwrap();
         let lines = list(dir.path(), me, 10);
         assert!(lines[0].starts_with("m1 · Pick a store"), "own open node first");
         assert!(lines.iter().any(|l| l.contains("Store choice")), "another node on the same problem is shown");
+        assert!(lines.iter().any(|l| l.ends_with("· why: One file is enough")), "a decision carries its first reason: {lines:?}");
         assert_eq!(lines.iter().filter(|l| l.contains("Pick a store")).count(), 1, "a carried copy of the same node: one line");
         assert!(lines.iter().any(|l| l.contains("unrelated")), "recent nodes of other sessions follow");
         assert!(!lines.iter().any(|l| l.contains("old")), "own closed nodes are not listed");
@@ -361,9 +367,9 @@ mod tests {
         let d = delta(dir.path(), me);
         assert_eq!(d.len(), 2, "the change on its memory id and the person's mark, not an unrelated node: {d:?}");
         assert!(delta(dir.path(), me).is_empty(), "seen once");
-        assert_eq!(search(dir.path(), &["store".into()], 5).len(), 3);
+        assert_eq!(search(dir.path(), &["store".into()], 5).len(), 4);
         assert_eq!(search(dir.path(), &["warehouse".into()], 5).len(), 1, "the detail is searched too");
-        assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 3);
+        assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 4);
     }
 
     #[test]
@@ -382,6 +388,9 @@ mod tests {
         assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into()], vec!["c".into()], vec!["d".into()]));
         assert!(n("changed").is_empty(), "nothing settled or freed yet");
         assert_eq!(n("check"), vec!["f".to_string()], "the agent's suggestion waits for the person");
+        let line_of = |id: &str| b["marked"].as_array().unwrap().iter().chain(b["held"].as_array().unwrap()).find(|i| i["node"]["id"] == id).unwrap()["line"].as_str().unwrap().to_string();
+        assert!(line_of("b").starts_with("! key"), "a marked node shows it");
+        assert!(line_of("c").contains("On hold") && !line_of("c").contains("postponed"), "the state in the person's words: {}", line_of("c"));
         // A decision on the same problem in a map written later comes first; the suggestion still shows.
         let later = "dddddddd-0000-0000-0000-000000000004";
         fs::write(dir.path().join(format!("{later}.json")), json!({"updatedAt": 9, "nodes": [{"id":"x","label":"decided elsewhere","state":"done","memid":"6"}]}).to_string()).unwrap();

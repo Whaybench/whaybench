@@ -44,7 +44,7 @@ fn tree_of(nodes: &[Value]) -> Tree<'_> {
 fn label_line(n: &Value, current: &str, with_kind: bool) -> (&'static str, String) {
     let badge = kind_of(s(n, "kind")).filter(|_| with_kind).map(|(t, c)| format!("<span class='k' style='background:{c}'>{t}</span>")).unwrap_or_default();
     let class = if s(n, "id") == current { "here" } else if is_open(n) { "open" } else { "shut" };
-    (class, format!("<span class='g'>{}</span>{badge}<span class='t' data-n='{}'>{}</span>", glyph(n, current), e(s(n, "id")), e(s(n, "label"))))
+    (class, format!("<span class='g'>{}</span>{badge}<span class='t' data-n='{}'>{}{}</span>", glyph(n, current), e(s(n, "id")), if n.get("mark").is_some() { "! " } else { "" }, e(s(n, "label"))))
 }
 
 fn frame_tree(nodes: &[Value], current: &str, style: &Style) -> String {

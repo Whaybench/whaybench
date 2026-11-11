@@ -6,8 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The important mark shows as `!` before a node's name in the alerts panel and the map panel, and the map panel's
+  node menu can mark and unmark.
+- In the memory list, a decision carries the first sentence of its reason (`why:`), so another session sees why,
+  not only what.
+
 ### Changed
 
+- The alerts panel shows a node's state in the interface language instead of the stored value.
 - The map update button's tooltip says what it does: it no longer mentions the view panel, which it does not send.
 - The map style fill worker is told all twelve node kinds.
 
