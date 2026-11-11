@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-12
+
+Claude Code and Codex CLI now connect to Whaybench the same way, so a session of one sees what the other
+decided and either can carry the work on.
+
 ### Added
 
 - Claude Code connects the way Codex does: the `context-map` plugin is now only configuration, standard hooks that
