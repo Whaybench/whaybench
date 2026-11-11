@@ -239,6 +239,12 @@ pub fn person(data: &Path, sid: &str, upsert: Value) -> Result<Value> { change_b
 /// `action` numbers the events of one person's action (a move to the trash), so it can be undone as one.
 fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool, action: Option<&str>) -> Result<Value> {
     let path = data.join(format!("{}.json", safe_id(sid)?));
+    // The session and the person (alerts panel, map menu) write the same map: one at a time, or a change is lost.
+    let locks = data.join("cache").join("map-locks");
+    fs::create_dir_all(&locks)?;
+    let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(locks.join(format!("{}.lock", safe_id(sid)?)))?;
+    // SAFETY: flock on a file this function owns; released when it closes at the end of the function.
+    unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) };
     if !input.is_object() { return Err("map update must be an object".into()); }
     if !["nodes", "upsert", "remove", "current"].iter().any(|k| input.get(k).is_some()) {
         return Err("map update requires nodes, upsert, remove or current".into());
@@ -378,14 +384,14 @@ pub fn purge(data: &Path, sid: &str, ids: &[String]) -> Result<usize> {
     Ok(gone.len())
 }
 
-/// At start: nodes in the trash longer than `trash_days` in `settings.json` (180 when unset, 0 = only by hand) go for good.
+/// At start: nodes in the trash longer than `trash_days` (counted from the move to the trash, its last change) in `settings.json` (180 when unset, 0 = only by hand) go for good.
 pub fn empty_old_trash(data: &Path) -> usize {
     let days = read_json(&data.join("settings.json"), Value::Null).ok().and_then(|s| s["trash_days"].as_u64()).unwrap_or(180);
     if days == 0 { return 0; }
     let before = now_ms().saturating_sub(days * 86_400_000);
     let mut n = 0;
     for (sid, nodes, _) in crate::memory::maps(data) {
-        let old: Vec<String> = nodes.iter().filter(|x| x["state"] == "removed" && x["closed"]["at"].as_u64().is_some_and(|t| t < before)).filter_map(|x| x["id"].as_str().map(String::from)).collect();
+        let old: Vec<String> = nodes.iter().filter(|x| x["state"] == "removed" && x["changed"]["at"].as_u64().is_some_and(|t| t < before)).filter_map(|x| x["id"].as_str().map(String::from)).collect();
         if !old.is_empty() { n += purge(data, &sid, &old).unwrap_or(0); }
     }
     n
@@ -449,6 +455,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn writers_at_the_same_time_lose_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let threads: Vec<_> = (0..8).map(|t| { let root = root.clone(); std::thread::spawn(move || {
+            for i in 0..10 {
+                let up = json!([{"id": format!("n{t}-{i}"), "label": "x"}]);
+                if t % 2 == 0 { command(&root, "s", Some(json!({"upsert": up}))).unwrap(); } else { person(&root, "s", up).unwrap(); }
+            }
+        }) }).collect();
+        for h in threads { h.join().unwrap(); }
+        assert_eq!(map_nodes(&root, "s").unwrap().len(), 80, "the session's and the person's writes all stay");
+    }
+
+    #[test]
     fn the_trash_takes_one_action_and_gives_it_back() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let sid = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -480,13 +500,20 @@ mod tests {
         trash(dir.path(), sid, "b", false)?;
         let path = dir.path().join(format!("{sid}.json"));
         let mut m: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
-        for n in m["nodes"].as_array_mut().unwrap() { if n["id"] == "b" { n["closed"]["at"] = json!(1); } }
+        for n in m["nodes"].as_array_mut().unwrap() { if n["id"] == "b" { n["changed"]["at"] = json!(1); } }
         fs::write(&path, m.to_string())?;
         fs::write(dir.path().join("settings.json"), r#"{"trash_days":0}"#)?;
         assert_eq!(empty_old_trash(dir.path()), 0);
         fs::remove_file(dir.path().join("settings.json"))?;
         assert_eq!(empty_old_trash(dir.path()), 1);
         assert!(get("b").is_none());
+        // Closed long ago, trashed now: it waits its 180 days like any other.
+        command(dir.path(), sid, Some(json!({"upsert": [{"id":"old","label":"old","state":"done"}]})))?;
+        let mut m: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        for n in m["nodes"].as_array_mut().unwrap() { if n["id"] == "old" { n["closed"]["at"] = json!(1); } }
+        fs::write(&path, m.to_string())?;
+        trash(dir.path(), sid, "old", false)?;
+        assert_eq!(empty_old_trash(dir.path()), 0);
         Ok(())
     }
 
