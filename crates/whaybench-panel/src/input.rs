@@ -50,7 +50,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         every(1000, move || {
             let now = glib::monotonic_time();
             if now - sent_at.get() < 1_500_000 { hint.set_text(wb_core::i18n::t("sent")); return; }
-            hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", (sessions::target(&d).map(|s| cut(&s, 8)).unwrap_or_else(|| wb_core::i18n::t("none").into())).to_string())]));
+            hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", (sessions::focus(&d).map(|s| cut(&s, 8)).unwrap_or_else(|| wb_core::i18n::t("none").into())).to_string())]));
         });
     }
     let shift = Rc::new(Cell::new(false));
@@ -67,7 +67,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             }
             let buffer = view.buffer();
             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().to_string();
-            let session = sessions::target(&d);
+            let session = sessions::focus(&d);
             match route(&text, session.as_deref()) {
                 Route::Nothing => {}
                 Route::Typed => {

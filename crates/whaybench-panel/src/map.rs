@@ -188,7 +188,7 @@ fn import_menu(d: &Data, items: &Items) {
 /// The menu of an imported map: read only, by purpose.
 fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title: &str) -> Items {
     let items = Items::new();
-    let session = sessions::target(d);
+    let session = sessions::focus(d);
     let tree = tree_of(data);
     if let Some(n) = node {
         let refer = items.sub();
@@ -263,7 +263,7 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
 fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(String, String)>) -> Items {
     if let Some(path) = imported_of(scope) { return imported_menu(d, data, node, path, scope.map_or("", |x| x.1.as_str())); }
     let items = Items::new();
-    let session = sessions::target(d);
+    let session = sessions::focus(d);
     let tree = tree_of(data);
     if let Some(n) = node {
         let (id, label) = (s(n, "id").to_string(), s(n, "label").to_string());
@@ -478,7 +478,7 @@ fn style_chosen(d: &Data, panel: &Rc<RefCell<Panel>>, scope: Option<&(String, St
     // A read-only panel has no session to ask: what is there is drawn.
     if imported_of(scope).is_some() { status::say(d, &wb_core::i18n::f("map-style-2", &[("a1", style.name.clone())]), 5); return; }
     record::decide("map", "style changed", "the person chose", &[("panel", panel_key(scope).to_string()), ("style", id)]);
-    let session = sessions::target(d);
+    let session = sessions::focus(d);
     let Some(session) = session else {
         if style.frame().is_some() { status::say(d, &wb_core::i18n::f("map-style-2", &[("a1", (style.name).to_string())]), 5); } else { status::say(d, &wb_core::i18n::f("map-style-not-shown-no-session", &[("a1", (style.name).to_string())]), 6); }
         return;
@@ -660,7 +660,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
     let ask = {
         let (d, extra, scope) = (d.clone(), extra.clone(), scope.clone());
         Rc::new(move || {
-            let Some(session) = sessions::target(&d) else { status::say(&d, wb_core::i18n::t("map-tidy-not-run-no-session"), 6); return };
+            let Some(session) = sessions::focus(&d) else { status::say(&d, wb_core::i18n::t("map-tidy-not-run-no-session"), 6); return };
             let text = update_request(scope.as_ref().map(|(i, l)| (i.as_str(), l.as_str())), extra.text().trim(), mapstyles::find(&d, &mapstyles::current(&d, panel_key(scope.as_ref()))).as_ref());
             extra.set_text("");
             if sessions::queue_prompt(&d, &session, &text) {

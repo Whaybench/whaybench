@@ -67,7 +67,9 @@ pub fn read(d: &Data, source: &Source) -> Option<(Vec<Value>, String, String)> {
         Source::File(p) => {
             let v: Value = serde_json::from_str(&fs::read_to_string(p).ok()?).ok()?;
             let title = if s(&v, "title").is_empty() { p.file_stem()?.to_string_lossy().to_string() } else { s(&v, "title").to_string() };
-            Some((v.get("nodes")?.as_array()?.clone(), title, s(&v, "from").to_string()))
+            // A session's own map names its session, a saved one where it came from.
+            let from = if s(&v, "from").is_empty() { s(&v, "sessionId") } else { s(&v, "from") };
+            Some((v.get("nodes")?.as_array()?.clone(), title, from.to_string()))
         }
         Source::Session(id, root) => {
             let map = sessions::map_of(d, id)?;

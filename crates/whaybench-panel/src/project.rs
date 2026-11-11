@@ -261,7 +261,7 @@ fn stamp_of(st: &Store, pid: &str) -> String {
 /// A request for the chosen session's AI; only to one that is running.
 fn request(p: &P, ask: &str) {
     let Some(pid) = &p.pid else { return };
-    let Some(session) = sessions::target(&p.d) else { p.path.set_text(wb_core::i18n::t("request-not-sent-no-session-selected")); return };
+    let Some(session) = sessions::focus(&p.d) else { p.path.set_text(wb_core::i18n::t("request-not-sent-no-session-selected")); return };
     let text = wb_core::i18n::ai_f("project-this-session-edits-the-project", &[("pid", (pid).to_string()), ("ask", (ask).to_string())]);
     if sessions::queue_prompt(&p.d, &session, &text) { status::say(&p.d, wb_core::i18n::t("request-sent-selected-session"), 5); }
     else { p.path.set_text(wb_core::i18n::t("request-not-sent-session-is-off-2")); }
@@ -568,11 +568,11 @@ fn open_source(p: &P, o: &Value) {
     }
     let (session, node) = (s(o, "session"), s(o, "node"));
     if session.is_empty() { return; }
-    sessions::set_focus(&p.d, &sessions::current_id(&p.d, session), wb_core::i18n::t("project"));
-    status::focus_app(&p.d, "dev.whaybench.map");
-    let (d, node) = (p.d.clone(), node.to_string());
-    // The map first has to change to that session.
-    glib::timeout_add_local_once(Duration::from_millis(1500), move || status::send(&d, "map", json!({"do": "pick", "node": node})));
+    // Opening a source is looking at its map, which is a file: the chosen session stays, and no session is woken.
+    let sid = sessions::current_id(&p.d, session);
+    let path = p.d.root.join(format!("{sid}.json"));
+    if path.is_file() { crate::mapimport::show(&p.d, &path, &sessions::session_name(&p.d, &sid), Some(node)); }
+    else { status::say(&p.d, &wb_core::i18n::f("source-not-opened-no-file", &[("path", path.display().to_string())]), 8); }
 }
 
 fn clicked(s_: &Shared, uri: &str) {

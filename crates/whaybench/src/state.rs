@@ -321,11 +321,16 @@ impl App {
         if let Some(w) = self.windows.get(&id) { w.toplevel().unwrap().send_close(); }
     }
 
-    /// The conversation in front is the chosen session, so the map, answer and files panels follow it: the front tab of
-    /// the conversation panel chosen last, whatever free panel lies above it. Only a change counts: a session chosen
-    /// elsewhere stays chosen.
+    /// The conversation in front is the chosen session, so the map, answer and files panels follow it and requests go
+    /// to it: the front tab of the conversation panel chosen last, whatever free panel lies above it, else any
+    /// conversation tab left. With no conversation tab left, no session is chosen. Only a change counts.
     pub fn sync_focus(&mut self) {
-        let Some(tab) = self.surface.by_choice().find_map(|p| self.terms.get(&p.tab().id)).cloned() else { return };
+        let front = self.surface.by_choice().find_map(|p| self.terms.get(&p.tab().id))
+            .or_else(|| self.surface.by_choice().flat_map(|p| p.tabs.iter()).find_map(|t| self.terms.get(&t.id))).cloned();
+        let Some(tab) = front else {
+            if self.focused_term.take().is_some() { wb_core::sessions::clear_focus(&self.data); }
+            return;
+        };
         let session = std::fs::read_to_string(wb_core::sessions::tab_file(&self.data, &tab)).ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
             .and_then(|v| v.get("session").and_then(|s| s.as_str()).map(String::from));

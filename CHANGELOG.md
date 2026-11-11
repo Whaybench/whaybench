@@ -49,6 +49,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
   arrives.
 - After `/resume` opens a session running in the background, the tab follows it again and the empty session left
   behind is stopped: the relay finds Claude Code's note of the opening in the transcript, as the old plugin did.
+- Requests (Tidy, the input panel, project and map requests) go only to the session the person chose: the
+  conversation tab in front. Closing that tab makes the next conversation tab the chosen one; with none left, no
+  session is chosen and nothing is sent, instead of falling back to the session whose map changed last.
+- Opening a project item's source shows that session's map read-only, as an imported map, instead of making that
+  session the chosen one.
 - The map tool finds its session outside a Whaybench tab too: the hooks note the session by the agent's process,
   which is also the MCP server's parent; the tab is the fallback.
 
