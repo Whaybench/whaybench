@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v5
       # The packages' .deb files are kept in GitHub's cache (saved only when the job succeeds), so a slow or broken
       # Ubuntu mirror costs one download, not every run. One list for CI and Release: a tag finds what main stored.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/apt-debs
           key: apt-debs-${{ hashFiles('.github/apt-packages.txt') }}
