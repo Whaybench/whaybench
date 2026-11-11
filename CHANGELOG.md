@@ -35,6 +35,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
   Route shows a step back into an earlier branch as "Back". Kanban has an On hold column and shows dropped nodes
   crossed out under Done. Questions shows ideas, and a decision that resolves a question as its answer. Focus and
   the other styles count dropped nodes as closed.
+- Map marks: ✕ for a dropped node and ‖ for one on hold, in the map panel, its styles and Claude's map text.
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).

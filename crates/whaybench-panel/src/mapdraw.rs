@@ -33,7 +33,7 @@ fn kind_of(k: &str) -> Option<(&'static str, &'static str)> {
 
 fn glyph(n: &Value, current: &str) -> &'static str {
     if s(n, "id") == current { return "●"; }
-    match s(n, "state") { "plan" => "□", "doing" => "◐", "done" => "✓", "changed" => "✎", _ => if n.get("isOpen") != Some(&Value::Bool(false)) { "◇" } else { "✓" } }
+    match s(n, "state") { "plan" => "□", "doing" => "◐", "done" => "✓", "changed" => "✎", "dropped" => "✕", "postponed" => "‖", _ => if n.get("isOpen") != Some(&Value::Bool(false)) { "◇" } else { "✓" } }
 }
 
 struct Tree<'a> { kids: HashMap<&'a str, Vec<&'a Value>>, by: HashMap<&'a str, &'a Value> }

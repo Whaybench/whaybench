@@ -19,6 +19,8 @@ pub fn glyph(n: &Value, current: &str) -> &'static str {
         "doing" => "◐",
         "done" => "✓",
         "changed" => "✎",
+        "dropped" => "✕",
+        "postponed" => "‖",
         _ => if n.get("isOpen") == Some(&Value::Bool(true)) { "◇" } else { "✓" },
     }
 }
@@ -796,6 +798,7 @@ mod tests {
         assert_eq!(glyph(&json!({"id":"a","isOpen":true,"state":"plan"}), ""), "□");
         assert_eq!(glyph(&json!({"id":"a","state":"doing"}), ""), "◐");
         assert_eq!(glyph(&json!({"id":"a","isOpen":false,"state":"changed"}), ""), "✎");
+        assert_eq!((glyph(&json!({"id":"a","isOpen":false,"state":"dropped"}), ""), glyph(&json!({"id":"a","isOpen":true,"state":"postponed"}), "")), ("✕", "‖"));
     }
     fn map() -> Value {
         json!({"current":"d","nodes":[{"id":"t","isOpen":false,"label":"top"},{"id":"a","parent":"t","isOpen":false},{"id":"b","parent":"a","isOpen":false},{"id":"c","parent":"t","isOpen":false},{"id":"d","parent":"c","isOpen":false},{"id":"lost","parent":"none","isOpen":true}]})

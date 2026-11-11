@@ -8,11 +8,12 @@ export function asText(map: ContextMap) {
 }
 
 // The mark before a node: where the conversation is, else the part's state, else open or settled.
-// □ work that could be coded now but waits; ◇ an open question or idea, thought about and paused.
-const STATE_GLYPH = { plan: '□', doing: '◐', done: '✓', changed: '✎' } as const
+// □ work that could be coded now but waits; ◇ an open question or idea, thought about and paused;
+// ✕ dropped; ‖ put on hold by the person.
+const STATE_GLYPH: Record<string, string> = { plan: '□', doing: '◐', done: '✓', changed: '✎', dropped: '✕', postponed: '‖' }
 export function glyph(node: MapNode, current?: string) {
   if (node.id === current) return '●'
-  if (node.state) return STATE_GLYPH[node.state]
+  if (node.state && STATE_GLYPH[node.state]) return STATE_GLYPH[node.state]
   return node.isOpen ? '◇' : '✓'
 }
 
