@@ -145,7 +145,7 @@ impl Surface {
     /// layout can always be picked up again, also after a restart. Settings windows and their dialogs stay above all.
     /// Within each group the order stays as it is.
     pub fn keep_order(&mut self) {
-        let held = self.held();
+        let held = self.lies_flat();
         let mut tagged: Vec<(u8, Panel)> = std::mem::take(&mut self.panels).into_iter().enumerate()
             .map(|(i, p)| (if p.modal { 2 } else if held(i) { 0 } else { 1 }, p)).collect();
         tagged.sort_by_key(|t| t.0);
@@ -158,9 +158,18 @@ impl Surface {
         move |i| h.walls.iter().any(|w| w.0 == i) || h.vertical.iter().chain(&h.horizontal).any(|(a, b)| *a == i || *b == i)
     }
 
-    /// Panels that hold on to nothing, apart from settings windows: they lie above the joint lines too.
-    pub fn free(&self) -> Vec<u64> {
+    /// For each panel in order: whether it lies in the layout. A panel over one below it floats even when one of its
+    /// edges happens to touch a wall or a neighbour, so the joint lines under it do not show through.
+    fn lies_flat(&self) -> impl Fn(usize) -> bool + use<> {
         let held = self.held();
+        let over = |a: &Rect, b: &Rect| a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom();
+        let floats: Vec<bool> = self.panels.iter().enumerate().map(|(i, p)| self.panels[..i].iter().any(|q| !q.modal && over(&p.rect, &q.rect))).collect();
+        move |i| held(i) && !floats.get(i).copied().unwrap_or(false)
+    }
+
+    /// Panels that float, apart from settings windows: they lie above the joint lines too.
+    pub fn free(&self) -> Vec<u64> {
+        let held = self.lies_flat();
         self.panels.iter().enumerate().filter(|(i, p)| !p.modal && !held(*i)).map(|(_, p)| p.pid).collect()
     }
 
@@ -645,6 +654,14 @@ mod tests {
         assert_eq!(s.by_choice().map(|p| p.pid).collect::<Vec<_>>(), [held, free]);
         s.panels.retain(|p| p.pid != held);
         assert_eq!(s.front(), Some(free), "a closed panel is passed over");
+    }
+
+    #[test]
+    fn a_panel_over_others_floats_even_when_an_edge_touches() {
+        // Two panels side by side, and one over both whose left edge sits on the wall.
+        let s = surface(&[Rect::new(0.0, 0.0, 700.0, 900.0), Rect::new(708.0, 0.0, 792.0, 900.0), Rect::new(0.0, 600.0, 1000.0, 100.0)]);
+        assert!(s.held()(2), "its left edge holds on to the wall");
+        assert_eq!(s.free(), vec![s.panels[2].pid], "the one on top floats; the two below stay in the layout");
     }
 
     #[test]
