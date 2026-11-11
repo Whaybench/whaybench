@@ -76,59 +76,134 @@ pub fn blocks(md: &str) -> Vec<Block> {
     out
 }
 
-fn text_label(markup: &str) -> gtk::Label {
-    let l = gtk::Label::new(None);
-    l.set_markup(markup);
-    l.set_xalign(0.0);
-    l.set_wrap(true);
-    l.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    l.set_selectable(true);
-    l
+/// A table as lines of text, each column as wide as its widest cell, so it can be selected with the rest.
+pub fn table_lines(rows: &[Vec<String>]) -> Vec<String> {
+    let plain: Vec<Vec<String>> = rows.iter().map(|r| r.iter().map(|c| strip_markup(c)).collect()).collect();
+    let cols = plain.iter().map(Vec::len).max().unwrap_or(0);
+    let width = |x: usize| plain.iter().filter_map(|r| r.get(x)).map(|c| c.chars().map(cell_width).sum::<usize>()).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..cols).map(width).collect();
+    plain.iter().map(|r| (0..cols).map(|x| {
+        let c = r.get(x).map(String::as_str).unwrap_or("");
+        let pad = widths[x] - c.chars().map(cell_width).sum::<usize>();
+        format!("{c}{}", " ".repeat(pad))
+    }).collect::<Vec<_>>().join("  │  ").trim_end().to_string()).collect()
 }
 
-/// Fills `into` with the document.
+/// Wide characters (Hangul, CJK) take two columns of a monospace font.
+fn cell_width(c: char) -> usize { if ('\u{1100}'..='\u{11FF}').contains(&c) || ('\u{2E80}'..='\u{A4CF}').contains(&c) || ('\u{AC00}'..='\u{D7A3}').contains(&c) || ('\u{F900}'..='\u{FAFF}').contains(&c) || ('\u{FF00}'..='\u{FF60}').contains(&c) { 2 } else { 1 } }
+
+fn strip_markup(m: &str) -> String {
+    let mut out = String::new();
+    let mut tag = false;
+    for c in m.chars() { match c { '<' => tag = true, '>' if tag => tag = false, _ if !tag => out.push(c), _ => {} } }
+    out.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
+}
+
+/// Markup split at its links: (markup, link address) pieces, since a text view's markup has no links.
+fn pieces(markup: &str) -> Vec<(String, Option<String>)> {
+    let mut out = Vec::new();
+    let mut rest = markup;
+    while let Some(at) = rest.find("<a href=\"") {
+        out.push((rest[..at].to_string(), None));
+        let after = &rest[at + 9..];
+        let Some(q) = after.find("\">") else { break };
+        let Some(end) = after.find("</a>") else { break };
+        out.push((after[q + 2..end].to_string(), Some(strip_markup(&after[..q]))));
+        rest = &after[end + 4..];
+    }
+    out.push((rest.to_string(), None));
+    out.into_iter().filter(|(m, _)| !m.is_empty()).collect()
+}
+
+/// Fills `into` with the document as one read-only text view: the whole answer selects and copies as one text.
 pub fn show(md: &str, into: &gtk::Box) {
-    for b in blocks(md) {
+    let view = gtk::TextView::new();
+    view.set_editable(false);
+    view.set_cursor_visible(false);
+    view.set_wrap_mode(gtk::WrapMode::WordChar);
+    view.add_css_class("answer");
+    let buf = view.buffer();
+    let tag = |name: &str, f: &dyn Fn(&gtk::TextTag)| { let t = gtk::TextTag::new(Some(name)); f(&t); buf.tag_table().add(&t); };
+    tag("h1", &|t| { t.set_scale(1.45); t.set_weight(700); });
+    tag("h2", &|t| { t.set_scale(1.25); t.set_weight(700); });
+    tag("h3", &|t| { t.set_scale(1.1); t.set_weight(700); });
+    tag("code", &|t| { t.set_family(Some("monospace")); t.set_left_margin(12); });
+    tag("head", &|t| { t.set_weight(700); });
+    tag("rule", &|t| { t.set_foreground(Some("gray")); });
+    tag("gap", &|t| { t.set_pixels_below_lines(8); });
+    let mut it = buf.end_iter();
+    let mut links = 0;
+    let all = blocks(md);
+    let last = all.len().saturating_sub(1);
+    for (i, b) in all.into_iter().enumerate() {
+        let start = buf.create_mark(None, &it, true);
         match b {
             Block::Text { markup, class, indent } => {
-                let l = text_label(&markup);
-                l.set_margin_start(indent * 16);
-                if !class.is_empty() { l.add_css_class(class); }
-                into.append(&l);
-            }
-            Block::Code(text) => {
-                let l = gtk::Label::new(Some(&text));
-                l.set_xalign(0.0);
-                l.set_selectable(true);
-                l.add_css_class("code");
-                let scroll = gtk::ScrolledWindow::new();
-                scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
-                scroll.set_propagate_natural_height(true);
-                scroll.set_child(Some(&l));
-                into.append(&scroll);
-            }
-            Block::Table(rows) => {
-                let grid = gtk::Grid::new();
-                for (y, row) in rows.iter().enumerate() {
-                    for (x, cell) in row.iter().enumerate() {
-                        let l = text_label(cell);
-                        l.add_css_class("cell");
-                        if y == 0 { l.add_css_class("head"); }
-                        l.set_hexpand(true);
-                        grid.attach(&l, x as i32, y as i32, 1, 1);
+                for (m, link) in pieces(&markup) {
+                    let from = buf.create_mark(None, &it, true);
+                    buf.insert_markup(&mut it, &m);
+                    if let Some(url) = link {
+                        links += 1;
+                        let t = gtk::TextTag::new(Some(&format!("link{links}\u{1}{url}")));
+                        t.set_underline(gtk::pango::Underline::Single);
+                        t.set_foreground(Some("#1e66f5"));
+                        buf.tag_table().add(&t);
+                        buf.apply_tag(&t, &buf.iter_at_mark(&from), &it);
                     }
+                    buf.delete_mark(&from);
                 }
-                into.append(&grid);
+                let s = buf.iter_at_mark(&start);
+                if !class.is_empty() { buf.apply_tag_by_name(class, &s, &it); }
+                if indent > 0 {
+                    let t = gtk::TextTag::new(None);
+                    t.set_left_margin(indent * 16);
+                    buf.tag_table().add(&t);
+                    buf.apply_tag(&t, &buf.iter_at_mark(&start), &it);
+                }
             }
-            Block::Rule => into.append(&gtk::Separator::new(gtk::Orientation::Horizontal)),
+            Block::Code(text) => { buf.insert(&mut it, &text); buf.apply_tag_by_name("code", &buf.iter_at_mark(&start), &it); }
+            Block::Table(rows) => {
+                for (y, line) in table_lines(&rows).iter().enumerate() {
+                    if y > 0 { buf.insert(&mut it, "\n"); }
+                    let from = buf.create_mark(None, &it, true);
+                    buf.insert(&mut it, line);
+                    if y == 0 { buf.apply_tag_by_name("head", &buf.iter_at_mark(&from), &it); }
+                    buf.delete_mark(&from);
+                }
+                buf.apply_tag_by_name("code", &buf.iter_at_mark(&start), &it);
+            }
+            Block::Rule => { buf.insert(&mut it, "────────"); buf.apply_tag_by_name("rule", &buf.iter_at_mark(&start), &it); }
         }
+        if i < last { buf.insert(&mut it, "\n"); }
+        buf.apply_tag_by_name("gap", &buf.iter_at_mark(&start), &it);
+        buf.delete_mark(&start);
     }
+    // A press on a link opens it, unless the press was the end of a selection.
+    let click = gtk::GestureClick::new();
+    {
+        let view = view.clone();
+        click.connect_released(move |_, _, x, y| {
+            if view.buffer().has_selection() { return; }
+            let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
+            let Some(at) = view.iter_at_location(bx, by) else { return };
+            let Some(url) = at.tags().iter().filter_map(|t| t.name()).find_map(|n| n.split_once('\u{1}').map(|(_, u)| u.to_string())) else { return };
+            gtk::UriLauncher::new(&url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |_| {});
+        });
+    }
+    view.add_controller(click);
+    into.append(&view);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     fn text(markup: &str, class: &'static str, indent: i32) -> Block { Block::Text { markup: markup.into(), class, indent } }
+    #[test]
+    fn tables_line_up_and_links_split_out() {
+        let rows = vec![vec!["ＡＢ".to_string(), "b".to_string()], vec!["a <b>x</b>".to_string(), "longer".to_string()]];
+        assert_eq!(table_lines(&rows), ["ＡＢ  │  b", "a x   │  longer"], "a wide character is two columns");
+        assert_eq!(pieces("see <a href=\"https://a.b/?x=1&amp;y\">here</a> now"), [("see ".to_string(), None), ("here".to_string(), Some("https://a.b/?x=1&y".to_string())), (" now".to_string(), None)]);
+    }
     #[test]
     fn paragraphs_headings_inline() {
         assert_eq!(blocks("# Title\n\ntext **bold** `code` <tag>\n"), [text("Title", "h1", 0), text("text <b>bold</b> <tt>code</tt> &lt;tag&gt;", "", 0)]);

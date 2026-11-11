@@ -6,6 +6,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The answer panel selects across paragraphs, lists, code and tables: the answer is one read-only text, so a
+  drag can go past a block, Ctrl+A selects it all and Ctrl+C copies it. Tables are lined-up text in a monospace
+  font; links still open on a click.
+
 ## [0.3.0] - 2026-11-12
 
 Claude Code and Codex CLI now connect to Whaybench the same way, so a session of one sees what the other
