@@ -67,33 +67,3 @@ export async function applyGraft($: EngineInterface, sessionId: string) {
   })
   await writeMap($, sessionId, { upsert })
 }
-
-// Deletions from Whaybench's map menu: <session id>.edit.json = { remove: [ids], lift: [ids] }.
-// remove drops a node with everything under it; lift drops only the node, its children moving up
-// to its parent. Whaybench keeps a copy of what was dropped before asking.
-export async function applyEdit($: EngineInterface, sessionId: string) {
-  const path = `${PATCHES}/${sessionId}.edit.json`
-  if (!(await $.fs.exists(path))) return
-  let edit: { remove?: string[]; lift?: string[] } = {}
-  try {
-    edit = JSON.parse(String(await $.fs.read(path)))
-  } catch {
-    edit = {}
-  }
-  await $.process.run(['rm', '-f', path]).catch(() => undefined)
-  const remove = Array.isArray(edit.remove) ? edit.remove.filter(i => typeof i === 'string') : []
-  const lift = Array.isArray(edit.lift) ? edit.lift.filter(i => typeof i === 'string') : []
-  if (!remove.length && !lift.length) return
-  // A lifted node's children move up to its parent; then the lifted and removed nodes go in one change.
-  const parents = new Map((await mapNow($)).nodes.map(n => [n.id, n.parent ?? '']))
-  const moved = new Set<string>()
-  for (const id of lift) {
-    if (!parents.has(id)) continue
-    const up = parents.get(id) ?? ''
-    for (const [child, p] of parents) if (p === id) parents.set(child, up), moved.add(child)
-    parents.delete(id)
-  }
-  const upsert = [...moved].filter(id => parents.has(id)).map(id => ({ id, parent: parents.get(id) ?? '' }))
-  await writeMap($, sessionId, { upsert, remove: [...lift, ...remove] })
-  await logLine($, sessionId, 'decide', 'map', 'map file applied', undefined, { kind: 'delete', removed: remove.length, lifted: lift.length })
-}

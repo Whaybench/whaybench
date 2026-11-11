@@ -26,6 +26,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Map nodes: kinds `task`, `appointment`, `problem`, `fact` and `rule`, and a `detail` field for what does not fit
   the short label (shown on hover in the map and alerts panels, searched by `whaybench memory search`). Claude is
   told a label rule per kind.
+- Trash: deleting from the map menu, or moving to the trash from the alerts panel, keeps the nodes in the alerts
+  panel's trash instead of a `maps/deleted-…` copy. Restore puts back what that one deletion changed (nodes changed
+  since stay as they are, and you are told); delete for good or empty the trash by hand, or after `trash_days`
+  (180 by default) at start. Claude does not see the trash, and a regrouping of its map leaves it alone.
+- A session takes the person's changes to its map (alerts panel, map menu) into its own view at the next prompt.
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).

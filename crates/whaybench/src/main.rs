@@ -119,6 +119,7 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     record::install_panic_hook();
     wb_core::sessions::save_lost_maps(&data);
     wb_core::sessions::prune(&data);
+    wb_core::map::empty_old_trash(&data.root);
 
     let again = std::env::args().skip(1).collect::<Vec<_>>();
     let result = start::prepare().and_then(|_| serve(&data, &run_id, apps, no_session));

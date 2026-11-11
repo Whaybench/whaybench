@@ -124,6 +124,8 @@ active) or `"keep_mb"` (the size all of them may take) in its `settings.json`, f
 A whole conversation goes at once, at the next start; saved maps in `maps` stay. Claude Code deletes its own
 conversations after 30 days unless its `cleanupPeriodDays` setting says otherwise; Whaybench then saves the map
 to `maps` as `auto-map-…`. Claude Code and Codex keep their own conversations where they always do.
+Map nodes you delete wait in the trash of the alerts panel, where they can be restored as they were; after 180 days
+they go for good at the next start (`"trash_days"` in `settings.json`, `0` to empty it only by hand).
 
 ## Make it yours
 

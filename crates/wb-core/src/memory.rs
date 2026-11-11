@@ -55,7 +55,7 @@ pub fn file_touched(data: &Path, sid: &str, op: &str, path: &str, node: Option<&
 }
 
 /// Every session's map as stored: (session id, its nodes, when it was last written).
-fn maps(data: &Path) -> Vec<(String, Vec<Value>, i64)> {
+pub(crate) fn maps(data: &Path) -> Vec<(String, Vec<Value>, i64)> {
     let mut out = Vec::new();
     for f in fs::read_dir(data).into_iter().flatten().flatten() {
         let name = f.file_name().to_string_lossy().to_string();
@@ -81,7 +81,7 @@ pub fn line(sid: &str, n: &Value) -> String {
 }
 
 /// Every event in the log, oldest first. shortcut: reads all month files each time; keep an index when the log grows large.
-fn events(data: &Path) -> Vec<Value> {
+pub(crate) fn events(data: &Path) -> Vec<Value> {
     let mut files: Vec<PathBuf> = fs::read_dir(data.join("memory").join("events")).into_iter().flatten().flatten().map(|f| f.path()).collect();
     files.sort();
     files.iter().flat_map(|f| fs::read_to_string(f).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect::<Vec<Value>>()).collect()
@@ -225,6 +225,14 @@ pub fn board(data: &Path) -> Value {
                 changed.push(json!({"session": s, "node": n, "line": format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::t("alerts-unblocked"), names[s.as_str()])}));
             }
         }
+    }
+    // The action that put each node in the trash: the last event that set it to removed.
+    if !trash.is_empty() {
+        let mut by: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+        for e in events(data).into_iter().filter(|e| e["data"]["state"][1] == "removed") {
+            if let (Some(sub), Some(a)) = (e["subject"].as_str(), e.get("action")) { by.insert(sub.to_string(), a.clone()); }
+        }
+        for t in &mut trash { let sub = format!("{}/{}", t["session"].as_str().unwrap_or(""), t["node"]["id"].as_str().unwrap_or("")); t["action"] = by.get(&sub).cloned().unwrap_or(Value::Null); }
     }
     json!({"due": due, "marked": marked, "changed": changed, "check": [], "held": held, "trash": trash})
 }

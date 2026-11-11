@@ -133,16 +133,6 @@ fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str)
     Ok(path)
 }
 
-/// Asks the map mod to drop nodes: `remove` with everything under them, `lift` only the node.
-fn edit(d: &Data, session: &str, remove: &[String], lift: &[String]) -> std::io::Result<()> {
-    let dir = d.root.join("map-patches");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{session}.edit.json"));
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, json!({"remove": remove, "lift": lift}).to_string())?;
-    std::fs::rename(tmp, path)
-}
-
 /// A menu item that runs a closure: collected, then attached when the menu opens.
 struct Items { menu: gio::Menu, group: gio::SimpleActionGroup, n: Rc<std::cell::Cell<u32>> }
 
@@ -335,30 +325,27 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
     }
     items.menu.append_section(None, &section.menu);
     if session.is_some() { let more = items.sub(); import_menu(d, &more); items.menu.append_section(None, &more.menu); }
-    // Deleting is a submenu, so it takes two presses; a copy of what goes is kept first.
+    // Deleting is a submenu, so it takes two presses; what goes waits in the trash, restorable from the alerts panel.
     if let (Some(n), Some(target)) = (node, session.as_ref()) {
         let (id, label) = (s(n, "id").to_string(), s(n, "label").to_string());
         let below = tree.below(&id).len();
         let drop = items.sub();
-        let act = |remove: Vec<String>, lift: Vec<String>, what: String| {
-            let (d2, data2, t2, label2, id2) = (d.clone(), data.clone(), target.clone(), label.clone(), id.clone());
-            let n = remove.len() + lift.len();
-            move || {
-                let done = export(&d2, &data2, Some(&id2), &label2, "deleted-").and_then(|copy| edit(&d2, &t2, &remove, &lift).map(|_| copy));
-                match done {
-                    Ok(copy) => {
-                        record::decide("map", "delete", &what, &[("session", t2.clone()), ("node", id2.clone())]);
-                        status::say(&d2, &wb_core::i18n::f("deleted-nodes-copy-restorable-by-import", &[("a1", (cut(&label2, 24)).to_string()), ("n", (n).to_string()), ("a2", (copy.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()).to_string())]), 8);
-                    }
-                    Err(e) => status::say(&d2, &wb_core::i18n::f("delete-failed", &[("e", (e).to_string())]), 8),
+        let act = |branch: bool, what: String| {
+            let (d2, t2, label2, id2) = (d.clone(), target.clone(), label.clone(), id.clone());
+            let n = if branch { below + 1 } else { 1 };
+            move || match wb_core::map::trash(&d2.root, &t2, &id2, branch) {
+                Ok(_) => {
+                    record::decide("map", "delete", &what, &[("session", t2.clone()), ("node", id2.clone())]);
+                    status::say(&d2, &wb_core::i18n::f("moved-to-trash", &[("a1", cut(&label2, 24)), ("n", n.to_string())]), 8);
                 }
+                Err(e) => status::say(&d2, &wb_core::i18n::f("delete-failed", &[("e", e.to_string())]), 8),
             }
         };
         if below > 0 {
-            drop.add(&wb_core::i18n::f("delete-whole-branch-including-below", &[("below", (below).to_string())]), true, act(vec![id.clone()], vec![], "whole branch".into()));
-            drop.add(wb_core::i18n::t("delete-node-only-nodes-below-move"), true, act(vec![], vec![id.clone()], "node only".into()));
+            drop.add(&wb_core::i18n::f("delete-whole-branch-including-below", &[("below", (below).to_string())]), true, act(true, "whole branch".into()));
+            drop.add(wb_core::i18n::t("delete-node-only-nodes-below-move"), true, act(false, "node only".into()));
         } else {
-            drop.add(wb_core::i18n::t("delete-node"), true, act(vec![id.clone()], vec![], "node".into()));
+            drop.add(wb_core::i18n::t("delete-node"), true, act(true, "node".into()));
         }
         let sec = items.sub();
         sec.menu.append_submenu(Some(wb_core::i18n::t("delete")), &drop.menu);
@@ -781,7 +768,10 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         let signature = format!("{}{text}{counts}{:?}", path.display(), wb_core::theme::load_active(&d));
         if panel.borrow().signature == signature { return; }
         panel.borrow_mut().signature = signature;
-        panel.borrow_mut().data = serde_json::from_str(&text).ok();
+        // The trash is the alerts panel's; the map shows what is left.
+        let mut data: Option<Value> = serde_json::from_str(&text).ok();
+        if let Some(arr) = data.as_mut().and_then(|m| m["nodes"].as_array_mut()) { arr.retain(|n| n["state"] != "removed"); }
+        panel.borrow_mut().data = data;
         draw(&list, &panel, &d, scope.as_ref(), unit);
         show_style(&stack, &web, &panel, &d, scope.as_ref(), &on_web);
     });

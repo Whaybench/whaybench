@@ -78,6 +78,16 @@ export function summary(map: ContextMap) {
 
 export type Change = Partial<MapNode> & { id: string; parent?: string }
 
+// The map as stored, taken into this session's view: the person's choices (alerts panel, map menu) are written to the
+// file, so the session sees them at its next prompt.
+export async function refreshMap($: EngineInterface, sessionId: string) {
+  const run = await $.process.run([WHAYBENCH, 'map', '--data-dir', SHARE_DIR, sessionId])
+  if (run.exitCode !== 0) return
+  const saved = JSON.parse(run.stdout) as StoredMap & { current?: string | null }
+  if (!Array.isArray(saved.nodes)) return
+  await update($, map, () => ({ nodes: saved.nodes, current: saved.current ?? undefined, turn: saved.turn, version: saved.version }))
+}
+
 // Every change of the map goes through `whaybench map`, which keeps the rules of a change
 // for every agent: merge by id, subtrees removed together, stamps, no broken references. What it saved
 // becomes this session's map; a change it refuses throws with its reason and leaves the map as it was.

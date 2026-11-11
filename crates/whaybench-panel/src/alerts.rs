@@ -47,17 +47,52 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
             if let Some(t) = item["node"].get("detail").and_then(Value::as_str) { label.set_tooltip_text(Some(t)); }
             let row = gtk::ListBoxRow::new();
             row.set_child(Some(&label));
-            row.set_widget_name(&format!("{}\t{}\t{}", item["session"].as_str().unwrap_or(""), item["node"]["id"].as_str().unwrap_or(""), item["node"].get("mark").is_some()));
+            row.set_widget_name(&format!("{}\t{}\t{}\t{}", item["session"].as_str().unwrap_or(""), item["node"]["id"].as_str().unwrap_or(""), item["node"].get("mark").is_some(), if key == "trash" { item["action"].as_str().unwrap_or("-") } else { "" }));
             list.append(&row);
         }
     }
+}
+
+fn say_error(d: &Data, e: impl std::fmt::Display) { status::say(d, &wb_core::i18n::f("alerts-not-written", &[("e", e.to_string())]), 8); }
+
+/// Back from the trash as the action left it; nodes changed since stay where they are, and the person is told.
+fn restore(d: &Data, action: &str) {
+    match wb_core::map::restore(&d.root, action) {
+        Ok(kept) if kept.is_empty() => status::say(d, t("alerts-restored"), 5),
+        Ok(kept) => status::say(d, &wb_core::i18n::f("alerts-restored-kept", &[("n", kept.len().to_string())]), 8),
+        Err(e) => say_error(d, e),
+    }
+}
+
+/// Gone for good: the given trash items (session, node id).
+fn purge(d: &Data, items: &[(String, String)]) {
+    let mut by: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
+    for (s, n) in items { by.entry(s).or_default().push(n.clone()); }
+    for (s, ids) in by { if let Err(e) = wb_core::map::purge(&d.root, s, &ids) { say_error(d, e); } }
+}
+
+fn popup(list: &gtk::ListBox, menu: &gio::Menu, group: &gio::SimpleActionGroup, x: f64, y: f64) {
+    let pop = gtk::PopoverMenu::from_model_full(menu, gtk::PopoverMenuFlags::NESTED);
+    pop.set_parent(list);
+    pop.insert_action_group("a", Some(group));
+    pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    pop.set_has_arrow(false);
+    pop.connect_closed(|p| { let p = p.clone(); glib::idle_add_local_once(move || p.unparent()); });
+    pop.popup();
+}
+
+fn item(menu: &gio::Menu, group: &gio::SimpleActionGroup, name: &str, label: &str, f: impl Fn() + 'static) {
+    menu.append(Some(t(label)), Some(&format!("a.{name}")));
+    let act = gio::SimpleAction::new(name, None);
+    act.connect_activate(move |_, _| f());
+    group.add_action(&act);
 }
 
 /// The person's choice for one node, written to its session's map as theirs.
 fn choose(d: &Data, sid: &str, node: &str, change: Value) {
     let mut c = change;
     c["id"] = json!(node);
-    if let Err(e) = wb_core::map::person(&d.root, sid, json!([c])) { status::say(d, &wb_core::i18n::f("alerts-not-written", &[("e", e.to_string())]), 8); }
+    if let Err(e) = wb_core::map::person(&d.root, sid, json!([c])) { say_error(d, e); }
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
@@ -91,38 +126,52 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         click.connect_pressed(move |g, _, x, y| {
             let Some(r) = list2.row_at_y(y as i32) else { return };
             let name = r.widget_name().to_string();
-            let parts: Vec<String> = name.split('\t').map(String::from).collect();
-            let [sid, node, marked] = parts.as_slice() else { return };
-            g.set_state(gtk::EventSequenceState::Claimed);
             let menu = gio::Menu::new();
             let group = gio::SimpleActionGroup::new();
-            let items: [(&str, &str, Value); 6] = [
+            let again = { let (d, l, v) = (d.clone(), list2.clone(), view.clone()); move || redraw(&d, &l, &v, true) };
+            // The trash heading: empty it all (a menu, so it takes two presses).
+            if name == "__trash__" {
+                g.set_state(gtk::EventSequenceState::Claimed);
+                let (d2, again) = (d.clone(), again.clone());
+                item(&menu, &group, "empty", "alerts-empty-trash", move || {
+                    let all: Vec<(String, String)> = memory::board(&d2.root)["trash"].as_array().into_iter().flatten()
+                        .map(|i| (i["session"].as_str().unwrap_or("").to_string(), i["node"]["id"].as_str().unwrap_or("").to_string())).collect();
+                    purge(&d2, &all);
+                    again();
+                });
+                popup(&list2, &menu, &group, x, y);
+                return;
+            }
+            let parts: Vec<String> = name.split('\t').map(String::from).collect();
+            let [sid, node, marked, action] = parts.as_slice() else { return };
+            g.set_state(gtk::EventSequenceState::Claimed);
+            if !action.is_empty() {
+                if action != "-" {
+                    let (d2, a2, again) = (d.clone(), action.clone(), again.clone());
+                    item(&menu, &group, "restore", "alerts-restore", move || { restore(&d2, &a2); again(); });
+                }
+                let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
+                item(&menu, &group, "purge", "alerts-purge", move || { purge(&d2, &[(s2.clone(), n2.clone())]); again(); });
+                popup(&list2, &menu, &group, x, y);
+                return;
+            }
+            let items: [(&str, &str, Value); 5] = [
                 ("done", "alerts-done", json!({"state": "done"})),
                 ("dropped", "alerts-dropped", json!({"state": "dropped"})),
                 ("held", "alerts-hold", json!({"state": "postponed"})),
                 ("reopen", "alerts-reopen", json!({"isOpen": true})),
-                ("trash", "alerts-to-trash", json!({"state": "removed"})),
                 ("mark", if marked == "true" { "alerts-unmark" } else { "alerts-mark" }, json!({"mark": if marked == "true" { Value::Null } else { json!("important") }})),
             ];
             for (name, label, change) in items {
-                menu.append(Some(t(label)), Some(&format!("a.{name}")));
-                let act = gio::SimpleAction::new(name, None);
-                let (d2, l2, v2, s2, n2) = (d.clone(), list2.clone(), view.clone(), sid.clone(), node.clone());
-                act.connect_activate(move |_, _| { choose(&d2, &s2, &n2, change.clone()); redraw(&d2, &l2, &v2, true); });
-                group.add_action(&act);
+                let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
+                item(&menu, &group, name, label, move || { choose(&d2, &s2, &n2, change.clone()); again(); });
             }
-            menu.append(Some(t("alerts-open-session")), Some("a.open"));
-            let open = gio::SimpleAction::new("open", None);
+            // To the trash alone: what is under it moves up, as the map panel's "node only".
+            let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
+            item(&menu, &group, "trash", "alerts-to-trash", move || { if let Err(e) = wb_core::map::trash(&d2.root, &s2, &n2, false) { say_error(&d2, e); } again(); });
             let (d2, s2) = (d.clone(), sid.clone());
-            open.connect_activate(move |_, _| ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "show".into(), s2.clone()]));
-            group.add_action(&open);
-            let pop = gtk::PopoverMenu::from_model_full(&menu, gtk::PopoverMenuFlags::NESTED);
-            pop.set_parent(&list2);
-            pop.insert_action_group("a", Some(&group));
-            pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-            pop.set_has_arrow(false);
-            pop.connect_closed(|p| { let p = p.clone(); glib::idle_add_local_once(move || p.unparent()); });
-            pop.popup();
+            item(&menu, &group, "open", "alerts-open-session", move || ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "show".into(), s2.clone()]));
+            popup(&list2, &menu, &group, x, y);
         });
     }
     list.add_controller(click);

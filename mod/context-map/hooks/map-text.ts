@@ -17,7 +17,9 @@ export function glyph(node: MapNode, current?: string) {
 }
 
 // Flattens the tree into drawable rows, depth-first in the given order, skipping folded branches.
-export function rows(nodes: MapNode[], folded: Set<string> = new Set(), wide = false) {
+export function rows(all: MapNode[], folded: Set<string> = new Set(), wide = false) {
+  // The trash is the person's, in the alerts panel; the map shows what is left.
+  const nodes = all.filter(n => n.state !== 'removed')
   const ids = new Set(nodes.map(n => n.id))
   const kids = (id?: string) =>
     nodes.filter(n => (id === undefined ? !n.parent || !ids.has(n.parent) : n.parent === id))

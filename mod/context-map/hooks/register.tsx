@@ -8,9 +8,9 @@ import { answersHooks } from './answers'
 import { filesHooks, filesRecordHooks } from './files'
 import { drainInbox } from './inbox'
 import { logLine } from './log'
-import { carriedSummary, changeMap, inheritMap, mapNow, writeMap } from './map-data'
+import { carriedSummary, changeMap, inheritMap, mapNow, refreshMap, writeMap } from './map-data'
 import { memoryHooks, memoryNote } from './memory'
-import { applyEdit, applyGraft, applyPatches } from './map-patches'
+import { applyGraft, applyPatches } from './map-patches'
 import { DESCRIPTION, mapToolHooks, SCHEMA } from './map-tool'
 import { paneHooks } from './pane'
 import { PANE, PREFIX, initPaths } from './paths'
@@ -47,6 +47,7 @@ export const register: Register = on => {
     const changed = e.command ? [] : await changedFilesNote($).catch(() => [])
     // The person follows the conversation on the map, so it is kept up in the turn things happen.
     const mapNote = e.command ? [] : [MAP_NOTE]
+    if (!e.command) await refreshMap($, await $.session.id()).catch(() => undefined)
     const memory = e.command ? [] : await memoryNote($).catch(() => [])
     if (inWhaybench && !e.command) { mapNote.unshift(viewNoteDue ? VIEW_NOTE : VIEW_SHORT); viewNoteDue = false }
     return next({ ...e, context: [...(e.context ?? []), ...rewindNote, ...changed, ...memory, ...mapNote] })
@@ -137,7 +138,6 @@ export const register: Register = on => {
         await drainInbox($, sessionId).catch(() => undefined)
         await applyPatches($, sessionId).catch(() => undefined)
         await applyGraft($, sessionId).catch(() => undefined)
-        await applyEdit($, sessionId).catch(() => undefined)
       })().finally(() => (busy = false))
     })
 

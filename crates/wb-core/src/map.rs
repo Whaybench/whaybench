@@ -1,7 +1,7 @@
 //! The conversation map file of a session: read it, or merge a change into it. Every agent
 //! writes through here, so the rules of a change — merge by id, subtrees removed together, stamps the
 //! program records, no broken references — are kept in one place.
-use std::{collections::HashSet, fs, io, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::{BTreeMap, HashSet}, fs, io, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
 
 use serde_json::{Value, json};
 
@@ -13,6 +13,13 @@ const STAMPED: [&str; 4] = ["opened", "changed", "closed", "visits"];
 const PERSON_ONLY: [&str; 1] = ["mark"];
 /// States that close a node; every other state, and none, leaves it open. `removed` is the trash.
 const CLOSING: [&str; 3] = ["done", "dropped", "removed"];
+
+/// A new id no other program or call shares: `<prefix><time>-<process>-<count>`.
+fn fresh(prefix: &str) -> String {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{prefix}{:x}-{:x}-{n:x}", now_ms(), std::process::id())
+}
 
 pub(crate) fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
@@ -128,7 +135,7 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value, person: bool) 
         let mut merged = before.clone().unwrap_or_else(|| json!({"id":id,"label":id,"isOpen":true}));
         for (key, value) in raw.as_object().ok_or("node must be an object")? {
             if STAMPED.contains(&key.as_str()) || (!person && PERSON_ONLY.contains(&key.as_str())) { continue; }
-            if value.is_null() && PERSON_ONLY.contains(&key.as_str()) { merged.as_object_mut().unwrap().shift_remove(key); } else { merged[key] = value.clone(); }
+            if value.is_null() && (person || PERSON_ONLY.contains(&key.as_str())) { merged.as_object_mut().unwrap().shift_remove(key); } else { merged[key] = value.clone(); }
         }
         // Open or closed follows the state: a closing state closes, closing without one means done, reopening
         // drops a closing state.
@@ -142,9 +149,7 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value, person: bool) 
         }
         // A new node without a memory id the agent chose starts its own.
         if before.is_none() && merged.get("memid").and_then(Value::as_str).is_none_or(str::is_empty) {
-            static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            merged["memid"] = json!(format!("m{:x}-{:x}-{n:x}", stamp["at"].as_u64().unwrap_or(0), std::process::id()));
+            merged["memid"] = json!(fresh("m"));
         }
         for key in ["parent", "reason", "detail"] {
             if merged[key] == "" { merged.as_object_mut().unwrap().shift_remove(key); }
@@ -217,12 +222,13 @@ fn carried(data: &Path, sid: &str, source: &Value) {
     if let Err(e) = crate::memory::record(data, at, &[ev]) { crate::log::warn("map", "memory not written", &e.to_string(), &[]); }
 }
 
-fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> { change_by(data, sid, input, latest, false) }
+fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> { change_by(data, sid, input, latest, false, None) }
 
 /// The person's change from the alert panel: it may set the person's fields (the mark), and is recorded as the person's.
-pub fn person(data: &Path, sid: &str, upsert: Value) -> Result<Value> { change_by(data, sid, json!({"upsert": upsert}), false, true) }
+pub fn person(data: &Path, sid: &str, upsert: Value) -> Result<Value> { change_by(data, sid, json!({"upsert": upsert}), false, true, None) }
 
-fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool) -> Result<Value> {
+/// `action` numbers the events of one person's action (a move to the trash), so it can be undone as one.
+fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool, action: Option<&str>) -> Result<Value> {
     let path = data.join(format!("{}.json", safe_id(sid)?));
     if !input.is_object() { return Err("map update must be an object".into()); }
     if !["nodes", "upsert", "remove", "current"].iter().any(|k| input.get(k).is_some()) {
@@ -243,6 +249,9 @@ fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool) -
         }
         let mut nodes = Vec::new();
         upsert(&mut nodes, &replacement, &stamp, false)?;
+        // The trash is the person's: a regrouping that leaves its nodes out does not empty it.
+        let kept: Vec<Value> = before.iter().filter(|o| o["state"] == "removed" && !nodes.iter().any(|n| n["id"] == o["id"])).cloned().collect();
+        nodes.extend(kept);
         nodes
     } else { map["nodes"].as_array().unwrap().clone() };
     if let Some(changes) = input.get("upsert") {
@@ -287,9 +296,93 @@ fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool) -
     // shortcut: every write counts as the session's own; a side worker's fill is not told apart yet.
     let at = stamp["at"].as_i64().unwrap_or(0);
     let source = if person { "person".to_string() } else { format!("session/{sid}") };
-    let events = crate::memory::diff(&source, sid, at, &before, map["nodes"].as_array().map(Vec::as_slice).unwrap_or(&[]));
+    let mut events = crate::memory::diff(&source, sid, at, &before, map["nodes"].as_array().map(Vec::as_slice).unwrap_or(&[]));
+    if let Some(a) = action { for e in &mut events { e["action"] = json!(a); } }
     if let Err(e) = crate::memory::record(data, at, &events) { crate::log::warn("map", "memory not written", &e.to_string(), &[]); }
     Ok(map)
+}
+
+fn map_nodes(data: &Path, sid: &str) -> Result<Vec<Value>> {
+    Ok(read_json(&data.join(format!("{}.json", safe_id(sid)?)), json!({"nodes":[]}))?["nodes"].as_array().cloned().unwrap_or_default())
+}
+
+/// The person moves a node to the trash: with its whole branch, or alone, its children moving up to its parent.
+/// The events share one action number, the one `restore` takes.
+pub fn trash(data: &Path, sid: &str, id: &str, branch: bool) -> Result<String> {
+    let nodes = map_nodes(data, sid)?;
+    let node = nodes.iter().find(|n| n["id"] == id).ok_or("no such node")?;
+    let mut ups = vec![json!({"id": id, "state": "removed"})];
+    if branch {
+        let mut under: HashSet<&str> = HashSet::from([id]);
+        loop {
+            let before = under.len();
+            for n in &nodes { if n["parent"].as_str().is_some_and(|p| under.contains(p)) { under.insert(n["id"].as_str().unwrap_or("")); } }
+            if under.len() == before { break; }
+        }
+        // What an earlier action put in the trash stays with that action.
+        ups.extend(nodes.iter().filter(|n| n["id"] != id && under.contains(n["id"].as_str().unwrap_or("")) && n["state"] != "removed").map(|n| json!({"id": n["id"], "state": "removed"})));
+    } else {
+        let up = node.get("parent").cloned().unwrap_or(json!(""));
+        ups.extend(nodes.iter().filter(|n| n["parent"] == id).map(|n| json!({"id": n["id"], "parent": up})));
+    }
+    let action = fresh("a");
+    change_by(data, sid, json!({"upsert": ups}), false, true, Some(&action))?;
+    Ok(action)
+}
+
+/// Undoes one trash action: every node it changed gets its fields back, unless the node changed since; those are
+/// left as they are and returned (`session/node id`).
+pub fn restore(data: &Path, action: &str) -> Result<Vec<String>> {
+    let evs = crate::memory::events(data);
+    let mut by_session: BTreeMap<String, Vec<(String, Value)>> = BTreeMap::new();
+    let mut since: HashSet<String> = HashSet::new();
+    for (i, e) in evs.iter().enumerate().filter(|(_, e)| e["action"] == action && e["type"] == "node.changed") {
+        let Some((sid, id)) = e["subject"].as_str().and_then(|s| s.split_once('/')) else { continue };
+        if evs[i + 1..].iter().any(|l| l["subject"] == e["subject"] && l["action"] != action) { since.insert(format!("{sid}/{id}")); }
+        by_session.entry(sid.to_string()).or_default().push((id.to_string(), e["data"].clone()));
+    }
+    let mut kept = Vec::new();
+    for (sid, items) in by_session {
+        let nodes = map_nodes(data, &sid)?;
+        let mut ups = Vec::new();
+        for (id, fields) in items {
+            let now = nodes.iter().find(|n| n["id"] == id.as_str());
+            let fields = fields.as_object().cloned().unwrap_or_default();
+            let as_left = !since.contains(&format!("{sid}/{id}")) && now.is_some_and(|n| fields.iter().all(|(k, v)| n.get(k).unwrap_or(&Value::Null) == &v[1]));
+            if !as_left { kept.push(format!("{sid}/{id}")); continue; }
+            let mut up = json!({"id": id});
+            for (k, v) in fields { up[k] = v[0].clone(); }
+            ups.push(up);
+        }
+        if !ups.is_empty() { change_by(data, &sid, json!({"upsert": ups}), false, true, Some(&fresh("a")))?; }
+    }
+    Ok(kept)
+}
+
+/// Empties the trash for good: the given nodes of one session, if they are in the trash. A node outside the trash
+/// under one of them moves up to the top level instead of going with it.
+pub fn purge(data: &Path, sid: &str, ids: &[String]) -> Result<usize> {
+    let nodes = map_nodes(data, sid)?;
+    let gone: HashSet<&str> = nodes.iter().filter(|n| n["state"] == "removed" && ids.iter().any(|i| n["id"] == i.as_str())).filter_map(|n| n["id"].as_str()).collect();
+    if gone.is_empty() { return Ok(0); }
+    let lift: Vec<Value> = nodes.iter().filter(|n| n["state"] != "removed" && n["parent"].as_str().is_some_and(|p| gone.contains(p))).map(|n| json!({"id": n["id"], "parent": ""})).collect();
+    let mut input = json!({"remove": gone.iter().collect::<Vec<_>>()});
+    if !lift.is_empty() { input["upsert"] = json!(lift); }
+    change_by(data, sid, input, false, true, None)?;
+    Ok(gone.len())
+}
+
+/// At start: nodes in the trash longer than `trash_days` in `settings.json` (180 when unset, 0 = only by hand) go for good.
+pub fn empty_old_trash(data: &Path) -> usize {
+    let days = read_json(&data.join("settings.json"), Value::Null).ok().and_then(|s| s["trash_days"].as_u64()).unwrap_or(180);
+    if days == 0 { return 0; }
+    let before = now_ms().saturating_sub(days * 86_400_000);
+    let mut n = 0;
+    for (sid, nodes, _) in crate::memory::maps(data) {
+        let old: Vec<String> = nodes.iter().filter(|x| x["state"] == "removed" && x["closed"]["at"].as_u64().is_some_and(|t| t < before)).filter_map(|x| x["id"].as_str().map(String::from)).collect();
+        if !old.is_empty() { n += purge(data, &sid, &old).unwrap_or(0); }
+    }
+    n
 }
 
 /// `whaybench map SESSION --end-turn`: one more finished turn, so the stamps of the next changes say in
@@ -348,6 +441,46 @@ pub fn free_path(dir: &Path, name: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_trash_takes_one_action_and_gives_it_back() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let sid = "aaaaaaaa-0000-0000-0000-000000000001";
+        command(dir.path(), sid, Some(json!({"upsert": [{"id":"t","label":"top","isOpen":true},{"id":"a","parent":"t","label":"a","isOpen":true},
+            {"id":"b","parent":"a","label":"b","isOpen":false},{"id":"c","parent":"a","label":"c","isOpen":true}]})))?;
+        let get = |id: &str| map_nodes(dir.path(), sid).unwrap().into_iter().find(|n| n["id"] == id);
+        // Alone: the children move up, and come back under it.
+        let act = trash(dir.path(), sid, "a", false)?;
+        assert_eq!((get("a").unwrap()["state"].as_str(), get("b").unwrap()["parent"].as_str()), (Some("removed"), Some("t")));
+        assert!(restore(dir.path(), &act)?.is_empty());
+        assert_eq!((get("a").unwrap().get("state"), get("a").unwrap()["isOpen"].as_bool(), get("b").unwrap()["parent"].as_str()), (None, Some(true), Some("a")));
+        assert_eq!(get("b").unwrap()["state"], "done", "a closed child keeps its own state");
+        // The branch: all of it, and a node changed since stays as it is.
+        let act = trash(dir.path(), sid, "a", true)?;
+        assert!(["a", "b", "c"].iter().all(|i| get(i).unwrap()["state"] == "removed"));
+        let regrouped = command(dir.path(), sid, Some(json!({"nodes": [{"id":"t","label":"top","isOpen":true}]})))?;
+        assert_eq!(regrouped["nodes"].as_array().unwrap().len(), 4, "a regrouping leaves the trash alone");
+        person(dir.path(), sid, json!([{"id":"c","label":"renamed"}]))?;
+        assert_eq!(restore(dir.path(), &act)?, vec![format!("{sid}/c")]);
+        assert_eq!((get("a").unwrap()["isOpen"].as_bool(), get("c").unwrap()["state"].as_str()), (Some(true), Some("removed")));
+        // Emptying: what is outside the trash under a purged node moves to the top level.
+        trash(dir.path(), sid, "a", false)?;
+        assert_eq!(purge(dir.path(), sid, &["a".into(), "c".into(), "t".into()])?, 2, "only nodes in the trash go");
+        assert!(get("a").is_none() && get("c").is_none() && get("t").is_some());
+        assert_eq!(get("b").unwrap()["parent"], "t");
+        // Old trash goes at start; 0 days keeps it.
+        trash(dir.path(), sid, "b", false)?;
+        let path = dir.path().join(format!("{sid}.json"));
+        let mut m: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        for n in m["nodes"].as_array_mut().unwrap() { if n["id"] == "b" { n["closed"]["at"] = json!(1); } }
+        fs::write(&path, m.to_string())?;
+        fs::write(dir.path().join("settings.json"), r#"{"trash_days":0}"#)?;
+        assert_eq!(empty_old_trash(dir.path()), 0);
+        fs::remove_file(dir.path().join("settings.json"))?;
+        assert_eq!(empty_old_trash(dir.path()), 1);
+        assert!(get("b").is_none());
+        Ok(())
+    }
 
     #[test]
     fn open_follows_the_state_and_the_mark_is_the_persons() -> Result<()> {
