@@ -314,7 +314,9 @@ fn new_project_id(st: &Store, name: &str) -> String {
 }
 
 /// The documents to show: those added as add-ons. Older ones without a template stay on file, out of sight.
-fn shown_docs(project: &Value) -> Vec<Value> { list(project, "docs").iter().filter(|d| !s(d, "addon").is_empty()).cloned().collect() }
+/// Every document of the project gets a tab: it is Markdown whatever made it (a template add-on, or a format the
+/// program no longer has).
+fn shown_docs(project: &Value) -> Vec<Value> { list(project, "docs").to_vec() }
 
 fn page_for(p: &mut P) -> String {
     let Some(pid) = p.pid.clone() else { return String::new() };

@@ -41,6 +41,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - The context percentage in the sessions panel: nothing wrote it. Context and plan usage show in Claude Code's
   status line and under the alerts panel.
 
+### Fixed
+
+- The project panel shows every document of a project as a tab, also one made in a format the program no longer
+  has (it is Markdown all the same); before, only documents added from a template add-on showed.
+- A session the person ended no longer comes back in the session list as not running when its own end hook
+  arrives.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added
