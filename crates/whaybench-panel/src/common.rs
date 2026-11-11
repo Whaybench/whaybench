@@ -95,7 +95,6 @@ flowboxchild {{ padding: 0; min-height: 0; }}
 .cell {{ padding: 3px 8px; border: 1px solid {line}; }}
 .head {{ font-weight: bold; background: {bar}; }}
 .h1 {{ font-size: {h1}pt; font-weight: bold; }} .h2 {{ font-size: {h2}pt; font-weight: bold; }} .h3 {{ font-size: {h3}pt; font-weight: bold; }}
-textview.answer, textview.answer text {{ background: transparent; color: inherit; }}
 .status {{ font-size: {small}pt; padding: 0 8px; }}
 listview, gridview, columnview, treeview, .view, window.dialog, dialog {{ background: {bg}; color: {text}; }}
 listview > row, gridview > child {{ color: {text}; }}

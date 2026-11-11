@@ -4,7 +4,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use gtk::prelude::*;
 use serde_json::{Value, json};
-use wb_core::{paths::Data, records, sessions, status};
+use wb_core::{paths::Data, records, sessions, status, theme};
+use webkit6::prelude::*;
 
 use crate::{common::{cut, every}, markdown};
 
@@ -30,10 +31,29 @@ fn save(d: &Data, h: &[Value]) {
     if std::fs::write(&tmp, Value::Array(h.to_vec()).to_string()).is_ok() { let _ = std::fs::rename(tmp, history_file(d)); }
 }
 
-struct Widgets { body: gtk::Box, where_: gtk::Label, back: gtk::Button, forward: gtk::Button, drop: gtk::Button, scroll: gtk::ScrolledWindow }
+struct Widgets { web: webkit6::WebView, where_: gtk::Label, back: gtk::Button, forward: gtk::Button, drop: gtk::Button, shown: RefCell<String> }
+
+fn style(d: &Data) -> String {
+    let t = theme::load_active(d);
+    let hex = |c: [f32; 4]| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
+    let ink = format!("#{:02x}{:02x}{:02x}", t.ink[0], t.ink[1], t.ink[2]);
+    format!("html,body{{margin:0;background:{};color:{ink};font:14px/1.55 '{f}',sans-serif}} body{{padding:6px 12px 12px}}\
+      .asked{{opacity:.6;font-size:small;margin-bottom:6px}} p{{margin:6px 0}} ul,ol{{margin:6px 0;padding-left:22px}}\
+      h1{{font-size:16pt;margin:12px 0 6px}} h2{{font-size:14pt;margin:12px 0 6px}} h3{{font-size:12pt;margin:10px 0 4px}} h4,h5,h6{{font-size:11pt;margin:10px 0 3px}}\
+      a{{color:{}}} hr{{border:0;border-top:1px solid {line}}} blockquote{{margin:6px 0;padding-left:10px;border-left:3px solid {line}}}\
+      table{{border-collapse:collapse;margin:6px 0}} td,th{{border:1px solid {line};padding:3px 8px;vertical-align:top;text-align:left}} th{{background:{};word-break:keep-all}}\
+      pre,code{{font-family:'{m}',monospace;font-size:9.5pt}} pre{{white-space:pre-wrap;background:{};padding:6px 8px;border-radius:4px}}",
+      hex(t.panel), hex(t.accent), hex(t.surface), hex(t.surface), line = hex(t.border), f = t.font.replace('\'', ""), m = t.terminal_font.replace('\'', ""))
+}
+
+/// Loads the page unless it is the one shown: a reload would drop the selection and the scroll place.
+fn show(w: &Widgets, page: String) {
+    if *w.shown.borrow() == page { return; }
+    w.web.load_html(&page, Some("about:blank"));
+    *w.shown.borrow_mut() = page;
+}
 
 fn draw(p: &Panel, w: &Widgets, d: &Data) {
-    while let Some(c) = w.body.first_child() { w.body.remove(&c); }
     let (row, place, can_back, can_forward) = if let Some((rows, i)) = &p.related {
         (rows.get(*i), wb_core::i18n::f("related-answers", &[("a1", (time_of(rows[*i]["at"].as_i64().unwrap_or(0), "%m-%d %H:%M")).to_string()), ("a2", (i + 1).to_string()), ("a3", (rows.len()).to_string())]), *i > 0, i + 1 < rows.len())
     } else if let Some(row) = p.history.get(p.pos) {
@@ -47,16 +67,11 @@ fn draw(p: &Panel, w: &Widgets, d: &Data) {
     w.forward.set_sensitive(can_forward);
     w.drop.set_sensitive(row.is_some());
     w.drop.set_tooltip_text(Some(if p.related.is_some() { wb_core::i18n::t("close-related-answers") } else { wb_core::i18n::t("remove-from-history") }));
-    let Some(row) = row else { return };
+    let top = format!("<!doctype html><meta charset='utf-8'><style>{}</style>", style(d));
+    let Some(row) = row else { return show(w, top) };
     let prompt = row.get("prompt").and_then(Value::as_str).unwrap_or("");
-    let head = gtk::Label::new(Some(&format!("{} · {}", time_of(row["at"].as_i64().unwrap_or(0), "%H:%M"), cut(prompt, 120))));
-    head.set_xalign(0.0);
-    head.set_wrap(true);
-    head.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    head.add_css_class("small");
-    w.body.append(&head);
-    markdown::show(row.get("text").and_then(Value::as_str).unwrap_or(""), &w.body);
-    w.scroll.vadjustment().set_value(0.0);
+    let asked = format!("{} · {}", time_of(row["at"].as_i64().unwrap_or(0), "%H:%M"), cut(prompt, 120));
+    show(w, format!("{top}<div class='asked'>{}</div>{}", markdown::escape(&asked), markdown::to_html(row.get("text").and_then(Value::as_str).unwrap_or(""))));
 }
 
 /// The nearest answer in the conversation: a session moved on has none of its own at first.
@@ -79,21 +94,34 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     bar.append(&back);
     bar.append(&forward);
     bar.append(&drop);
-    let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    for m in [8] { body.set_margin_start(m + 2); body.set_margin_end(m + 2); body.set_margin_top(m); body.set_margin_bottom(m); }
-    let scroll = gtk::ScrolledWindow::new();
-    scroll.set_child(Some(&body));
-    scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroll.set_vexpand(true);
+    let web = webkit6::WebView::new();
+    crate::common::web_menu_in_language(&web);
+    crate::common::follow_zoom(&web, &d);
+    web.set_vexpand(true);
+    web.set_hexpand(true);
+    if let Some(settings) = WebViewExt::settings(&web) { settings.set_default_charset("utf-8"); settings.set_enable_javascript(false); }
+    // A link in the answer opens in the view panel; the answer's own page stays.
+    {
+        let d = d.clone();
+        web.connect_decide_policy(move |_, decision, kind| {
+            if kind != webkit6::PolicyDecisionType::NavigationAction && kind != webkit6::PolicyDecisionType::NewWindowAction { return false; }
+            let Some(nav) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>() else { return false };
+            let uri = nav.navigation_action().and_then(|a| a.request()).and_then(|r| r.uri()).map(|u| u.to_string()).unwrap_or_default();
+            if uri.starts_with("about:") { return false; }
+            decision.ignore();
+            if uri.starts_with("http") { let _ = wb_core::view::open(&d, &uri, None); }
+            true
+        });
+    }
     let area = gtk::Box::new(gtk::Orientation::Vertical, 0);
     area.append(&bar);
-    area.append(&scroll);
+    area.append(&web);
     win.set_child(Some(&area));
 
     let history: Vec<Value> = std::fs::read_to_string(history_file(&d)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default();
     let pos = history.len().saturating_sub(1);
     let panel = Rc::new(RefCell::new(Panel { history, pos, related: None, followed: None, last_at: 0 }));
-    let w = Rc::new(Widgets { body, where_, back: back.clone(), forward: forward.clone(), drop: drop.clone(), scroll });
+    let w = Rc::new(Widgets { web, where_, back: back.clone(), forward: forward.clone(), drop: drop.clone(), shown: RefCell::default() });
     draw(&panel.borrow(), &w, &d);
 
     let go = |step: i64, panel: Rc<RefCell<Panel>>, w: Rc<Widgets>, d: Data| move |_: &gtk::Button| {
@@ -178,6 +206,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 }
             }
         }
-        if changed { draw(&panel.borrow(), &w, &d); }
+        // Drawn each time: the page holds the theme's colours, and the same page is not loaded again.
+        let _ = changed;
+        draw(&panel.borrow(), &w, &d);
     });
 }

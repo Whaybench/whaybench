@@ -8,9 +8,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- The answer panel selects across paragraphs, lists, code and tables: the answer is one read-only text, so a
-  drag can go past a block, Ctrl+A selects it all and Ctrl+C copies it. Tables are lined-up text in a monospace
-  font; links still open on a click.
+- The answer panel draws the answer as a web page: tables are real tables with lines and wrapping cells, and a
+  selection goes across paragraphs, lists, code and tables (a drag past a block, Ctrl+A, Ctrl+C). A link opens
+  in the view panel. HTML written in an answer is shown as text.
 
 ## [0.3.0] - 2026-11-12
 
