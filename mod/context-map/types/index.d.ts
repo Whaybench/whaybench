@@ -21,12 +21,10 @@ export type MapNode = {
   mark?: 'important'
   // Where a node taken up from an imported map came from (Whaybench's continue-from-this-map).
   source?: { file: string; node: string; title?: string; path?: string[] }
-  // Recorded by the mod itself, never by Claude: when the node opened, last changed and closed,
-  // and the turns in which it became the conversation's current node.
+  // Recorded by the program, never by Claude: when the node opened, last changed and closed.
   opened?: Stamp
   changed?: Stamp
   closed?: Stamp
-  visits?: number[]
 }
 
 // A moment in the conversation: wall-clock time and the person's turn number.

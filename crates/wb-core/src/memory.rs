@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 use crate::map::Result;
 
 /// Fields a node carries that the memory does not follow: the program's stamps and where the conversation stayed.
-const NOT_FOLLOWED: [&str; 6] = ["id", "opened", "changed", "closed", "visits", "links"];
+const NOT_FOLLOWED: [&str; 5] = ["id", "opened", "changed", "closed", "links"];
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 

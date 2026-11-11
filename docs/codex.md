@@ -50,8 +50,8 @@ Only `whaybench map` writes map files, whatever the agent:
 
 The plugin calls `~/.local/bin/whaybench`, which Whaybench links at start.
 
-`whaybench map` merges by id, removes the nodes under a removed node, and records `opened`, `changed`, `closed`
-and `visits` itself, dropping what the agent sent for them. A duplicate id, a missing parent or current node, a
+`whaybench map` merges by id, removes the nodes under a removed node, and records `opened`, `changed` and `closed`
+itself, dropping what the agent sent for them. A duplicate id, a missing parent or current node, a
 parent loop or a bad id is refused before saving, and the stored map stays. Removing the current node clears
 `current`.
 

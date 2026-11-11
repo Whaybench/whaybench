@@ -115,8 +115,7 @@ pub fn missing(style: &Style, nodes: &[Value], current: &str) -> Vec<(String, Ve
         let mut lacking: Vec<String> = nodes.iter().filter(|n| empty(n, f)).map(|n| s(n, "id").to_string()).collect();
         if f == "reason" {
             // Only the stops on the way here need a reason.
-            let visited: HashSet<String> = nodes.iter().filter(|n| !empty(n, "visits")).map(|n| s(n, "id").to_string()).collect();
-            let on_way = if visited.is_empty() { path_to(nodes, current).iter().map(|n| s(n, "id").to_string()).collect() } else { visited };
+            let on_way: HashSet<String> = path_to(nodes, current).iter().map(|n| s(n, "id").to_string()).collect();
             lacking.retain(|i| on_way.contains(i));
         }
         if !lacking.is_empty() { out.push((f.to_string(), lacking)); }
@@ -177,7 +176,7 @@ mod tests {
     #[test]
     fn only_what_a_worker_can_write_is_asked_and_reasons_only_on_the_way() {
         let st = scratch("mm");
-        put(&st, "x", r#"{"frame":"route","needs":["kind","reason","state","visits"]}"#);
+        put(&st, "x", r#"{"frame":"route","needs":["kind","reason","state"]}"#);
         let style = find(&st.data, "x").unwrap();
         let nodes = vec![json!({"id":"a","label":"a","kind":"note"}), json!({"id":"b","parent":"a","label":"b"}), json!({"id":"c","parent":"a","label":"c"})];
         let need = missing(&style, &nodes, "b");

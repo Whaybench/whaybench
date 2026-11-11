@@ -327,8 +327,8 @@ mod tests {
     fn nodes() -> Vec<Value> {
         vec![
             json!({"id":"a","label":"root","isOpen":true,"kind":"question"}),
-            json!({"id":"b","parent":"a","label":"choice <1>","isOpen":true,"kind":"option","state":"doing","visits":[2],"reason":"why it moved"}),
-            json!({"id":"c","parent":"a","label":"conclusion","isOpen":false,"kind":"conclusion","closed":{"turn":3,"at":1793900000000i64},"visits":[1]}),
+            json!({"id":"b","parent":"a","label":"choice <1>","isOpen":true,"kind":"option","state":"doing","reason":"why it moved"}),
+            json!({"id":"c","parent":"a","label":"conclusion","isOpen":false,"kind":"conclusion","closed":{"turn":3,"at":1793900000000i64}}),
             json!({"id":"d","label":"memo","isOpen":true,"kind":"note","state":"plan"}),
         ]
     }

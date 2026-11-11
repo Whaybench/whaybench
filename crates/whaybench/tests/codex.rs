@@ -61,7 +61,6 @@ fn first_question_two_turns_and_resume_keep_the_map_visible() {
     assert_eq!(read(data.join("latest.json")), first);
     assert_eq!(first["version"], 2);
     assert_eq!(first["nodes"][0]["opened"]["turn"], 0);
-    assert_eq!(first["nodes"][0]["visits"], json!([0]));
     let mut stop = event("Stop");
     stop["turn_id"] = json!("turn1");
     stop["last_assistant_message"] = json!("first turn checked");
@@ -82,7 +81,6 @@ fn first_question_two_turns_and_resume_keep_the_map_visible() {
     assert_eq!(second["nodes"][0], first["nodes"][0]);
     assert_eq!(second["nodes"][1]["opened"]["turn"], 1);
     assert_eq!(second["nodes"][1]["closed"]["turn"], 1);
-    assert_eq!(second["nodes"][1]["visits"], json!([1]));
 
     stop["turn_id"] = json!("turn2");
     stop["last_assistant_message"] = json!("map update in the next turn checked");

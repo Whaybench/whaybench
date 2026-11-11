@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// Fields only the program writes; whatever an agent sends for them is dropped.
-const STAMPED: [&str; 4] = ["opened", "changed", "closed", "visits"];
+const STAMPED: [&str; 3] = ["opened", "changed", "closed"];
 /// Fields only the person sets (through the alert panel); an agent's value is dropped.
 const PERSON_ONLY: [&str; 1] = ["mark"];
 /// States that close a node; every other state, and none, leaves it open. `removed` is the trash.
@@ -278,13 +278,6 @@ fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool, a
         let old = map.get("current").cloned().unwrap_or(Value::Null);
         if old.as_str().is_some_and(|id| gone.contains(id)) { Value::Null } else { old }
     });
-    if current != map["current"] {
-        if let Some(node) = nodes.iter_mut().find(|n| n["id"] == current) {
-            let mut visits = node.get("visits").and_then(Value::as_array).cloned().unwrap_or_default();
-            if visits.last() != Some(&stamp["turn"]) { visits.push(stamp["turn"].clone()); }
-            node["visits"] = json!(visits);
-        }
-    }
     map["nodes"] = json!(nodes);
     map["current"] = current;
     map["sessionId"] = json!(sid);

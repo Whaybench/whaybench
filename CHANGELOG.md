@@ -54,6 +54,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   branch. The times are when the conversation began and was last active, to the minute (session records now
   keep their start). The imported copy also keeps the session the map came from.
 
+### Removed
+
+- The `visits` field of map nodes: where the conversation went is worked out from when nodes were made and changed.
+
 ### Fixed
 
 - The data directory has its `maps` folder from the start, so Open map shows it before any map was saved.
