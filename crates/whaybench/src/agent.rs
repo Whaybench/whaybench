@@ -51,6 +51,21 @@ pub fn record(data: &Data, words: &[String]) -> Result<(), String> {
     done.map_err(|e| e.to_string())
 }
 
+/// `whaybench memory ...`: what the memory holds for a session (3.19).
+pub fn memory(data: &Data, words: &[String]) -> Result<(), String> {
+    let usage = "memory list SESSION | changes SESSION | show MEMID|SESSION/NODE | search WORD...";
+    let root = &data.root;
+    let lines = match words {
+        [op, id] if op == "list" => { let l = wb_core::memory::list(root, id, 100); wb_core::memory::mark_seen(root, id); l }
+        [op, id] if op == "changes" => wb_core::memory::delta(root, id),
+        [op, key] if op == "show" => vec![serde_json::to_string_pretty(&wb_core::memory::show(root, key)).unwrap_or_default()],
+        [op, words @ ..] if op == "search" && !words.is_empty() => wb_core::memory::search(root, words, 50),
+        _ => return Err(usage.into()),
+    };
+    for l in lines { println!("{l}"); }
+    Ok(())
+}
+
 pub fn hook(data: &Data, words: &[String]) -> Result<(), String> {
     if words != ["codex"] { return Err("hook codex".into()); }
     let event = serde_json::from_reader(io::stdin().lock()).map_err(|e| e.to_string())?;

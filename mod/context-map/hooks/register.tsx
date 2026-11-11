@@ -9,6 +9,7 @@ import { filesHooks, filesRecordHooks } from './files'
 import { drainInbox } from './inbox'
 import { logLine } from './log'
 import { carriedSummary, changeMap, inheritMap, mapNow, writeMap } from './map-data'
+import { memoryHooks, memoryNote } from './memory'
 import { applyEdit, applyGraft, applyPatches } from './map-patches'
 import { DESCRIPTION, mapToolHooks, SCHEMA } from './map-tool'
 import { paneHooks } from './pane'
@@ -46,11 +47,13 @@ export const register: Register = on => {
     const changed = e.command ? [] : await changedFilesNote($).catch(() => [])
     // The person follows the conversation on the map, so it is kept up in the turn things happen.
     const mapNote = e.command ? [] : [MAP_NOTE]
+    const memory = e.command ? [] : await memoryNote($).catch(() => [])
     if (inWhaybench && !e.command) { mapNote.unshift(viewNoteDue ? VIEW_NOTE : VIEW_SHORT); viewNoteDue = false }
-    return next({ ...e, context: [...(e.context ?? []), ...rewindNote, ...changed, ...mapNote] })
+    return next({ ...e, context: [...(e.context ?? []), ...rewindNote, ...changed, ...memory, ...mapNote] })
   })
 
   safetyHooks(on)
+  memoryHooks(on)
   filesRecordHooks(on)
   sessionRecordHooks(on)
 

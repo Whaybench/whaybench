@@ -19,6 +19,7 @@ use wb_core::{log as record, paths};
 
 const USAGE: &str = "whaybench [--data-dir DIR] [--agent codex] [--app COMMAND]... [--no-session]    the agent is Claude Code unless given
 whaybench map [--data-dir DIR] SESSION [--write < CHANGE.json | --take-over < MAP.json | --start-from < MAP.json | --end-turn]    read, change or take over a conversation map, or count a finished turn
+whaybench memory [--data-dir DIR] list SESSION | changes SESSION | show MEMID|SESSION/NODE | search WORD...    what the memory holds: a session's memory list, what changed since it last looked, one node, a search
 whaybench record [--data-dir DIR] SESSION touch|state|alive|off|answer|moved|carry-from ...    a session's record, state, heartbeat, answers
 whaybench hook [--data-dir DIR] codex < EVENT.json    run by Codex's hooks
 whaybench ctl [--data-dir DIR] session new [MAP-FROM] | show ID | type ID TEXT | end ID
@@ -39,7 +40,7 @@ struct Args {
 fn parse_args(mut args: Vec<String>) -> Result<Args, String> {
     let mut out = Args { data_dir: None, apps: Vec::new(), no_session: false, codex: false, ctl: None };
     // ctl, map, record and hook take the words after them as their own; map, record and hook stay as the first of them.
-    if args.first().is_some_and(|a| matches!(a.as_str(), "ctl" | "map" | "record" | "hook")) {
+    if args.first().is_some_and(|a| matches!(a.as_str(), "ctl" | "map" | "record" | "hook" | "memory")) {
         if args[0] == "ctl" { args.remove(0); }
         out.ctl = Some(Vec::new());
     }
@@ -83,6 +84,7 @@ fn main() {
             Some("map") => agent::map(&data, &rest[1..]),
             Some("record") => agent::record(&data, &rest[1..]),
             Some("hook") => agent::hook(&data, &rest[1..]),
+            Some("memory") => agent::memory(&data, &rest[1..]),
             _ => ctl::send(&data, &rest),
         };
         if let Err(e) = done { fail(&e); }

@@ -17,6 +17,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   the problem it settles and what is still open under it. The important mark is the person's only.
 - Memory: files a session reads, changes or attaches to a node are recorded as `file.touched` events with the
   node, so every session's nodes about a file can be found by its path (`whaybench record SESSION file …`).
+- Memory list: Claude Code sees, with its first prompt and after a compaction, its own open nodes and the related
+  and recent nodes of other sessions (one line each, up to 100), and on later prompts only what changed for it
+  since. `whaybench memory list | changes | show | search`.
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).
