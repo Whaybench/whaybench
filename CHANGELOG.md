@@ -8,6 +8,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `whaybench hook claude|codex`: one handler for both agents' standard hook events. Codex sessions now get what
+  Claude Code sessions get: the memory list at the start and after a compaction, the memory changes and the files
+  the person changed on each prompt, the view panel note, and file records for what `apply_patch` changed.
 - `whaybench mcp`: the conversation map tool `context_map` over MCP, with the same description and input as
   Claude Code's. Codex now keeps its map with this tool instead of shell commands; Whaybench registers the
   server in Codex's own config and lets the tool run without asking.

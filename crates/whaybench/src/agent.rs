@@ -75,11 +75,14 @@ pub fn statusline(data: &Data) -> Result<(), String> {
 }
 
 pub fn hook(data: &Data, words: &[String]) -> Result<(), String> {
-    if words != ["codex"] { return Err("hook codex".into()); }
+    let name = match words { [a] if a == "claude" || a == "codex" => a.as_str(), _ => return Err("hook claude|codex".into()) };
     let event = serde_json::from_reader(io::stdin().lock()).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let tab = std::env::var("WHAYBENCH_TAB").ok();
-    println!("{}", codex::hook(&data.root, &event, tab.as_deref(), &exe).map_err(|e| e.to_string())?);
+    // Codex runs only inside Whaybench; Claude Code's plugin hooks also run in plain Claude Code sessions.
+    let inside = name == "codex" || std::env::var("WHAYBENCH").is_ok_and(|v| v == "1");
+    let agent = wb_core::hook::Agent { name, tab: tab.as_deref(), inside, exe: &exe };
+    println!("{}", wb_core::hook::run(&data.root, &agent, &event).map_err(|e| e.to_string())?);
     Ok(())
 }
 

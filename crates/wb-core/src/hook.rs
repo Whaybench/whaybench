@@ -1,0 +1,389 @@
+//! The agents' hooks, `whaybench hook claude|codex`: one handler for the standard events Claude Code and Codex both
+//! send (session start, prompt, tool use, notification, stop, end), so the session's record, what the agent is told
+//! each turn, its file records and answers are the same whatever the agent. The map tool itself is `whaybench mcp`.
+use std::{collections::{HashMap, HashSet}, fs, path::Path};
+
+use serde_json::{Value, json};
+
+use crate::{i18n, map::{self, Result, now_ms, read_json, safe_id, text, write_json}, memory, session_record};
+
+pub const EVENTS: [&str; 10] = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
+    "Notification", "Stop", "Interrupt", "SessionEnd", "PreCompact"];
+const EDITS_KEPT: usize = 200;
+const TEXT_KEPT: usize = 40_000;
+
+/// Who runs the hook, and whether it runs inside Whaybench (the view panel is there).
+pub struct Agent<'a> { pub name: &'a str, pub tab: Option<&'a str>, pub inside: bool, pub exe: &'a Path }
+
+fn files_dir(data: &Path) -> std::path::PathBuf { data.join("files") }
+fn state_file(data: &Path, kind: &str, sid: &str) -> std::path::PathBuf { data.join("cache").join("hook").join(format!("{sid}.{kind}.json")) }
+
+/// One event; the result is what the agent reads on stdout.
+pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
+    let sid = safe_id(text(event, "session_id")?)?;
+    let name = text(event, "hook_event_name")?;
+    if !EVENTS.contains(&name) { return Err("unsupported hook event".into()); }
+    // The session list shows what the person asked: neither commands nor Whaybench's own requests.
+    let prompt = if name == "UserPromptSubmit" { Some(text(event, "prompt")?) } else { None };
+    let shown = prompt.filter(|p| !p.starts_with('/') && !p.starts_with('[')).map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect::<String>());
+    let tab = a.tab.map(safe_id).transpose()?;
+    let agent = (a.name == "codex").then_some("codex");
+    let mut record = session_record::touch(data, sid, session_record::Touch { prompt: shown.as_deref(), tab, cwd: event.get("cwd").and_then(Value::as_str), agent })?;
+    let (state, note) = match name {
+        "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => ("working", None),
+        "PermissionRequest" => ("waiting", None),
+        "Notification" if event["notification_type"] != "idle_prompt" => ("waiting", event.get("message").and_then(Value::as_str)),
+        // A session can end mid-turn: no Stop comes, so the end settles it.
+        "SessionEnd" => ("done", Some("ended")),
+        "PreCompact" => ("", None),
+        _ => ("done", None),
+    };
+    if !state.is_empty() { session_record::state(data, sid, state, note)?; }
+    session_record::alive(data, sid, name != "SessionEnd")?;
+    let map_path = data.join(format!("{sid}.json"));
+    if !map_path.exists() {
+        write_json(&map_path, &json!({"sessionId":sid,"nodes":[],"current":null,"version":2,"turn":0,"updatedAt":now_ms()}))?;
+    }
+    if name == "SessionStart" || name == "UserPromptSubmit" {
+        // The panel follows latest.json until the person selects a session; a resumed conversation shows its map.
+        let m = read_json(&map_path, Value::Null)?;
+        map::validate(&m)?;
+        write_json(&data.join("latest.json"), &m)?;
+    }
+    let tool = event["tool_name"].as_str().unwrap_or("");
+    match name {
+        "Stop" => stop(data, a, sid, event, &mut record)?,
+        "PreToolUse" if is_shell(tool) => write_json(&state_file(data, "bash", sid), &json!(now_ms()))?,
+        "PreToolUse" => if let Some(reason) = held_back(data, sid, a, tool, &event["tool_input"]) {
+            return Ok(json!({"hookSpecificOutput": {"hookEventName": name, "permissionDecision": "deny", "permissionDecisionReason": reason}}));
+        },
+        "PostToolUse" => if let Some(context) = after_tool(data, sid, a, tool, event)? { return Ok(context_out(name, &context)); },
+        _ => {}
+    }
+    if name == "SessionStart" || name == "UserPromptSubmit" {
+        let mut parts = Vec::new();
+        if a.name == "codex" {
+            let vars = [("session", sid.to_string()), ("command", crate::codex::shell_quote(a.exe)?)];
+            parts.push(i18n::ai_f("codex-context", &vars));
+            parts.push(i18n::ai_f("codex-map-context", &vars));
+        } else {
+            parts.push(i18n::ai("map-note").to_string());
+        }
+        if a.inside { parts.push(i18n::ai(if name == "SessionStart" { "view-note" } else { "view-short" }).to_string()); }
+        // The whole memory list when the conversation starts, resumes or was compacted; on a prompt, what changed.
+        if name == "SessionStart" {
+            let lines = memory::list(data, sid, 100);
+            memory::mark_seen(data, sid);
+            if !lines.is_empty() { parts.push(i18n::ai_f("memory-whole", &[("lines", lines.join("\n"))])); }
+        } else {
+            let lines = memory::delta(data, sid);
+            if !lines.is_empty() { parts.push(i18n::ai_f("memory-changes", &[("lines", lines.join("\n"))])); }
+            if let Some(changed) = changed_files_note(data, sid) { parts.push(changed); }
+        }
+        return Ok(context_out(name, &parts.join("\n\n")));
+    }
+    Ok(json!({}))
+}
+
+fn context_out(name: &str, context: &str) -> Value { json!({"hookSpecificOutput": {"hookEventName": name, "additionalContext": context}}) }
+
+fn is_shell(tool: &str) -> bool { ["Bash", "shell", "local_shell", "exec_command"].contains(&tool) }
+
+/// The end of a turn: count it once, and keep its answer.
+fn stop(data: &Path, a: &Agent, sid: &str, event: &Value, record: &mut Value) -> Result<()> {
+    let turn = event.get("turn_id").and_then(Value::as_str);
+    let counted = turn.is_some() && record.get("lastCompletedTurn").and_then(Value::as_str) == turn;
+    if counted || event.get("stop_hook_active") == Some(&json!(true)) { return Ok(()); }
+    map::end_turn(data, sid)?;
+    if let Some(turn) = turn {
+        record["lastCompletedTurn"] = json!(turn);
+        write_json(&data.join("sessions").join(format!("{sid}.json")), record)?;
+    }
+    let last = event.get("last_assistant_message").and_then(Value::as_str).unwrap_or("");
+    // Claude Code's transcript holds the turn's every block of text; the last message alone misses what came before tools.
+    let whole = if a.name == "claude" { event.get("transcript_path").and_then(Value::as_str).map(|p| whole_turn(Path::new(p), last)).unwrap_or_default() } else { String::new() };
+    let answer = if whole.trim().is_empty() { last.to_string() } else { whole };
+    if !answer.trim().is_empty() { session_record::answer(data, sid, &json!({"text": answer, "turnId": turn}))?; }
+    Ok(())
+}
+
+/// The text of the turn since the person's last message, from a Claude Code transcript.
+pub fn whole_turn(transcript: &Path, last: &str) -> String {
+    let rows: Vec<Value> = fs::read_to_string(transcript).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let asked = |d: &Value| {
+        let c = &d["message"]["content"];
+        if d["type"] != "user" || d["isMeta"] == true { return false; }
+        if let Some(s) = c.as_str() { return !s.starts_with('<'); }
+        c.as_array().is_some_and(|x| x.iter().any(|b| b["type"] == "text") && !x.iter().any(|b| b["type"] == "tool_result"))
+    };
+    let start = rows.iter().rposition(asked).unwrap_or(0);
+    let parts: Vec<String> = rows[(start + 1).min(rows.len())..].iter().filter(|d| d["type"] == "assistant")
+        .filter_map(|d| d["message"]["content"].as_array().map(|c| c.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<String>().trim().to_string()))
+        .filter(|t| !t.is_empty()).collect();
+    let whole = parts.join("\n\n");
+    if whole.is_empty() || whole.ends_with(last.trim()) { whole } else { format!("{whole}\n\n{}", last.trim()) }
+}
+
+/// The files a tool call read or changed: (path, "read" | "edit").
+fn touched(tool: &str, input: &Value) -> Vec<(String, &'static str)> {
+    let path = input.get("file_path").or_else(|| input.get("notebook_path")).and_then(Value::as_str).map(String::from);
+    match tool {
+        "Read" => path.map(|p| vec![(p, "read")]).unwrap_or_default(),
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => path.map(|p| vec![(p, "edit")]).unwrap_or_default(),
+        // Codex changes files with apply_patch: its patch names each file it adds, updates or deletes.
+        "apply_patch" => input.to_string().replace("\\n", "\n").lines()
+            .filter_map(|l| ["*** Add File: ", "*** Update File: ", "*** Delete File: "].iter().find_map(|h| l.trim_start_matches('"').strip_prefix(h)))
+            .map(|p| (p.trim().trim_end_matches('"').to_string(), "edit")).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// After a tool: its run time when it was a shell command, the files it read or changed with the node the
+/// conversation was on, the edit itself, and the decisions that come with a file read for the first time.
+fn after_tool(data: &Path, sid: &str, a: &Agent, tool: &str, event: &Value) -> Result<Option<String>> {
+    if is_shell(tool) {
+        let from = read_json(&state_file(data, "bash", sid), json!(now_ms()))?.as_u64().unwrap_or(now_ms());
+        let file = files_dir(data).join(format!("{sid}.bash.json"));
+        let mut runs = read_json(&file, json!([]))?.as_array().cloned().unwrap_or_default();
+        runs.push(json!([from, now_ms()]));
+        let skip = runs.len().saturating_sub(500);
+        write_json(&file, &json!(runs[skip..]))?;
+        return Ok(None);
+    }
+    let input = &event["tool_input"];
+    let mut told = None;
+    for (path, op) in touched(tool, input) {
+        let path = if Path::new(&path).is_absolute() { path } else { Path::new(event["cwd"].as_str().unwrap_or("")).join(&path).to_string_lossy().to_string() };
+        let node = map::command(data, sid, None).ok().and_then(|m| m["current"].as_str().map(String::from));
+        let file = files_dir(data).join(format!("{sid}.json"));
+        let mut touches = read_json(&file, json!([]))?.as_array().cloned().unwrap_or_default();
+        touches.push(json!({"path": path, "op": op, "at": now_ms(), "node": node}));
+        let skip = touches.len().saturating_sub(1000);
+        write_json(&file, &json!(touches[skip..]))?;
+        memory::file_touched(data, sid, op, &path, node.as_deref())?;
+        if a.name == "claude" && (tool == "Edit" || tool == "Write") {
+            let cut = |t: &str| if t.chars().count() > TEXT_KEPT { format!("{}\n…", t.chars().take(TEXT_KEPT).collect::<String>()) } else { t.to_string() };
+            let (before, after, whole) = if tool == "Edit" { (input["old_string"].as_str().unwrap_or(""), input["new_string"].as_str().unwrap_or(""), false) }
+                else { (event["tool_response"]["originalFile"].as_str().unwrap_or(""), input["content"].as_str().unwrap_or(""), true) };
+            let edits_file = files_dir(data).join(format!("{sid}.edits.json"));
+            let mut edits = read_json(&edits_file, json!([]))?.as_array().cloned().unwrap_or_default();
+            edits.push(json!({"path": path, "at": now_ms(), "node": node, "before": cut(before), "after": cut(after), "whole": whole}));
+            let skip = edits.len().saturating_sub(EDITS_KEPT);
+            write_json(&edits_file, &json!(edits[skip..]))?;
+        }
+        if op == "read" {
+            let told_file = state_file(data, "decisions", sid);
+            let mut seen: Vec<String> = serde_json::from_value(read_json(&told_file, json!([]))?).unwrap_or_default();
+            if !seen.contains(&path) {
+                seen.push(path.clone());
+                write_json(&told_file, &json!(seen))?;
+                let lines = decisions_for(data, sid, &path);
+                if !lines.is_empty() { told = Some(i18n::ai_f("file-decisions", &[("path", path.clone()), ("lines", lines.join("\n"))])); }
+            }
+        }
+    }
+    Ok(told)
+}
+
+/// The sessions whose maps this one carries on, itself first.
+fn lineage(data: &Path, sid: &str) -> Vec<String> {
+    let links = read_json(&data.join("forks").join("inherited.json"), json!({})).unwrap_or(json!({}));
+    let mut ids = vec![sid.to_string()];
+    while let Some(next) = links[ids.last().unwrap().as_str()].as_str() { if ids.len() > 30 || ids.iter().any(|i| i == next) { break; } ids.push(next.to_string()); }
+    ids
+}
+
+/// `*` within a name, `**` across folders, `?` one character.
+fn glob(pattern: &str, path: &str) -> bool {
+    fn go(p: &[u8], s: &[u8]) -> bool {
+        match p {
+            [] => s.is_empty(),
+            [b'*', b'*', rest @ ..] => (0..=s.len()).any(|i| go(rest, &s[i..])),
+            [b'*', rest @ ..] => (0..=s.len()).take_while(|i| *i == 0 || s[i - 1] != b'/').any(|i| go(rest, &s[i..])),
+            [b'?', rest @ ..] => !s.is_empty() && s[0] != b'/' && go(rest, &s[1..]),
+            [c, rest @ ..] => s.first() == Some(c) && go(rest, &s[1..]),
+        }
+    }
+    go(pattern.as_bytes(), path.as_bytes())
+}
+
+/// The settled decisions of the branches a file belongs to: attached to a node, or touched while the talk was on it.
+pub fn decisions_for(data: &Path, sid: &str, path: &str) -> Vec<String> {
+    let ids = lineage(data, sid);
+    let mut nodes_of: HashSet<String> = HashSet::new();
+    for id in &ids {
+        let attached = read_json(&data.join("node-files").join(format!("{id}.json")), json!({})).unwrap_or(json!({}));
+        for (node, patterns) in attached.as_object().into_iter().flatten() {
+            if patterns.as_array().into_iter().flatten().filter_map(Value::as_str).any(|p| glob(p, path)) { nodes_of.insert(node.clone()); }
+        }
+        for t in read_json(&files_dir(data).join(format!("{id}.json")), json!([])).unwrap_or(json!([])).as_array().into_iter().flatten() {
+            if t["path"] == path { if let Some(n) = t["node"].as_str() { nodes_of.insert(n.to_string()); } }
+        }
+    }
+    let nodes = map::command(data, sid, None).ok().and_then(|m| m["nodes"].as_array().cloned()).unwrap_or_default();
+    let by: HashMap<&str, &Value> = nodes.iter().filter_map(|n| Some((n["id"].as_str()?, n))).collect();
+    let decision = |id: &str| by.get(id).is_some_and(|n| !map::is_open(n) && n["kind"] == "conclusion");
+    let parent = |id: &str| by.get(id).and_then(|n| n["parent"].as_str()).unwrap_or("").to_string();
+    let children = |id: &str| nodes.iter().filter(|c| c["parent"] == id).filter_map(|c| c["id"].as_str().map(String::from)).collect::<Vec<_>>();
+    let mut found: Vec<String> = Vec::new();
+    let mut add = |id: &str| if decision(id) && !found.iter().any(|f| f == id) { found.push(id.to_string()); };
+    for id in &nodes_of {
+        if !by.contains_key(id.as_str()) { continue; }
+        add(id);
+        // Below a top-level branch: its settled children, and its siblings' settled ends (the same part of the work).
+        let up = parent(id);
+        if by.contains_key(up.as_str()) {
+            let mut stack = vec![(id.clone(), 0)];
+            while let Some((pid, depth)) = stack.pop() {
+                for c in children(&pid) { add(&c); if depth < 4 { stack.push((c, depth + 1)); } }
+            }
+            if by.contains_key(parent(&up).as_str()) { for c in children(&up) { add(&c); } }
+        }
+        let mut p = up;
+        for _ in 0..10 { if !by.contains_key(p.as_str()) { break; } add(&p); p = parent(&p); }
+    }
+    found.iter().take(15).map(|id| format!("- {}", by[id.as_str()]["label"].as_str().unwrap_or(""))).collect()
+}
+
+/// Files this session read or changed that changed on disk after its last touch, and not while one of its shell
+/// commands ran: most likely the person saved them. Each change once: `only` limits it to one file.
+fn changed_since(data: &Path, sid: &str, only: Option<&str>) -> Vec<(String, u64)> {
+    let mut last: HashMap<String, u64> = HashMap::new();
+    for t in read_json(&files_dir(data).join(format!("{sid}.json")), json!([])).unwrap_or(json!([])).as_array().into_iter().flatten() {
+        let (Some(p), Some(at)) = (t["path"].as_str(), t["at"].as_u64()) else { continue };
+        if only.is_none_or(|o| o == p) { let e = last.entry(p.to_string()).or_default(); *e = (*e).max(at); }
+    }
+    let runs: Vec<(u64, u64)> = read_json(&files_dir(data).join(format!("{sid}.bash.json")), json!([])).unwrap_or(json!([])).as_array().into_iter().flatten()
+        .filter_map(|r| Some((r[0].as_u64()?, r[1].as_u64()?))).collect();
+    let told = read_json(&state_file(data, "changes", sid), json!({})).unwrap_or(json!({}));
+    let mut out = Vec::new();
+    for (path, touched) in last {
+        let Ok(at) = fs::metadata(&path).and_then(|m| m.modified()) else { continue };
+        let at = at.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let own = runs.iter().any(|(f, t)| at + 500 >= *f && at <= t + 1500);
+        if at > touched + 1500 && told[&path].as_u64() != Some(at) && !own { out.push((path, at)); }
+    }
+    out
+}
+
+fn tell_changes(data: &Path, sid: &str, changes: &[(String, u64)]) {
+    let file = state_file(data, "changes", sid);
+    let mut told = read_json(&file, json!({})).unwrap_or(json!({}));
+    for (p, at) in changes { told[p] = json!(at); }
+    let _ = write_json(&file, &told);
+}
+
+fn clock(ms: u64) -> String { chrono::DateTime::from_timestamp_millis(ms as i64).map(|t| t.with_timezone(&chrono::Local).format("%H:%M:%S").to_string()).unwrap_or_default() }
+
+/// For the next prompt: files the person changed since the agent read or changed them.
+fn changed_files_note(data: &Path, sid: &str) -> Option<String> {
+    let changes = changed_since(data, sid, None);
+    if changes.is_empty() { return None; }
+    tell_changes(data, sid, &changes);
+    let lines: Vec<String> = changes.iter().map(|(p, at)| {
+        let vim = vim_holding(p).map(|(_, dirty)| format!(", still open in vim{}", if dirty { " with unsaved changes" } else { "" })).unwrap_or_default();
+        format!("- {p} (changed at {}{vim})", clock(*at))
+    }).collect();
+    Some(i18n::ai_f("files-changed", &[("lines", lines.join("\n"))]))
+}
+
+/// A file open in vim has a swap file beside it naming vim's pid (bytes 24..28) and whether it has unsaved changes.
+fn vim_holding(path: &str) -> Option<(u32, bool)> {
+    let p = Path::new(path);
+    let (dir, base) = (p.parent()?, p.file_name()?.to_string_lossy().to_string());
+    for ext in ["swp", "swo", "swn"] {
+        let Ok(b) = fs::read(dir.join(format!(".{base}.{ext}"))) else { continue };
+        if b.len() < 28 { continue; }
+        let pid = u32::from_le_bytes([b[24], b[25], b[26], b[27]]);
+        if pid != 0 && Path::new(&format!("/proc/{pid}")).exists() { return Some((pid, b.get(1007) == Some(&b'U'))); }
+    }
+    None
+}
+
+/// Before an edit: held back when the file changed on disk since the agent's last look, and the first time it is open in vim.
+fn held_back(data: &Path, sid: &str, a: &Agent, tool: &str, input: &Value) -> Option<String> {
+    // shortcut: Claude Code's edit tools only; Codex's apply_patch is not held back until its deny output is checked.
+    if a.name != "claude" || !["Edit", "MultiEdit", "Write", "NotebookEdit"].contains(&tool) { return None; }
+    let path = input.get("file_path").or_else(|| input.get("notebook_path")).and_then(Value::as_str)?;
+    if let Some(change) = changed_since(data, sid, Some(path)).into_iter().next() {
+        tell_changes(data, sid, std::slice::from_ref(&change));
+        return Some(i18n::ai_f("edit-changed", &[("path", path.to_string()), ("at", clock(change.1))]));
+    }
+    let (pid, dirty) = vim_holding(path)?;
+    let file = state_file(data, "vim", sid);
+    let mut warned: Vec<String> = serde_json::from_value(read_json(&file, json!([])).ok()?).unwrap_or_default();
+    let key = format!("{path}:{pid}");
+    if warned.contains(&key) { return None; }
+    warned.push(key);
+    let _ = write_json(&file, &json!(warned));
+    Some(i18n::ai_f("edit-in-vim", &[("path", path.to_string()), ("pid", pid.to_string()), ("dirty", (if dirty { "with unsaved changes" } else { "no unsaved changes" }).to_string())]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ev(sid: &str, name: &str, extra: Value) -> Value {
+        let mut e = json!({"session_id": sid, "hook_event_name": name, "cwd": "/w"});
+        for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); }
+        e
+    }
+
+    #[test]
+    fn a_claude_session_is_recorded_told_and_kept_from_clashing() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let exe = data.join("whaybench");
+        let a = Agent { name: "claude", tab: Some("t1"), inside: true, exe: &exe };
+        let sid = "aaaaaaaa-0000-0000-0000-000000000001";
+        let start = run(data, &a, &ev(sid, "SessionStart", json!({"source": "startup"}))).unwrap();
+        let told = start["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+        assert!(told.contains("call the context_map tool") && told.contains("view panel beside this conversation"), "{told}");
+        run(data, &a, &ev(sid, "UserPromptSubmit", json!({"prompt": "/clear"}))).unwrap();
+        assert!(read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null).unwrap().get("firstPrompt").is_none(), "commands are not what was asked");
+        // A decision attached to the files of a branch comes with the first read of such a file.
+        map::command(data, sid, Some(json!({"upsert": [{"id": "t", "label": "App"}, {"id": "b", "parent": "t", "label": "Store"}, {"id": "d", "parent": "b", "label": "Store → SQLite", "kind": "conclusion", "state": "done"}], "current": "b"}))).unwrap();
+        let file = data.join("f.rs");
+        fs::write(&file, "x").unwrap();
+        let path = file.to_string_lossy().to_string();
+        write_json(&data.join("node-files").join(format!("{sid}.json")), &json!({"b": [format!("{}/*.rs", data.display())]})).unwrap();
+        let read = |r: &Agent| run(data, r, &ev(sid, "PostToolUse", json!({"tool_name": "Read", "tool_input": {"file_path": path}}))).unwrap();
+        let first = read(&a);
+        assert!(first["hookSpecificOutput"]["additionalContext"].as_str().unwrap().contains("- Store → SQLite"), "{first}");
+        assert_eq!(read(&a), json!({}), "told once per file");
+        let touches = read_json(&data.join("files").join(format!("{sid}.json")), json!([])).unwrap();
+        assert_eq!((touches[0]["op"].as_str(), touches[0]["node"].as_str()), (Some("read"), Some("b")));
+        // Changed on disk after the read, not by a shell command of the agent: the next edit is held back once.
+        std::thread::sleep(std::time::Duration::from_millis(1600));
+        fs::write(&file, "person").unwrap();
+        let edit = ev(sid, "PreToolUse", json!({"tool_name": "Edit", "tool_input": {"file_path": path, "old_string": "x", "new_string": "y"}}));
+        let held = run(data, &a, &edit).unwrap();
+        assert_eq!(held["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert!(held["hookSpecificOutput"]["permissionDecisionReason"].as_str().unwrap().contains("was changed on disk"));
+        assert_eq!(run(data, &a, &edit).unwrap(), json!({}), "the same change is told once");
+        // Open in vim: held back the first time only.
+        let mut swap = vec![0u8; 1008];
+        swap[24..28].copy_from_slice(&std::process::id().to_le_bytes());
+        swap[1007] = b'U';
+        fs::write(data.join(".f.rs.swp"), swap).unwrap();
+        assert!(run(data, &a, &edit).unwrap()["hookSpecificOutput"]["permissionDecisionReason"].as_str().unwrap().contains("open in vim"));
+        assert_eq!(run(data, &a, &edit).unwrap(), json!({}));
+        run(data, &a, &ev(sid, "PostToolUse", json!({"tool_name": "Edit", "tool_input": {"file_path": path, "old_string": "x", "new_string": "y"}}))).unwrap();
+        assert_eq!(read_json(&data.join("files").join(format!("{sid}.edits.json")), json!([])).unwrap()[0]["after"], "y");
+        // The turn's whole text comes from the transcript, not only its last block.
+        let transcript = data.join("t.jsonl");
+        fs::write(&transcript, [json!({"type": "user", "message": {"content": "do it"}}), json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "First part."}]}}),
+            json!({"type": "user", "message": {"content": [{"type": "tool_result"}]}}), json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "Done."}]}})]
+            .iter().map(|r| r.to_string()).collect::<Vec<_>>().join("\n")).unwrap();
+        run(data, &a, &ev(sid, "Stop", json!({"transcript_path": transcript, "last_assistant_message": "Done."}))).unwrap();
+        let answer = read_json(&data.join("answers").join(format!("{sid}.json")), Value::Null).unwrap();
+        assert!(answer.to_string().contains("First part.\\n\\nDone."), "{answer}");
+    }
+
+    #[test]
+    fn codex_patches_name_their_files_and_globs_match_folders() {
+        let patch = json!({"input": "*** Begin Patch\n*** Update File: src/a.rs\n@@\n*** Add File: b.md\n*** End Patch"});
+        assert_eq!(touched("apply_patch", &patch), vec![("src/a.rs".to_string(), "edit"), ("b.md".to_string(), "edit")]);
+        assert!(glob("/w/src/**", "/w/src/a/b.rs") && glob("/w/*.rs", "/w/a.rs") && !glob("/w/*.rs", "/w/a/b.rs") && glob("a?c", "abc"));
+    }
+}

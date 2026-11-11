@@ -11,7 +11,7 @@ Without `--agent` the agent is Claude Code, and nothing on that path changes.
 |---|---|---|
 | `whaybench --agent codex` | Prepares `<data>/codex` as Codex's folder (`CODEX_HOME`) and passes `WHAYBENCH_AGENT=codex` to everything the run starts | `crates/whaybench/src/agent.rs`, `prepare` in `crates/wb-core/src/codex.rs` |
 | Terminal relay | Starts `codex --no-daemon --sandbox workspace-write` instead of Claude Code; a session comes back with `codex resume ID` | `Relay::start` in `crates/whaybench-term/src/main.rs`, `codex::args` |
-| `whaybench hook codex` | Receives Codex's eight hooks (SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, Interrupt, SessionEnd) and writes the shared files | `hook` in `crates/wb-core/src/codex.rs` |
+| `whaybench hook codex` | Receives Codex's eight hooks (SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, Interrupt, SessionEnd). The same handler serves Claude Code's events (`whaybench hook claude`): the session record, state and heartbeat; at the start (and after a compaction) the map guidance, the view panel note and the whole memory list; on each prompt the memory changes and the files the person changed; after `apply_patch` the files it changed, as file records and memory events; at the end of a turn its count and answer | `crates/wb-core/src/hook.rs` |
 | `whaybench record SESSION touch\|state\|alive\|off\|answer\|moved\|carry-from` | Session record, state, heartbeat and answers. Only these functions write those files, whatever the agent | `crates/wb-core/src/session_record.rs` |
 | `whaybench mcp` | The conversation map tool `context_map` over MCP. Whaybench registers it in Codex's `config.toml` as the server `whaybench`, passes it `WHAYBENCH_TAB` (Codex passes an MCP server only the variables it lists) and lets the tool run without asking. The tab tells the server which session it serves | `crates/whaybench/src/mcp.rs`, `crates/wb-core/src/map_tool.rs` |
 | `whaybench map SESSION [--write]` | Reads or changes a conversation map. A change comes on stdin as `upsert`, `remove`, `current` (`nodes` for a whole replacement) | `command` in `crates/wb-core/src/map.rs` |
@@ -59,8 +59,9 @@ parent loop or a bad id is refused before saving, and the stored map stays. Remo
 
 ## Not yet
 
-File read and change records, usage and limits, requests to a Codex session without a tab, the whole turn's
-answer, taking over another session's map, filling a map style's fields, handing work between agents.
+Holding back a patch to a file the person changed or has open in vim (Claude Code's edits are), files read
+through shell commands, usage and limits, requests to a Codex session without a tab, the whole turn's answer,
+taking over another session's map, filling a map style's fields.
 
 ## Tests
 

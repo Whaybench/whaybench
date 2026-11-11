@@ -10,7 +10,7 @@ use std::{
 
 use serde_json::{Value, json};
 
-use crate::{i18n, map::{self, Result, now_ms, read_json, safe_id, text, write_json}, session_record};
+use crate::map::{Result, write_json};
 
 /// Set for everything a Codex run starts: the terminal relay, the panels and the hooks.
 pub const ENV_AGENT: &str = "WHAYBENCH_AGENT";
@@ -30,60 +30,9 @@ pub fn args(args: &[String]) -> Vec<String> {
     out
 }
 
-fn shell_quote(path: &Path) -> Result<String> {
+pub(crate) fn shell_quote(path: &Path) -> Result<String> {
     let path = path.to_str().ok_or("command path is not UTF-8")?;
     Ok(format!("'{}'", path.replace('\'', "'\\''")))
-}
-
-/// One Codex hook event (stdin of `whaybench hook codex`); the result is what Codex reads on stdout.
-pub fn hook(data: &Path, event: &Value, tab: Option<&str>, exe: &Path) -> Result<Value> {
-    let sid = safe_id(text(event, "session_id")?)?;
-    let name = text(event, "hook_event_name")?;
-    if !EVENTS.contains(&name) { return Err("unsupported hook event".into()); }
-    let prompt = if name == "UserPromptSubmit" { Some(text(event, "prompt")?) } else { None };
-    let at = now_ms();
-    let tab = tab.map(safe_id).transpose()?;
-    let mut record = session_record::touch(data, sid, session_record::Touch { prompt, tab, cwd: Some(text(event, "cwd")?), agent: Some("codex") })?;
-    let state = match name {
-        "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => "working",
-        "PermissionRequest" => "waiting",
-        _ => "done",
-    };
-    session_record::state(data, sid, state, None)?;
-    session_record::alive(data, sid, name != "SessionEnd")?;
-    let map_path = data.join(format!("{sid}.json"));
-    if !map_path.exists() {
-        write_json(&map_path, &json!({"sessionId":sid,"nodes":[],"current":null,"version":2,"turn":0,"updatedAt":at}))?;
-    }
-    if name == "SessionStart" || name == "UserPromptSubmit" {
-        // The panel follows latest.json until the person selects a session; a resumed conversation
-        // publishes its existing map rather than replacing its nodes.
-        let m = read_json(&map_path, Value::Null)?;
-        map::validate(&m)?;
-        write_json(&data.join("latest.json"), &m)?;
-    }
-    if name == "Stop" {
-        let turn = event.get("turn_id").and_then(Value::as_str);
-        let already_counted = turn.is_some() && record.get("lastCompletedTurn").and_then(Value::as_str) == turn;
-        if !already_counted && event.get("stop_hook_active") != Some(&json!(true)) {
-            map::end_turn(data, sid)?;
-            if let Some(turn) = turn {
-                record["lastCompletedTurn"] = json!(turn);
-                write_json(&data.join("sessions").join(format!("{sid}.json")), &record)?;
-            }
-        }
-        if let Some(answer) = event.get("last_assistant_message").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-            // shortcut: records the final assistant message; collect all blocks when full-turn history is added.
-            session_record::answer(data, sid, &json!({"text": answer, "turnId": turn}))?;
-        }
-    }
-    if name == "SessionStart" || name == "UserPromptSubmit" {
-        let command = shell_quote(exe)?;
-        let vars = [("session", sid.to_string()), ("command", command)];
-        let context = format!("{}\n{}", i18n::ai_f("codex-context", &vars), i18n::ai_f("codex-map-context", &vars));
-        return Ok(json!({"hookSpecificOutput":{"hookEventName":name,"additionalContext":context}}));
-    }
-    Ok(json!({}))
 }
 
 fn hook_config(exe: &Path) -> Result<Value> {
@@ -165,13 +114,15 @@ pub fn prepare(data: &Path, source: &Path, exe: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map::read_json;
 
     fn event(name: &str) -> Value {
         json!({"session_id":"codex-1","hook_event_name":name,"cwd":"work"})
     }
 
     fn call(data: &Path, event: &Value) -> Result<Value> {
-        hook(data, event, Some("tab1"), &data.join("whaybench"))
+        let exe = data.join("whaybench");
+        crate::hook::run(data, &crate::hook::Agent { name: "codex", tab: Some("tab1"), inside: true, exe: &exe }, event)
     }
 
 

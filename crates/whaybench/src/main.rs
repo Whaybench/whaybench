@@ -22,7 +22,7 @@ const USAGE: &str = "whaybench [--data-dir DIR] [--agent codex] [--app COMMAND].
 whaybench map [--data-dir DIR] SESSION [--write < CHANGE.json | --take-over < MAP.json | --start-from < MAP.json | --end-turn]    read, change or take over a conversation map, or count a finished turn
 whaybench memory [--data-dir DIR] list SESSION | changes SESSION | show MEMID|SESSION/NODE | search WORD...    what the memory holds: a session's memory list, what changed since it last looked, one node, a search
 whaybench record [--data-dir DIR] SESSION touch|state|alive|off|answer|moved|carry-from ...    a session's record, state, heartbeat, answers
-whaybench hook [--data-dir DIR] codex < EVENT.json    run by Codex's hooks
+whaybench hook [--data-dir DIR] claude|codex < EVENT.json    run by the agent's hooks
 whaybench mcp [--data-dir DIR]    the conversation map tool over MCP (stdio), for an agent in a Whaybench tab
 whaybench statusline [--data-dir DIR] < STATUS.json    a Claude Code status line: context and plan usage, kept for the alerts panel
 whaybench ctl [--data-dir DIR] session new [MAP-FROM] | show ID | type ID TEXT | end ID
