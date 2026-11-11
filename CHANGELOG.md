@@ -8,6 +8,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Memory: every change to a conversation map is appended as an event (CloudEvents 1.0) to
+  `memory/events/<year-month>.jsonl` in the data directory: nodes added, changed and removed, links, and maps
+  carried from another session.
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).
 - `keep_days` and `keep_mb` in the data directory's `settings.json` limit how long and how much conversation

@@ -110,7 +110,18 @@ pub fn command(data: &Path, sid: &str, input: Option<Value>) -> Result<Value> {
 /// went before: its nodes start over as opened now, and `latest.json` is left as it is,
 /// as the session has not talked yet.
 pub fn start_from(data: &Path, sid: &str, source: &Value) -> Result<Value> {
-    change(data, sid, json!({"nodes": source.get("nodes").ok_or("map requires nodes array")?}), false)
+    let map = change(data, sid, json!({"nodes": source.get("nodes").ok_or("map requires nodes array")?}), false)?;
+    carried(data, sid, source);
+    Ok(map)
+}
+
+/// The memory hears that this session's map came from another session or a saved map.
+fn carried(data: &Path, sid: &str, source: &Value) {
+    let from = source.get("sessionId").or_else(|| source.get("from")).and_then(Value::as_str).unwrap_or("");
+    let ids: Vec<Value> = source.get("nodes").and_then(Value::as_array).into_iter().flatten().filter_map(|n| n.get("id").cloned()).collect();
+    let at = now_ms() as i64;
+    let ev = crate::memory::event(&format!("session/{sid}"), "map.carried", &format!("{sid}/"), at, json!({"from": from, "nodes": ids}));
+    if let Err(e) = crate::memory::record(data, at, &[ev]) { crate::log::warn("map", "memory not written", &e.to_string(), &[]); }
 }
 
 fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> {
@@ -121,6 +132,7 @@ fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> {
     }
     let mut map = read_json(&path, json!({"nodes":[],"current":null,"turn":0}))?;
     validate(&map)?;
+    let before = map["nodes"].as_array().cloned().unwrap_or_default();
     let stamp = json!({"at":now_ms(),"turn":map.get("turn").and_then(Value::as_u64).unwrap_or(0)});
     let mut nodes = if let Some(replacement) = input.get("nodes") {
         validate(&json!({"nodes":replacement}))?;
@@ -164,6 +176,10 @@ fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> {
     validate(&map)?;
     write_json(&path, &map)?;
     if latest { write_json(&data.join("latest.json"), &map)?; }
+    // shortcut: every write counts as the session's own; a side worker's fill is not told apart yet.
+    let at = stamp["at"].as_i64().unwrap_or(0);
+    let events = crate::memory::diff(&format!("session/{sid}"), sid, at, &before, map["nodes"].as_array().map(Vec::as_slice).unwrap_or(&[]));
+    if let Err(e) = crate::memory::record(data, at, &events) { crate::log::warn("map", "memory not written", &e.to_string(), &[]); }
     Ok(map)
 }
 
@@ -192,6 +208,7 @@ pub fn take_over(data: &Path, sid: &str, source: &Value) -> Result<Value> {
     let map = json!({"sessionId":sid, "nodes":source["nodes"], "current":source.get("current").cloned().unwrap_or(Value::Null),
         "turn":source.get("turn").and_then(Value::as_u64).unwrap_or(0), "version":2, "updatedAt":now_ms()});
     write_json(&path, &map)?;
+    carried(data, sid, source);
     Ok(map)
 }
 
