@@ -14,7 +14,7 @@ Without `--agent` the agent is Claude Code, and nothing on that path changes.
 | `whaybench hook codex` | Receives Codex's eight hooks (SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, Interrupt, SessionEnd) and writes the shared files | `hook` in `crates/wb-core/src/codex.rs` |
 | `whaybench record SESSION touch\|state\|alive\|off\|answer\|moved\|carry-from` | Session record, state, heartbeat and answers. Only these functions write those files, whatever the agent | `crates/wb-core/src/session_record.rs` |
 | `whaybench map SESSION [--write]` | Reads or changes a conversation map. A change comes on stdin as `upsert`, `remove`, `current` (`nodes` for a whole replacement) | `command` in `crates/wb-core/src/map.rs` |
-| Agent guidance | At SessionStart and every UserPromptSubmit, the rules of keeping the map and the commands go into Codex's context | `codex-context`, `codex-map-context` in `config/lang/en.ftl` and the language add-ons |
+| Agent guidance | At SessionStart and every UserPromptSubmit, the rules of keeping the map and the commands go into Codex's context | `codex-context`, `codex-map-context` in `config/lang/ai.ftl` (English in every language) |
 
 ## How it differs from Claude Code
 

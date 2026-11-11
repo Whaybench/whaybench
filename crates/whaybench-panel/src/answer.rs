@@ -139,7 +139,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                     Some(i) => {
                         wb_core::log::decide("answer", "related answers", "found", &[("session", session), ("kept_answers", rows.len().to_string())]);
                         // A node made while tidying the map has that turn's time, not the time it was talked about.
-                        let tidied = rows[i]["prompt"].as_str().is_some_and(|t| t.starts_with(wb_core::i18n::t("map-update")));
+                        let tidied = rows[i]["prompt"].as_str().is_some_and(|t| t.starts_with(wb_core::i18n::ai("map-update")));
                         status::say(&d, &if tidied { wb_core::i18n::f("related-answers-node-created-at-map", &[("a1", (i + 1).to_string()), ("a2", (rows.len()).to_string())]) } else { wb_core::i18n::f("related-answers-2", &[("a1", (i + 1).to_string()), ("a2", (rows.len()).to_string())]) }, 8);
                         p.related = Some((rows, i));
                         status::focus_app(&d, "dev.whaybench.answer");

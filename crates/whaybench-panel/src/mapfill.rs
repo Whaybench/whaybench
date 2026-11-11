@@ -29,7 +29,7 @@ pub fn transcript_text(raw: &str) -> String {
         };
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         if text.is_empty() || text.starts_with('<') { continue; }
-        parts.push(format!("{}: {}", if kind == "user" { wb_core::i18n::t("user") } else { "AI" }, text.chars().take(2000).collect::<String>()));
+        parts.push(format!("{}: {}", if kind == "user" { wb_core::i18n::ai("user") } else { "AI" }, text.chars().take(2000).collect::<String>()));
     }
     let whole = parts.join("\n");
     let count = whole.chars().count();
@@ -65,16 +65,16 @@ pub fn run(d: &Data, session: &str, style: &Style, scope: Option<&str>) {
     let wanted: Vec<&String> = need.iter().flat_map(|(_, ids)| ids).collect();
     let listing: Vec<String> = all.iter().filter(|n| wanted.iter().any(|w| w.as_str() == s(n, "id"))).map(|n| {
         let parent = label_of(s(n, "parent"));
-        format!("- {}: {}{}  [{}]", s(n, "id"), s(n, "label"), if parent.is_empty() { String::new() } else { wb_core::i18n::f("parent", &[("parent", (parent).to_string())]) }, if !wb_core::map::is_open(n) { wb_core::i18n::t("done") } else { wb_core::i18n::t("open-3") })
+        format!("- {}: {}{}  [{}]", s(n, "id"), s(n, "label"), if parent.is_empty() { String::new() } else { wb_core::i18n::ai_f("parent", &[("parent", (parent).to_string())]) }, if !wb_core::map::is_open(n) { wb_core::i18n::ai("done") } else { wb_core::i18n::ai("open-3") })
     }).collect();
-    let asks: Vec<String> = need.iter().map(|(f, ids)| wb_core::i18n::f("nodes", &[("f", (f).to_string()), ("a1", (mapstyles::filled_hint(f)).to_string()), ("a2", (ids.join(", ")).to_string())])).collect();
+    let asks: Vec<String> = need.iter().map(|(f, ids)| wb_core::i18n::ai_f("nodes", &[("f", (f).to_string()), ("a1", (mapstyles::filled_hint(f)).to_string()), ("a2", (ids.join(", ")).to_string())])).collect();
     let talk = transcript_path(session).and_then(|p| fs::read_to_string(p).ok()).map(|t| transcript_text(&t)).unwrap_or_default();
-    let prompt = wb_core::i18n::f("output-only-the-json-array-as", &[("talk", (talk).to_string()), ("a1", (listing.join("\n")).to_string()), ("a2", (asks.join("\n")).to_string())]);
+    let prompt = wb_core::i18n::ai_f("output-only-the-json-array-as", &[("talk", (talk).to_string()), ("a1", (listing.join("\n")).to_string()), ("a2", (asks.join("\n")).to_string())]);
     // An empty folder: no project settings, so no plugins load.
     let work = d.cache().join("fill-work");
     let _ = fs::create_dir_all(&work);
     let started = Instant::now();
-    let child = Command::new(sessions::claude_program()).args(["-p", "--model", "haiku", "--tools", "", "--no-session-persistence", "--setting-sources", "project", "--strict-mcp-config", "--output-format", "text", "--system-prompt", wb_core::i18n::t("a-worker-that-fills-conversation-map")])
+    let child = Command::new(sessions::claude_program()).args(["-p", "--model", "haiku", "--tools", "", "--no-session-persistence", "--setting-sources", "project", "--strict-mcp-config", "--output-format", "text", "--system-prompt", wb_core::i18n::ai("a-worker-that-fills-conversation-map")])
         .current_dir(&work).env_remove("WHAYBENCH").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
     let mut child = match child { Ok(c) => c, Err(e) => { log(true, format!("run failed: {e}")); return } };
     if let Some(mut input) = child.stdin.take() { let _ = input.write_all(prompt.as_bytes()); }

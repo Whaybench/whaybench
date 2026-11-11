@@ -262,7 +262,7 @@ fn stamp_of(st: &Store, pid: &str) -> String {
 fn request(p: &P, ask: &str) {
     let Some(pid) = &p.pid else { return };
     let Some(session) = sessions::target(&p.d) else { p.path.set_text(wb_core::i18n::t("request-not-sent-no-session-selected")); return };
-    let text = wb_core::i18n::f("project-this-session-edits-the-project", &[("pid", (pid).to_string()), ("ask", (ask).to_string())]);
+    let text = wb_core::i18n::ai_f("project-this-session-edits-the-project", &[("pid", (pid).to_string()), ("ask", (ask).to_string())]);
     if sessions::queue_prompt(&p.d, &session, &text) { status::say(&p.d, wb_core::i18n::t("request-sent-selected-session"), 5); }
     else { p.path.set_text(wb_core::i18n::t("request-not-sent-session-is-off-2")); }
 }
@@ -616,8 +616,8 @@ fn clicked(s_: &Shared, uri: &str) {
             };
             let (s2, pid2, w2) = (s_.clone(), pid.clone(), where_.clone());
             ask_text(&win, wb_core::i18n::t("request-change-2"), &wb_core::i18n::f("request", &[("where_", (where_).to_string())]), move |t| {
-                let source = if original.is_empty() { String::new() } else { wb_core::i18n::f("original-of-the-template", &[("original", (original).to_string())]) };
-                request(&s2.borrow(), &wb_core::i18n::f("change-as-the-user-requests-check", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("pid2", (pid2).to_string()), ("did", (did).to_string()), ("source", (source).to_string())]));
+                let source = if original.is_empty() { String::new() } else { wb_core::i18n::ai_f("original-of-the-template", &[("original", (original).to_string())]) };
+                request(&s2.borrow(), &wb_core::i18n::ai_f("change-as-the-user-requests-check", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("pid2", (pid2).to_string()), ("did", (did).to_string()), ("source", (source).to_string())]));
             });
         }
         "dback" | "dredo" => {
@@ -626,12 +626,12 @@ fn clicked(s_: &Shared, uri: &str) {
             let where_ = format!("{did} > {path}");
             let cmd = format!("`whaybench-project change {pid} {did} {id}`");
             if kind == "dback" {
-                request(&s_.borrow(), &wb_core::i18n::f("put-section-back-as-it-was", &[("where_", (where_).to_string()), ("id", (id).to_string()), ("cmd", (cmd).to_string())]));
+                request(&s_.borrow(), &wb_core::i18n::ai_f("put-section-back-as-it-was", &[("where_", (where_).to_string()), ("id", (id).to_string()), ("cmd", (cmd).to_string())]));
                 over(s_, None);
             } else {
                 let (s2, id2) = (s_.clone(), id.to_string());
                 let w2 = where_.clone();
-                ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { let _ = &id2; request(&s2.borrow(), &wb_core::i18n::f("rework-section-user-request-the-earlier", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
+                ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { let _ = &id2; request(&s2.borrow(), &wb_core::i18n::ai_f("rework-section-user-request-the-earlier", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
             }
         }
         "iback" | "iredo" => {
@@ -642,7 +642,7 @@ fn clicked(s_: &Shared, uri: &str) {
             let where_ = wb_core::i18n::f("text-4", &[("a1", (history::target_name(target)).to_string()), ("a2", (if s(&c, "kind") == "item" { wb_core::i18n::t("item") } else { s(&c, "kind") }).to_string()), ("a3", (s(&c, "id")).to_string()), ("a4", (history::label(&c).chars().take(60).collect::<String>()).to_string())]);
             let cmd = format!("`whaybench-project change-items {pid} {id}`");
             if kind == "iback" {
-                request(&s_.borrow(), &wb_core::i18n::f("put-back-as-it-was-before", &[("where_", (where_).to_string()), ("id", (id).to_string()), ("cmd", (cmd).to_string())]));
+                request(&s_.borrow(), &wb_core::i18n::ai_f("put-back-as-it-was-before", &[("where_", (where_).to_string()), ("id", (id).to_string()), ("cmd", (cmd).to_string())]));
                 over(s_, None);
             } else {
                 let (s2, w2) = (s_.clone(), where_.clone());

@@ -22,9 +22,12 @@ error, so also run one short session with a temporary data folder and check that
   `mod/context-map` is the Claude Code connector and calls these commands.
 - Internal values (setting keys, stored values, states, log messages) are in
   English.
-- Text shown on screen or sent to the agent goes in Fluent files:
-  `config/lang/en.ftl`, and `addons/languages/<lang>/messages.ftl` with the
-  same keys in the same order.
+- Text shown on screen goes in Fluent files: `config/lang/en.ftl`, and
+  `addons/languages/<lang>/messages.ftl` with the same keys in the same order
+  (`i18n::t`, `i18n::f`).
+- Text only the agent reads (requests, worker prompts, Codex context) is
+  English in every language: `config/lang/ai.ftl` (`i18n::ai`, `i18n::ai_f`).
+  It is never translated.
 - Code holds only the default theme and map style. Others are add-on folders
   under `addons/`.
 - Apps inside panels cannot move or resize their panel: Whaybench ignores

@@ -11,6 +11,8 @@ use crate::paths::{self, Data};
 pub const DEFAULT: &str = "en";
 pub const DEFAULT_NAME: &str = "English";
 const ENGLISH: &str = include_str!("../../../config/lang/en.ftl");
+/// What only the agent reads, in English whatever the interface language.
+const FOR_AGENT: &str = include_str!("../../../config/lang/ai.ftl");
 /// For tests and for trying a language without choosing it.
 pub const ENV_LANG: &str = "WHAYBENCH_LANG";
 const BUNDLED_KO: &str = include_str!("../../../addons/languages/ko/messages.ftl");
@@ -93,6 +95,28 @@ pub fn t(key: &str) -> &'static str {
     v
 }
 
+fn agent_bundle() -> &'static Bundle {
+    static B: OnceLock<Bundle> = OnceLock::new();
+    B.get_or_init(|| bundle(FOR_AGENT, DEFAULT))
+}
+
+/// A text for the agent (a request, a worker's prompt), with nothing to fill in. Always English.
+pub fn ai(key: &str) -> &'static str {
+    static M: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+    let mut m = M.get_or_init(Default::default).lock().unwrap();
+    if let Some(v) = m.get(key) { return v; }
+    let v: &'static str = Box::leak(format_with(agent_bundle(), key, None).unwrap_or_else(|| key.to_string()).into_boxed_str());
+    m.insert(key.to_string(), v);
+    v
+}
+
+/// A text for the agent with values to fill in. Always English.
+pub fn ai_f(key: &str, values: &[(&str, String)]) -> String {
+    let mut args = FluentArgs::new();
+    for (k, v) in values { args.set(*k, v.clone()); }
+    format_with(agent_bundle(), key, Some(&args)).unwrap_or_else(|| key.to_string())
+}
+
 /// A name a language add-on gives to an add-on, if it gives one. English names live in the add-ons themselves.
 pub fn name_in_language(key: &str) -> Option<String> {
     let t = texts();
@@ -119,7 +143,7 @@ mod tests {
     }
     #[test]
     fn both_files_read_and_korean_has_every_key() {
-        for (name, text) in [("en", ENGLISH), ("ko", BUNDLED_KO)] {
+        for (name, text) in [("en", ENGLISH), ("ko", BUNDLED_KO), ("ai", FOR_AGENT)] {
             if let Err((_, errors)) = FluentResource::try_new(text.to_string()) { panic!("{name}: {errors:?}"); }
         }
         // The names of add-ons are only in a language add-on.
@@ -127,6 +151,9 @@ mod tests {
         let (en, ko) = (keys(ENGLISH).into_iter().filter(own).collect::<Vec<_>>(), keys(BUNDLED_KO).into_iter().filter(own).collect::<Vec<_>>());
         assert!(en.len() > 300);
         assert_eq!(en, ko);
+        // What the agent reads is in no language add-on (a name people see too, such as `done`, is both).
+        let leaked: Vec<String> = keys(FOR_AGENT).into_iter().filter(|k| keys(BUNDLED_KO).contains(k) && !keys(ENGLISH).contains(k)).collect();
+        assert!(leaked.is_empty(), "agent texts in the Korean file: {leaked:?}");
         let vars = |t: &str| { let mut v: Vec<String> = t.split("{ $").skip(1).filter_map(|x| x.split(' ').next().map(String::from)).collect(); v.sort(); v };
         for (a, b) in ENGLISH.lines().zip(BUNDLED_KO.lines()) { assert_eq!(vars(a), vars(b), "{a}"); }
     }

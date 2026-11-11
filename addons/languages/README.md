@@ -24,4 +24,5 @@ session-off = Session { $a1 } is off
 - `{"\u000A"}` is a new line. `{" "}` keeps a space at the start or end of a text.
 - HTML tags in a text stay as they are.
 - Add-ons are in English. To translate their names add `map-style-<folder> = ...`, `theme-<folder> = ...` or `doc-<folder> = ...`; without one the English name shows.
+- Only what people see is translated. What Whaybench sends to the agent is in `config/lang/ai.ftl` and stays English in every language.
 - A key you leave out shows in English, so a new version of the program never breaks a language. Compare your file with the new `en.ftl` to find what to add.

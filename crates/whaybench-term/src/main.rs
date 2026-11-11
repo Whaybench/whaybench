@@ -100,7 +100,7 @@ impl Relay {
         if let Some(from) = self.map_from.take() {
             env.push(("WHAYBENCH_MAP_FROM".into(), from));
             // Sent as the session's first prompt, so the map is read and confirmed before the person goes on.
-            env.push(("WHAYBENCH_MAP_PROMPT".into(), wb_core::i18n::t("map-carry-prompt").into()));
+            env.push(("WHAYBENCH_MAP_PROMPT".into(), wb_core::i18n::ai("map-carry-prompt").into()));
         }
         let c_env: Vec<(CString, CString)> = env.iter().filter_map(|(k, v)| Some((CString::new(k.as_str()).ok()?, CString::new(v.as_str()).ok()?))).collect();
 

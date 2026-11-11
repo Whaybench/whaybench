@@ -146,8 +146,8 @@ pub fn panels(d: &Data) -> Vec<Vec<String>> {
 /// The request that takes one node of an imported map into this conversation as a reference.
 pub fn reference_request(path: &str, title: &str, node: &Value, flow: &[String], lines: &[String]) -> String {
     let source = json!({"file": path, "node": s(node, "id"), "title": title, "path": flow}).to_string();
-    let upper = if flow.is_empty() { i18n::t("none-top-branch").to_string() } else { flow.join(" › ") };
-    i18n::f("import-reference-request", &[("title", title.to_string()), ("head", s(node, "label").to_string()), ("flow", upper), ("lines", lines.iter().take(60).cloned().collect::<Vec<_>>().join("\n")), ("source", source)])
+    let upper = if flow.is_empty() { i18n::ai("none-top-branch").to_string() } else { flow.join(" › ") };
+    i18n::ai_f("import-reference-request", &[("title", title.to_string()), ("head", s(node, "label").to_string()), ("flow", upper), ("lines", lines.iter().take(60).cloned().collect::<Vec<_>>().join("\n")), ("source", source)])
 }
 
 /// The request that hands a whole imported map to a session: its file, its size and its top branches; the session
@@ -158,7 +158,7 @@ pub fn whole_reference_request(path: &str, title: &str, data: &Value) -> String 
     let open = nodes.iter().filter(|n| wb_core::map::is_open(n)).count();
     let tops: Vec<String> = nodes.iter().filter(|n| !ids.contains(s(n, "parent"))).take(60).map(|n| format!("- {}", s(n, "label"))).collect();
     let source = json!({"file": path, "node": "", "title": title}).to_string();
-    i18n::f("import-reference-whole-request", &[("title", title.to_string()), ("path", path.to_string()), ("count", nodes.len().to_string()), ("open", open.to_string()), ("lines", tops.join("\n")), ("source", source)])
+    i18n::ai_f("import-reference-whole-request", &[("title", title.to_string()), ("path", path.to_string()), ("count", nodes.len().to_string()), ("open", open.to_string()), ("lines", tops.join("\n")), ("source", source)])
 }
 
 #[cfg(test)]

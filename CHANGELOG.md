@@ -51,8 +51,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- The map update request (Tidy) is now English whatever the interface language, since only the agent reads it, and
-  short: keep every node and id, and put the whole conversation, answers included, into the node fields.
+- Every text only the agent reads (map update and other requests, the map fill worker's prompt, Codex's context,
+  the carried-map prompt) is English whatever the interface language, in `config/lang/ai.ftl`; language add-ons
+  hold only what people see. The map update request is short: keep every node and id, and put the whole
+  conversation, answers included, into the node fields.
 - The `blocks` link is gone: what a node depends on is written as `requires`.
 - Open or closed comes from a node's `state` alone (`done`, `dropped` and `removed` close it); `isOpen` is no
   longer stored or recorded in events. An agent that still sends it is read as a state, and a stored

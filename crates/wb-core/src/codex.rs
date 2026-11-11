@@ -80,7 +80,7 @@ pub fn hook(data: &Path, event: &Value, tab: Option<&str>, exe: &Path) -> Result
     if name == "SessionStart" || name == "UserPromptSubmit" {
         let command = shell_quote(exe)?;
         let vars = [("session", sid.to_string()), ("command", command)];
-        let context = format!("{}\n{}", i18n::f("codex-context", &vars), i18n::f("codex-map-context", &vars));
+        let context = format!("{}\n{}", i18n::ai_f("codex-context", &vars), i18n::ai_f("codex-map-context", &vars));
         return Ok(json!({"hookSpecificOutput":{"hookEventName":name,"additionalContext":context}}));
     }
     Ok(json!({}))

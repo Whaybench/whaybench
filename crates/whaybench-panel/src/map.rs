@@ -67,15 +67,13 @@ struct Panel {
     page: String,
 }
 
-/// The request the map update sends. It is for the agent, not the person, so it is English whatever the interface
-/// language: the conversation is put into the node fields the map tool describes, not summarized.
+/// The request the map update sends: the conversation is put into the node fields the map tool describes, not summarized.
 pub fn update_request(scope: Option<(&str, &str)>, extra: &str, style: Option<&mapstyles::Style>) -> String {
-    let mut t = String::from("[Map update] Bring this session's map up to date with the whole conversation, answers included. \
-Keep every node and its id; do not shorten or merge. Put what was said into the node fields: kind, a label by its kind's \
-rule, detail for the rest, state, links, at/due/requires. Send only what changed; reply in two or three lines.");
-    if let Some((id, label)) = scope { t += &format!("\nScope: branch '{label}' (node {id}) and below. Do not change other branches."); }
-    if let Some(st) = style { t += &format!("\nThe map is shown in the style '{}'{}.", st.name, if st.frame().is_some() { "; fill what it needs (kind, reason, links)" } else { "" }); }
-    if !extra.is_empty() { t += &format!("\nAdditional request: {extra}"); }
+    use wb_core::i18n::{ai, ai_f};
+    let mut t = String::from(ai("map-update-request"));
+    if let Some((id, label)) = scope { t += &ai_f("map-update-scope", &[("label", label.to_string()), ("id", id.to_string())]); }
+    if let Some(st) = style { t += &ai_f(if st.frame().is_some() { "map-update-style-frame" } else { "map-update-style" }, &[("name", st.name.clone())]); }
+    if !extra.is_empty() { t += &ai_f("map-update-extra", &[("extra", extra.to_string())]); }
     t
 }
 
@@ -103,12 +101,12 @@ pub fn flow_of(data: &Value, id: &str) -> Vec<String> {
 pub fn reflect_request(pid: Option<&str>, work: Option<&str>, flow: &[String], lines: &[String]) -> String {
     let mut t = String::new();
     if let (Some(p), Some(q)) = (pid, work) {
-        t += &wb_core::i18n::f("project-work-first-run-whaybench-project", &[("q", (q).to_string()), ("p", (p).to_string())]);
+        t += &wb_core::i18n::ai_f("project-work-first-run-whaybench-project", &[("q", (q).to_string()), ("p", (p).to_string())]);
     }
-    let target = pid.map(|p| wb_core::i18n::f("project-2", &[("p", (p).to_string())])).unwrap_or_else(|| wb_core::i18n::t("a-new-project-create-it-with").into());
-    let map_target = pid.unwrap_or(wb_core::i18n::t("text-3"));
-    t += &wb_core::i18n::f("reflect-in-project-the-user-sent", &[("target", (target).to_string()), ("a1", (if flow.is_empty() { wb_core::i18n::t("none-top-branch").to_string() } else { flow.join(" › ") }).to_string()), ("a2", (lines.iter().take(120).cloned().collect::<Vec<_>>().join("\n")).to_string())]);
-    t += &wb_core::i18n::f("n1-first-compare-with-whaybench-project", &[("map_target", (map_target).to_string())]);
+    let target = pid.map(|p| wb_core::i18n::ai_f("project-2", &[("p", (p).to_string())])).unwrap_or_else(|| wb_core::i18n::ai("a-new-project-create-it-with").into());
+    let map_target = pid.unwrap_or(wb_core::i18n::ai("text-3"));
+    t += &wb_core::i18n::ai_f("reflect-in-project-the-user-sent", &[("target", (target).to_string()), ("a1", (if flow.is_empty() { wb_core::i18n::ai("none-top-branch").to_string() } else { flow.join(" › ") }).to_string()), ("a2", (lines.iter().take(120).cloned().collect::<Vec<_>>().join("\n")).to_string())]);
+    t += &wb_core::i18n::ai_f("n1-first-compare-with-whaybench-project", &[("map_target", (map_target).to_string())]);
     t
 }
 

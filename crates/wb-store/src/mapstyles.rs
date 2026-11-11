@@ -16,9 +16,9 @@ pub const FILLED: [&str; 3] = ["kind", "reason", "links"];
 /// How a side worker is asked for a field.
 pub fn filled_hint(field: &str) -> &'static str {
     match field {
-        "kind" => wb_core::i18n::t("one-of-question-option-pro-con"),
-        "reason" => wb_core::i18n::t("one-line-about-40-characters-why"),
-        _ => wb_core::i18n::t("relations-to-nodes-of-other-branches"),
+        "kind" => wb_core::i18n::ai("one-of-question-option-pro-con"),
+        "reason" => wb_core::i18n::ai("one-line-about-40-characters-why"),
+        _ => wb_core::i18n::ai("relations-to-nodes-of-other-branches"),
     }
 }
 
@@ -135,9 +135,9 @@ pub fn fill_item(template: &str, label: &str, path: &str, id: &str) -> String {
 /// The request that has the AI draw the map in a style with no frame, in a view of its own.
 pub fn draw_request(style: &Style, d: &Data, session: &str, scope: Option<(&str, &str)>) -> String {
     let title = wb_core::i18n::f("map-style", &[("a1", (scope.map(|(_, l)| format!(" · {}", l.chars().take(12).collect::<String>())).unwrap_or_default()).to_string())]);
-    let target = scope.map_or_else(|| wb_core::i18n::t("the-conversation-map-of-this-session").to_string(), |(i, l)| wb_core::i18n::f("branch-node-and-below", &[("l", (l).to_string()), ("i", (i).to_string())]));
+    let target = scope.map_or_else(|| wb_core::i18n::ai("the-conversation-map-of-this-session").to_string(), |(i, l)| wb_core::i18n::ai_f("branch-node-and-below", &[("l", (l).to_string()), ("i", (i).to_string())]));
     let map = d.root.join(format!("{session}.json"));
-    wb_core::i18n::f("map-style-show-in-the-style", &[("a1", (style.name).to_string()), ("target", (target).to_string()), ("a2", (map.display()).to_string()), ("a3", (style.instruction().trim()).to_string()), ("title", (title).to_string())])
+    wb_core::i18n::ai_f("map-style-show-in-the-style", &[("a1", (style.name).to_string()), ("target", (target).to_string()), ("a2", (map.display()).to_string()), ("a3", (style.instruction().trim()).to_string()), ("title", (title).to_string())])
 }
 
 impl Store {
