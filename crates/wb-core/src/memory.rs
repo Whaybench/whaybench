@@ -217,8 +217,9 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
             let item = json!({"session": s, "node": n, "line": person_line(&names[s.as_str()], n)});
             if n["state"] == "removed" { trash.push(item); continue; }
             if n["state"] == "postponed" { held.push(item.clone()); }
-            if !is_open(n) { continue; }
+            // The person's mark holds whatever the state: what they marked they want to see again.
             if n.get("mark").is_some() { marked.push(item.clone()); }
+            if !is_open(n) { continue; }
             // The agent's suggestion to close it: the person approves or declines.
             if let Some(sg) = n.get("suggest").filter(|v| v.is_object()) {
                 let to = crate::i18n::t(if sg["state"] == "dropped" { "alerts-dropped" } else { "alerts-done" });
@@ -385,7 +386,7 @@ mod tests {
             {"id":"e","label":"done","isOpen":false,"state":"done","mark":"important","memid":"5"}]}).to_string()).unwrap();
         let b = board(dir.path(), None);
         let n = |k: &str| b[k].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
-        assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into()], vec!["c".into()], vec!["d".into()]));
+        assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into(), "e".into()], vec!["c".into()], vec!["d".into()]), "a marked node shows even when done");
         assert!(n("changed").is_empty(), "nothing settled or freed yet");
         assert_eq!(n("check"), vec!["f".to_string()], "the agent's suggestion waits for the person");
         let line_of = |id: &str| b["marked"].as_array().unwrap().iter().chain(b["held"].as_array().unwrap()).find(|i| i["node"]["id"] == id).unwrap()["line"].as_str().unwrap().to_string();
