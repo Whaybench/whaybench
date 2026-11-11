@@ -9,12 +9,12 @@ use wb_core::{i18n::t, memory, paths::Data, status};
 
 use crate::common::{ctl, every};
 
-const SECTIONS: [(&str, &str); 6] = [("due", "alerts-due"), ("marked", "alerts-marked"), ("changed", "alerts-changed"), ("check", "alerts-check"), ("held", "alerts-held"), ("trash", "alerts-trash")];
+const SECTIONS: [(&str, &str); 7] = [("due", "alerts-due"), ("marked", "alerts-marked"), ("changed", "alerts-changed"), ("check", "alerts-check"), ("open", "alerts-open"), ("held", "alerts-held"), ("trash", "alerts-trash")];
 
 struct View { shown: String, trash_open: bool }
 
 fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) {
-    let board = memory::board(&d.root);
+    let board = memory::board(&d.root, wb_core::sessions::target(d).as_deref());
     let sig = format!("{}{}", board, view.borrow().trash_open);
     if !force && view.borrow().shown == sig { return; }
     view.borrow_mut().shown = sig;
@@ -140,7 +140,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 g.set_state(gtk::EventSequenceState::Claimed);
                 let (d2, again) = (d.clone(), again.clone());
                 item(&menu, &group, "empty", "alerts-empty-trash", move || {
-                    let all: Vec<(String, String)> = memory::board(&d2.root)["trash"].as_array().into_iter().flatten()
+                    let all: Vec<(String, String)> = memory::board(&d2.root, None)["trash"].as_array().into_iter().flatten()
                         .map(|i| (i["session"].as_str().unwrap_or("").to_string(), i["node"]["id"].as_str().unwrap_or("").to_string())).collect();
                     purge(&d2, &all);
                     again();

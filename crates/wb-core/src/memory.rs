@@ -198,7 +198,8 @@ fn person_line(name: &str, n: &Value) -> String {
     parts.join(" · ")
 }
 
-pub fn board(data: &Path) -> Value {
+/// `current` is the conversation on show: its open nodes get a section of their own, so any of them can be marked.
+pub fn board(data: &Path, current: Option<&str>) -> Value {
     let all = maps(data);
     let d = crate::paths::Data::new(data.to_path_buf());
     let names: std::collections::HashMap<&str, String> = all.iter().map(|m| (m.0.as_str(), crate::sessions::session_name(&d, &m.0))).collect();
@@ -248,7 +249,9 @@ pub fn board(data: &Path) -> Value {
         }
         for t in &mut trash { let sub = format!("{}/{}", t["session"].as_str().unwrap_or(""), t["node"]["id"].as_str().unwrap_or("")); t["action"] = by.get(&sub).cloned().unwrap_or(Value::Null); }
     }
-    json!({"due": due, "marked": marked, "changed": changed, "check": [], "held": held, "trash": trash})
+    let open: Vec<Value> = all.iter().filter(|m| Some(m.0.as_str()) == current).flat_map(|(s, nodes, _)| nodes.iter().filter(|n| is_open(n)).map(move |n| (s, n)))
+        .map(|(s, n)| json!({"session": s, "node": n, "line": person_line(&names[s.as_str()], n)})).collect();
+    json!({"due": due, "marked": marked, "changed": changed, "check": [], "open": open, "held": held, "trash": trash})
 }
 
 fn links(node: &Value) -> Vec<(String, String)> {
@@ -364,15 +367,18 @@ mod tests {
             {"id":"c","label":"later","isOpen":true,"state":"postponed","memid":"3"},
             {"id":"d","label":"gone","isOpen":false,"state":"removed","memid":"4"},
             {"id":"e","label":"done","isOpen":false,"state":"done","mark":"important","memid":"5"}]}).to_string()).unwrap();
-        let b = board(dir.path());
+        let b = board(dir.path(), None);
         let n = |k: &str| b[k].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into()], vec!["c".into()], vec!["d".into()]));
         assert!(n("changed").is_empty(), "nothing settled or freed yet");
+        assert!(n("open").is_empty(), "no conversation on show");
+        let mine = board(dir.path(), Some(s));
+        assert_eq!(mine["open"].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap()).collect::<Vec<_>>(), ["a", "b", "c"], "its open nodes, marked or not");
         fs::write(dir.path().join(format!("{s}.json")), json!({"updatedAt": 2, "nodes": [
             {"id":"p","label":"first","isOpen":false,"state":"done","closed":{"at":5}},
             {"id":"q","label":"then","isOpen":true,"requires":"p"},
             {"id":"r","label":"blocked","isOpen":true,"requires":"p ∧ q"}]}).to_string()).unwrap();
-        let b = board(dir.path());
+        let b = board(dir.path(), None);
         assert_eq!(b["changed"].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap()).collect::<Vec<_>>(), ["q"], "only what its condition now allows");
     }
 

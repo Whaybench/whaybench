@@ -36,6 +36,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
   crossed out under Done. Questions shows ideas, and a decision that resolves a question as its answer. Focus and
   the other styles count dropped nodes as closed.
 - Map marks: ✕ for a dropped node and ‖ for one on hold, in the map panel, its styles and Claude's map text.
+- Alerts panel: a section with the open nodes of the conversation on show, so any of them can be marked.
 - `whaybench statusline`: a Claude Code status line showing context and the 5-hour and weekly plan usage with
   their reset times; the same numbers appear under the alerts panel. The README shows the setting to add.
 
@@ -50,6 +51,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The map update request (Tidy) is now English whatever the interface language, since only the agent reads it, and
+  short: keep every node and id, and put the whole conversation, answers included, into the node fields.
 - The `blocks` link is gone: what a node depends on is written as `requires`.
 - Open or closed comes from a node's `state` alone (`done`, `dropped` and `removed` close it); `isOpen` is no
   longer stored or recorded in events. An agent that still sends it is read as a state, and a stored

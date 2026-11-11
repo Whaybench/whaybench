@@ -67,16 +67,15 @@ struct Panel {
     page: String,
 }
 
-/// The request the map update sends, the steps numbered as they come.
+/// The request the map update sends. It is for the agent, not the person, so it is English whatever the interface
+/// language: the conversation is put into the node fields the map tool describes, not summarized.
 pub fn update_request(scope: Option<(&str, &str)>, extra: &str, style: Option<&mapstyles::Style>) -> String {
-    let mut steps = vec![wb_core::i18n::t("review-the-whole-conversation-add-missing"), wb_core::i18n::t("send-only-what-changed-in-the")];
-    // The style on show is kept up too.
-    let style_step = style.map(|st| if st.frame().is_some() { wb_core::i18n::f("fill-the-nodes-kind-reason-and", &[("a1", (st.name).to_string())]) } else { wb_core::i18n::f("show-the-tidied-map-again-in", &[("a1", (st.name).to_string())]) });
-    if let Some(x) = &style_step { steps.insert(1, x); }
-    let mut t = String::from(wb_core::i18n::t("map-update-rebuild-this-session-s"));
-    if let Some((id, label)) = scope { t += &wb_core::i18n::f("scope-branch-node-and-below-do", &[("label", (label).to_string()), ("id", (id).to_string())]); }
-    t += &steps.iter().enumerate().map(|(i, x)| format!("{}) {x}", i + 1)).collect::<Vec<_>>().join("\n");
-    if !extra.is_empty() { t += &wb_core::i18n::f("additional-request", &[("extra", (extra).to_string())]); }
+    let mut t = String::from("[Map update] Bring this session's map up to date with the whole conversation, answers included. \
+Keep every node and its id; do not shorten or merge. Put what was said into the node fields: kind, a label by its kind's \
+rule, detail for the rest, state, links, at/due/requires. Send only what changed; reply in two or three lines.");
+    if let Some((id, label)) = scope { t += &format!("\nScope: branch '{label}' (node {id}) and below. Do not change other branches."); }
+    if let Some(st) = style { t += &format!("\nThe map is shown in the style '{}'{}.", st.name, if st.frame().is_some() { "; fill what it needs (kind, reason, links)" } else { "" }); }
+    if !extra.is_empty() { t += &format!("\nAdditional request: {extra}"); }
     t
 }
 
@@ -819,7 +818,7 @@ mod tests {
     #[test]
     fn requests_are_built_in_order() {
         let t = update_request(None, "", None);
-        assert!(t.starts_with("[Map update]") && t.contains("\n1) Review the whole conversation") && t.contains("\n2) Send only what changed") && !t.contains("Scope") && !t.contains("Additional request"));
+        assert!(t.starts_with("[Map update]") && t.contains("do not shorten or merge") && t.contains("detail for the rest") && !t.contains("Scope") && !t.contains("Additional request"));
         let t = update_request(Some(("n1", "branch")), "more", None);
         assert!(t.contains("Scope: branch 'branch' (node n1)") && t.ends_with("Additional request: more"));
         let r = reflect_request(Some("p"), Some("q1"), &["top".into()], &["- node".into()]);
