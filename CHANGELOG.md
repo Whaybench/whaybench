@@ -47,6 +47,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   has (it is Markdown all the same); before, only documents added from a template add-on showed.
 - A session the person ended no longer comes back in the session list as not running when its own end hook
   arrives.
+- After `/resume` opens a session running in the background, the tab follows it again and the empty session left
+  behind is stopped: the relay finds Claude Code's note of the opening in the transcript, as the old plugin did.
+- The map tool finds its session outside a Whaybench tab too: the hooks note the session by the agent's process,
+  which is also the MCP server's parent; the tab is the fallback.
 
 ## [0.2.0] - 2026-11-12
 

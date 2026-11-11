@@ -1,6 +1,6 @@
 //! `whaybench mcp`: the conversation map tool over the Model Context Protocol (JSON-RPC 2.0, one message per line on
-//! stdin and stdout), so every agent that speaks MCP keeps its map the same way. The agent starts it inside a
-//! Whaybench tab; the tab says which session it is, since no agent tells an MCP server its session id.
+//! stdin and stdout), so every agent that speaks MCP keeps its map the same way. No agent tells an MCP server its
+//! session id: the agent's hooks note it by the agent's process, which is this server's parent; the tab is a fallback.
 use std::io::{self, BufRead, Write};
 
 use serde_json::{Value, json};
@@ -24,8 +24,9 @@ pub fn handle(d: &Data, tab: Option<&str>, msg: &Value) -> Option<Value> {
         "tools/call" => {
             let p = &msg["params"];
             let text = if p["name"] != map_tool::NAME { Err(format!("unknown tool: {}", p["name"])) } else {
-                match tab.and_then(|t| sessions::session_of_tab(d, t)) {
-                    None => Err("This conversation is not in a Whaybench tab, so it has no map here.".to_string()),
+                // The agent's own process says which session it runs, inside a tab or not; the tab is the fallback.
+                match wb_core::hook::session_of_agent(&d.root).or_else(|| tab.and_then(|t| sessions::session_of_tab(d, t))) {
+                    None => Err("No session is known for this conversation yet: its hooks have not run.".to_string()),
                     Some(sid) => map_tool::call(&d.root, &sid, &p["arguments"]).map_err(|e| e.to_string()),
                 }
             };

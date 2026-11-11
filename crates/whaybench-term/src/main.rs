@@ -17,6 +17,8 @@ use screen::{Titles, typed_command};
 use wb_core::{log as record, paths::{self, Data}, sessions};
 
 const TICK: Duration = Duration::from_secs(2);
+/// How long after /resume the relay looks for the session it opened (the old mod looked six times, two seconds apart).
+const RESUME_WATCH: Duration = Duration::from_secs(14);
 /// An attach that ends this soon did not attach.
 const ATTACH_FAILS_WITHIN: Duration = Duration::from_secs(3);
 /// The map tool as Claude Code names it: the plugin `context-map`, its MCP server `whaybench`.
@@ -46,6 +48,8 @@ struct Relay {
     leave_at: Option<Instant>,
     closing: bool,
     map_from: Option<String>,
+    /// When /resume was typed: for a while, look whether it opened a session running in the background.
+    resumed_at: Option<Instant>,
 }
 
 fn size_of(fd: RawFd) -> libc::winsize {
@@ -168,6 +172,11 @@ impl Relay {
             write_all(self.master, b"\r");
             return;
         }
+        if name == "resume" {
+            self.resumed_at = Some(Instant::now());
+            write_all(self.master, b"\r");
+            return;
+        }
         let in_background = self.session.as_deref().is_some_and(sessions::background);
         if !in_background && (name == "background" || name == "bg") {
             if let Some(s) = &self.session { wb_core::hook::note_fork(&self.data.root, s); }
@@ -262,11 +271,28 @@ impl Relay {
                     let _ = fs::write(sessions::alive_dir(&self.data).join(s), self.child.to_string());
                 }
             }
-        } else { self.follow_move(); }
+        } else {
+            self.resumed_somewhere();
+            self.follow_move();
+        }
         if !self.running && self.title == wb_core::i18n::t("ended") { return; }
         if let Some(s) = self.session.clone() {
             let name = sessions::tab_title(&self.data, &s);
             self.set_title(if name.is_empty() { wb_core::i18n::t("new-session") } else { &name });
+        }
+    }
+
+    /// After /resume (the picker finishes later): when it opened a session running in the background, this tab's
+    /// number moves there, so the tab follows it and the empty session left behind is stopped (`follow_move`).
+    fn resumed_somewhere(&mut self) {
+        let Some(at) = self.resumed_at else { return };
+        if at.elapsed() > RESUME_WATCH { self.resumed_at = None; return; }
+        let Some(me) = self.session.clone() else { return };
+        let Some((target, empty)) = sessions::resumed_elsewhere(&self.data, &me) else { return };
+        self.resumed_at = None;
+        match wb_core::session_record::moved(&self.data.root, &me, &target, empty.as_deref()) {
+            Ok(()) => record::decide("session", "number change", "/resume opened a session running in the background", &[("tab", self.tab.clone()), ("old", me), ("new", target), ("empty", empty.unwrap_or_default())]),
+            Err(e) => record::error("session", "move not recorded", &[("error", e.to_string())]),
         }
     }
 
@@ -461,7 +487,7 @@ fn main() {
     let mut relay = Relay {
         data, tab, session, attached: attach.is_some(), master: -1, child: 0, running: false, started: Instant::now(),
         screen: vt100::Parser::new(40, 120, 0), titles: Titles::default(), title: String::new(),
-        leave_at: None, closing: false, map_from,
+        leave_at: None, closing: false, map_from, resumed_at: None,
     };
     relay.set_title(wb_core::i18n::t("new-session"));
     let argv: Vec<String> = match (&attach, &resume) {

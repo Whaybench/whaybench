@@ -55,6 +55,8 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         map::validate(&m)?;
         write_json(&data.join("latest.json"), &m)?;
     }
+    // The agent's process is this session from now on: the MCP server, its child too, finds the session by it.
+    if name == "SessionStart" || name == "UserPromptSubmit" { note_agent_process(data, sid); }
     let carried = if name == "SessionStart" { adopt_fork(data, sid, a, event).or_else(|| carry_in(data, sid)) } else { None };
     let tool = event["tool_name"].as_str().unwrap_or("");
     match name {
@@ -406,6 +408,15 @@ mod tests {
     }
 
     #[test]
+    fn the_session_is_found_by_the_agent_process() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(agent_process().is_some(), "a process above the tests");
+        assert_eq!(session_of_agent(dir.path()), None);
+        note_agent_process(dir.path(), "s1");
+        assert_eq!(session_of_agent(dir.path()).as_deref(), Some("s1"), "a hook and the MCP server under the same agent agree");
+    }
+
+    #[test]
     fn codex_patches_name_their_files_and_globs_match_folders() {
         let patch = json!({"input": "*** Begin Patch\n*** Update File: src/a.rs\n@@\n*** Add File: b.md\n*** End Patch"});
         assert_eq!(touched("apply_patch", &patch), vec![("src/a.rs".to_string(), "edit"), ("b.md".to_string(), "edit")]);
@@ -491,4 +502,39 @@ fn adopt_fork(data: &Path, sid: &str, a: &Agent, event: &Value) -> Option<String
     // The carried record has no tab; this session is in the tab it started in.
     crate::session_record::touch(data, sid, crate::session_record::Touch { prompt: None, tab: a.tab, cwd: None, agent: None }).ok()?;
     None
+}
+
+/// One process: its name, parent and start time (`/proc/<pid>/stat`).
+fn proc_stat(pid: u32) -> Option<(String, u32, u64)> {
+    let text = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let (open, close) = (text.find('(')?, text.rfind(')')?);
+    let rest: Vec<&str> = text[close + 1..].split_whitespace().collect();
+    Some((text[open + 1..close].to_string(), rest.get(1)?.parse().ok()?, rest.get(19)?.parse().ok()?))
+}
+
+/// The agent this program runs under: the nearest process above it that is not a shell. A hook runs through a
+/// shell, the MCP server straight from the agent, so both arrive at the same process. Its id and start time
+/// (an id can be used again later).
+pub fn agent_process() -> Option<(u32, u64)> {
+    const SHELLS: [&str; 6] = ["sh", "bash", "dash", "zsh", "env", "timeout"];
+    let mut pid = std::os::unix::process::parent_id();
+    for _ in 0..8 {
+        let (comm, parent, start) = proc_stat(pid)?;
+        if !SHELLS.contains(&comm.as_str()) { return Some((pid, start)); }
+        pid = parent;
+    }
+    None
+}
+
+fn agent_file(data: &Path, pid: u32) -> std::path::PathBuf { data.join("cache").join("agent-process").join(format!("{pid}.json")) }
+
+fn note_agent_process(data: &Path, sid: &str) {
+    if let Some((pid, start)) = agent_process() { let _ = write_json(&agent_file(data, pid), &json!({"session": sid, "start": start})); }
+}
+
+/// The session of the agent this program runs under, as its hooks last noted it.
+pub fn session_of_agent(data: &Path) -> Option<String> {
+    let (pid, start) = agent_process()?;
+    let noted = read_json(&agent_file(data, pid), Value::Null).ok()?;
+    (noted["start"].as_u64() == Some(start)).then(|| noted["session"].as_str().map(String::from)).flatten()
 }

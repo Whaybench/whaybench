@@ -88,6 +88,39 @@ fn transcript_of(d: &Data, id: &str) -> Option<PathBuf> {
     Some(Path::new(&home).join(".claude/projects").join(folder).join(format!("{id}.jsonl")))
 }
 
+/// After /resume picked a session that runs in the background, Claude Code does not move it into this tab: this
+/// tab's program becomes a window onto it, its own number stands for nothing, and the session the tab was in goes on
+/// in the background, empty when nobody spoke in it. Claude Code notes the opening in the transcript as a system
+/// row; only that row counts (the same words can be in the conversation), and only from the last 90 seconds.
+/// The session opened, and the empty one carried on, if any.
+pub fn resumed_elsewhere(d: &Data, me: &str) -> Option<(String, Option<String>)> {
+    let text = fs::read_to_string(transcript_of(d, me)?).ok()?;
+    let short = opened_short(&text, chrono::Utc::now())?;
+    let target = fs::read_dir(sessions_dir(d)).ok()?.flatten().filter_map(|f| f.file_name().to_string_lossy().strip_suffix(".json").map(String::from))
+        .find(|n| n.starts_with(&short))?;
+    if target == me { return None; }
+    let carried = continued_in_text(&text).filter(|c| c != &target && !has_conversation(d, c));
+    Some((target, carried))
+}
+
+/// The short number of the background session a transcript says was opened in the last 90 seconds.
+fn opened_short(text: &str, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let mut short = None;
+    for line in text.lines().filter(|l| l.contains("running in the background (")) {
+        let Ok(row) = serde_json::from_str::<Value>(line) else { continue };
+        if row["type"] != "system" || row["subtype"] != "local_command" { continue; }
+        let content = row["content"].as_str().unwrap_or("");
+        let Some(rest) = content.strip_prefix("<local-command-stdout>Opening ") else { continue };
+        let Some(at) = rest.find("running in the background (") else { continue };
+        let id = &rest[at + "running in the background (".len()..];
+        let id = id.split(')').next().unwrap_or("");
+        if id.len() != 8 || !id.bytes().all(|b| b.is_ascii_hexdigit()) { continue; }
+        let when = row["timestamp"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok());
+        if when.is_some_and(|t| (now - t.with_timezone(&chrono::Utc)).num_seconds() < 90) { short = Some(id.to_string()); }
+    }
+    short
+}
+
 /// The session a conversation carried on in, by Claude Code's own record. Needed when /background came right
 /// after /resume: the new session has no transcript yet, so the mod takes it for a spare process and does not
 /// take the conversation over.
@@ -633,6 +666,13 @@ mod tests {
         let text = format!("x\n{{\"continuedInSessionId\":\"00000000-0000-4000-8000-000000000001\"}}\n{{\"continuedInSessionId\":\"{id}\",\"a\":1}}\ny");
         assert_eq!(continued_in_text(&text).as_deref(), Some(id));
         assert_eq!(continued_in_text("nothing"), None);
+        // /resume into a background session: only Claude Code's own system row counts, and only a recent one.
+        let now = chrono::Utc::now();
+        let row = |kind: &str, ago: i64| serde_json::json!({"type": kind, "subtype": "local_command", "timestamp": (now - chrono::Duration::seconds(ago)).to_rfc3339(),
+            "content": "<local-command-stdout>Opening Fix the store, running in the background (5813148b)</local-command-stdout>"}).to_string();
+        assert_eq!(opened_short(&row("system", 5), now).as_deref(), Some("5813148b"));
+        assert_eq!(opened_short(&row("user", 5), now), None, "the same words in the conversation do not count");
+        assert_eq!(opened_short(&row("system", 200), now), None, "an old opening does not count");
         assert_eq!(continued_in_text("\"continuedInSessionId\":\"short\""), None);
     }
     #[test]
