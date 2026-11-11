@@ -19,7 +19,7 @@ Call it in the same turn whenever the structure changes: a new topic, task or si
 - \`current\`: the node the conversation is on now.
 - \`nodes\`: the whole map, replacing it. Only for a real regrouping, rarely.
 - \`show\`: true returns the map as text, when you have lost track of its ids.
-Labels are short (a few words) in the conversation's language. A node is open while its question is unsettled; mark it closed once settled, and open it again when the person comes back to it with more to say. Record topics and questions. When the conversation builds something (a game, an app, a setup), keep a branch for it whose children are its parts as in its structure diagram, each with \`state\` (plan, doing, done, changed) updated as the work moves, so the person sees which part is being made, finished or changed without reading code. Keep the two kinds of open node apart: work that could be done now but is put off for later gets \`state: plan\` (drawn □), while an idea or question thought about and paused stays open with no state (drawn ◇). When you lay out a list for the person (options, items, steps), add every item as a child node at once so the list stays beside the chat, and close each as it is done or declined; do not invent next steps nobody has raised.`
+Labels are short (a few words) in the conversation's language. A node is open while its question is unsettled; close it once settled (\`state: done\`, or \`isOpen: false\`), drop it when given up (\`state: dropped\`), and open it again when the person comes back to it with more to say. When a decision settles an open problem, here or in another session, say so at once with a \`resolves\` link to it. Give a node about the same problem as a node in the memory list that node's \`memid\`. Put times, due dates and what a node depends on in \`at\`, \`due\`, \`requires\` and \`assumes\`. Record topics and questions. When the conversation builds something (a game, an app, a setup), keep a branch for it whose children are its parts as in its structure diagram, each with \`state\` (plan, doing, done, changed) updated as the work moves, so the person sees which part is being made, finished or changed without reading code. Keep the two kinds of open node apart: work that could be done now but is put off for later gets \`state: plan\` (drawn □), while an idea or question thought about and paused stays open with no state (drawn ◇). When you lay out a list for the person (options, items, steps), add every item as a child node at once so the list stays beside the chat, and close each as it is done or declined; do not invent next steps nobody has raised.`
 
 export const SCHEMA = {
   type: 'object',
@@ -33,10 +33,15 @@ export const SCHEMA = {
           label: { type: 'string' },
           parent: { type: 'string', description: 'id of the parent node; omit for a top-level topic' },
           isOpen: { type: 'boolean', description: 'true while the question is unsettled' },
-          state: { type: 'string', enum: ['plan', 'doing', 'done', 'changed'], description: 'for a part of something being built; plan = work put off for later (an open idea or question has no state)' },
-          kind: { type: 'string', enum: ['question', 'option', 'pro', 'con', 'conclusion', 'note'], description: 'what the node is in the discussion: conclusion on every settled decision; the other kinds when a map style asks for them' },
+          state: { type: 'string', enum: ['plan', 'doing', 'done', 'changed', 'dropped', 'postponed'], description: 'plan = work put off for later, doing, done = finished or settled (closes), changed, dropped = given up (closes), postponed = put on hold by the person. An open idea or question has no state' },
+          kind: { type: 'string', enum: ['question', 'option', 'pro', 'con', 'conclusion', 'note', 'idea'], description: 'what the node is in the discussion: conclusion on every settled decision; the other kinds when a map style asks for them' },
+          memid: { type: 'string', description: 'the memory id of an existing node in the memory list that is about the same problem; omit for a new problem' },
+          at: { type: 'string', description: 'when it happens: YYYY-MM-DD or YYYY-MM-DD HH:MM (an appointment)' },
+          due: { type: 'string', description: 'by when: YYYY-MM-DD or YYYY-MM-DD HH:MM' },
+          requires: { type: 'string', description: 'what must be done first: node ids of this map with ∧ (and), ∨ (or), ¬ (not), parentheses' },
+          assumes: { type: 'string', description: 'what must hold for it to make sense: node ids with ∧ ∨ ¬' },
           reason: { type: 'string', description: 'one short line: why the conversation moved to this node; give it when a map style asks for it' },
-          links: { type: 'array', items: { type: 'object', properties: { to: { type: 'string' }, rel: { type: 'string', enum: ['cause', 'leads', 'blocks', 'replaces', 'related'] } }, required: ['to', 'rel'] }, description: 'ties to nodes in other branches; give them when a map style asks for them' },
+          links: { type: 'array', items: { type: 'object', properties: { to: { type: 'string' }, rel: { type: 'string', enum: ['cause', 'leads', 'replaces', 'related', 'resolves'] } }, required: ['to', 'rel'] }, description: 'ties to nodes in other branches. resolves: this decision settles that problem (it closes, with what is open under it); replaces: this takes the place of that' },
           source: { type: 'object', properties: { file: { type: 'string' }, node: { type: 'string' }, title: { type: 'string' }, path: { type: 'array', items: { type: 'string' } } }, required: ['file', 'node'], description: 'for a node taken up from an imported map: that map file and node; give it when Whaybench asks' },
         },
         required: ['id', 'label', 'isOpen'],
@@ -51,10 +56,15 @@ export const SCHEMA = {
           label: { type: 'string' },
           parent: { type: 'string', description: 'id of the parent node; empty string for a top-level topic' },
           isOpen: { type: 'boolean', description: 'true while the question is unsettled' },
-          state: { type: 'string', enum: ['plan', 'doing', 'done', 'changed'], description: 'for a part of something being built; plan = work put off for later (an open idea or question has no state)' },
-          kind: { type: 'string', enum: ['question', 'option', 'pro', 'con', 'conclusion', 'note'], description: 'what the node is in the discussion: conclusion on every settled decision; the other kinds when a map style asks for them' },
+          state: { type: 'string', enum: ['plan', 'doing', 'done', 'changed', 'dropped', 'postponed'], description: 'plan = work put off for later, doing, done = finished or settled (closes), changed, dropped = given up (closes), postponed = put on hold by the person. An open idea or question has no state' },
+          kind: { type: 'string', enum: ['question', 'option', 'pro', 'con', 'conclusion', 'note', 'idea'], description: 'what the node is in the discussion: conclusion on every settled decision; the other kinds when a map style asks for them' },
+          memid: { type: 'string', description: 'the memory id of an existing node in the memory list that is about the same problem; omit for a new problem' },
+          at: { type: 'string', description: 'when it happens: YYYY-MM-DD or YYYY-MM-DD HH:MM (an appointment)' },
+          due: { type: 'string', description: 'by when: YYYY-MM-DD or YYYY-MM-DD HH:MM' },
+          requires: { type: 'string', description: 'what must be done first: node ids of this map with ∧ (and), ∨ (or), ¬ (not), parentheses' },
+          assumes: { type: 'string', description: 'what must hold for it to make sense: node ids with ∧ ∨ ¬' },
           reason: { type: 'string', description: 'one short line: why the conversation moved to this node; give it when a map style asks for it' },
-          links: { type: 'array', items: { type: 'object', properties: { to: { type: 'string' }, rel: { type: 'string', enum: ['cause', 'leads', 'blocks', 'replaces', 'related'] } }, required: ['to', 'rel'] }, description: 'ties to nodes in other branches; give them when a map style asks for them' },
+          links: { type: 'array', items: { type: 'object', properties: { to: { type: 'string' }, rel: { type: 'string', enum: ['cause', 'leads', 'replaces', 'related', 'resolves'] } }, required: ['to', 'rel'] }, description: 'ties to nodes in other branches. resolves: this decision settles that problem (it closes, with what is open under it); replaces: this takes the place of that' },
           source: { type: 'object', properties: { file: { type: 'string' }, node: { type: 'string' }, title: { type: 'string' }, path: { type: 'array', items: { type: 'string' } } }, required: ['file', 'node'], description: 'for a node taken up from an imported map: that map file and node; give it when Whaybench asks' },
         },
         required: ['id'],

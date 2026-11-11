@@ -11,6 +11,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Memory: every change to a conversation map is appended as an event (CloudEvents 1.0) to
   `memory/events/<year-month>.jsonl` in the data directory: nodes added, changed and removed, links, and maps
   carried from another session.
+- Map nodes: kind `idea`; states `dropped` and `postponed`; open or closed now follows the state (closing without
+  a state means done). A memory id (`memid`) on every new node, kept through a regrouping. Times and conditions:
+  `at`, `due`, and `requires` / `assumes` over node ids with ∧ ∨ ¬, checked when written. A `resolves` link closes
+  the problem it settles and what is still open under it. The important mark is the person's only.
+
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).
 - `keep_days` and `keep_mb` in the data directory's `settings.json` limit how long and how much conversation
@@ -22,6 +27,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The `blocks` link is gone: what a node depends on is written as `requires`.
 - A saved map's file name, and that of the copy kept when a map is imported, no longer takes its title (which
   is in the interface language): it is `map-<first change>-<last change>.json`, or `branch-<node id>-…` for a
   branch. The times are when the conversation began and was last active, to the minute (session records now

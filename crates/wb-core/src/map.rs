@@ -9,6 +9,10 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// Fields only the program writes; whatever an agent sends for them is dropped.
 const STAMPED: [&str; 4] = ["opened", "changed", "closed", "visits"];
+/// Fields only the person sets (through the alert panel); an agent's value is dropped.
+const PERSON_ONLY: [&str; 1] = ["mark"];
+/// States that close a node; every other state, and none, leaves it open. `removed` is the trash.
+const CLOSING: [&str; 3] = ["done", "dropped", "removed"];
 
 pub(crate) fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
@@ -41,6 +45,23 @@ pub(crate) fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     value.get(key).and_then(Value::as_str).ok_or_else(|| format!("missing string field: {key}").into())
 }
 
+/// A condition: node ids joined by ∧ (and), ∨ (or) and ¬ (not), with parentheses. The node ids it names.
+pub fn condition_ids(expr: &str) -> Result<Vec<String>> {
+    let spaced = expr.replace('(', " ( ").replace(')', " ) ").replace('∧', " ∧ ").replace('∨', " ∨ ").replace('¬', " ¬ ");
+    let (mut ids, mut depth, mut want_term) = (Vec::new(), 0i32, true);
+    for tok in spaced.split_whitespace() {
+        match tok {
+            "(" | "¬" if want_term => { if tok == "(" { depth += 1; } }
+            ")" if !want_term && depth > 0 => depth -= 1,
+            "∧" | "∨" if !want_term => want_term = true,
+            id if want_term && safe_id(id).is_ok() => { ids.push(id.to_string()); want_term = false; }
+            _ => return Err(format!("condition is not well formed: {expr}").into()),
+        }
+    }
+    if want_term || depth != 0 { return Err(format!("condition is not well formed: {expr}").into()); }
+    Ok(ids)
+}
+
 pub fn validate(map: &Value) -> Result<()> {
     let nodes = map.get("nodes").and_then(Value::as_array).ok_or("map requires nodes array")?;
     let mut ids = HashSet::new();
@@ -49,6 +70,15 @@ pub fn validate(map: &Value) -> Result<()> {
         text(node, "label")?;
         if node.get("isOpen").is_some_and(|v| !v.is_boolean()) { return Err("isOpen must be a boolean".into()); }
         if !ids.insert(id) { return Err("duplicate node id".into()); }
+    }
+    for node in nodes {
+        for key in ["requires", "assumes"] {
+            if let Some(expr) = node.get(key).and_then(Value::as_str) {
+                if let Some(missing) = condition_ids(expr)?.into_iter().find(|i| !ids.contains(i.as_str())) {
+                    return Err(format!("{key} names a node that is not in the map: {missing}").into());
+                }
+            }
+        }
     }
     if let Some(current) = map.get("current").filter(|v| !v.is_null()) {
         if !current.as_str().is_some_and(|id| ids.contains(id)) { return Err("current must refer to a node".into()); }
@@ -72,7 +102,23 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value) -> Result<()> 
         let before = index.map(|i| nodes[i].clone());
         let mut merged = before.clone().unwrap_or_else(|| json!({"id":id,"label":id,"isOpen":true}));
         for (key, value) in raw.as_object().ok_or("node must be an object")? {
-            if !STAMPED.contains(&key.as_str()) { merged[key] = value.clone(); }
+            if !STAMPED.contains(&key.as_str()) && !PERSON_ONLY.contains(&key.as_str()) { merged[key] = value.clone(); }
+        }
+        // Open or closed follows the state: a closing state closes, closing without one means done, reopening
+        // drops a closing state.
+        let state = merged.get("state").and_then(Value::as_str).unwrap_or("").to_string();
+        if raw.get("state").is_some() {
+            merged["isOpen"] = json!(!CLOSING.contains(&state.as_str()));
+        } else if raw.get("isOpen") == Some(&json!(false)) && !CLOSING.contains(&state.as_str()) {
+            merged["state"] = json!("done");
+        } else if raw.get("isOpen") == Some(&json!(true)) && CLOSING.contains(&state.as_str()) {
+            merged.as_object_mut().unwrap().shift_remove("state");
+        }
+        // A new node without a memory id the agent chose starts its own.
+        if before.is_none() && merged.get("memid").and_then(Value::as_str).is_none_or(str::is_empty) {
+            static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            merged["memid"] = json!(format!("m{:x}-{:x}-{n:x}", stamp["at"].as_u64().unwrap_or(0), std::process::id()));
         }
         for key in ["parent", "reason"] {
             if merged[key] == "" { merged.as_object_mut().unwrap().shift_remove(key); }
@@ -94,6 +140,27 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value) -> Result<()> 
         if let Some(i) = index { nodes[i] = merged; } else { nodes.push(merged); }
     }
     Ok(())
+}
+
+/// A `resolves` link sent in this change settles its target: the target and what is still open under it become done.
+fn resolve(nodes: &mut [Value], changes: &Value, stamp: &Value) {
+    let targets: Vec<String> = changes.as_array().into_iter().flatten()
+        .flat_map(|c| c.get("links").and_then(Value::as_array).cloned().unwrap_or_default())
+        .filter(|l| l["rel"] == "resolves").filter_map(|l| l["to"].as_str().map(String::from)).collect();
+    let mut settle: HashSet<String> = targets.into_iter().collect();
+    loop {
+        let before = settle.len();
+        for n in nodes.iter() {
+            if n.get("parent").and_then(Value::as_str).is_some_and(|p| settle.contains(p)) { settle.insert(n["id"].as_str().unwrap_or("").to_string()); }
+        }
+        if settle.len() == before { break; }
+    }
+    for n in nodes.iter_mut().filter(|n| settle.contains(n["id"].as_str().unwrap_or("")) && n["isOpen"] != false) {
+        n["state"] = json!("done");
+        n["isOpen"] = json!(false);
+        n["changed"] = stamp.clone();
+        n["closed"] = stamp.clone();
+    }
 }
 
 /// `whaybench map SESSION [--write]`: without a change, the map as stored; with one (`upsert`, `remove`,
@@ -136,11 +203,21 @@ fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> {
     let stamp = json!({"at":now_ms(),"turn":map.get("turn").and_then(Value::as_u64).unwrap_or(0)});
     let mut nodes = if let Some(replacement) = input.get("nodes") {
         validate(&json!({"nodes":replacement}))?;
+        // A regrouping keeps each node's memory id: the agent sends the nodes without it.
+        let mut replacement = replacement.clone();
+        for n in replacement.as_array_mut().into_iter().flatten() {
+            if n.get("memid").is_none() {
+                if let Some(m) = before.iter().find(|o| o["id"] == n["id"]).and_then(|o| o.get("memid")).cloned() { n["memid"] = m; }
+            }
+        }
         let mut nodes = Vec::new();
-        upsert(&mut nodes, replacement, &stamp)?;
+        upsert(&mut nodes, &replacement, &stamp)?;
         nodes
     } else { map["nodes"].as_array().unwrap().clone() };
-    if let Some(changes) = input.get("upsert") { upsert(&mut nodes, changes, &stamp)?; }
+    if let Some(changes) = input.get("upsert") {
+        upsert(&mut nodes, changes, &stamp)?;
+        resolve(&mut nodes, changes, &stamp);
+    }
     let mut gone = HashSet::new();
     if let Some(remove) = input.get("remove") {
         for id in remove.as_array().ok_or("remove must be an array")? {
@@ -239,6 +316,43 @@ pub fn free_path(dir: &Path, name: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_follows_the_state_and_the_mark_is_the_persons() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let up = |c: Value| command(dir.path(), "s", Some(json!({"upsert": [c]})));
+        let map = up(json!({"id":"q","label":"question","isOpen":true,"mark":"important"}))?;
+        assert!(map["nodes"][0].get("mark").is_none(), "an agent cannot set the mark");
+        assert!(map["nodes"][0]["memid"].as_str().is_some_and(|m| !m.is_empty()), "a new node starts its own memory id");
+        let map = up(json!({"id":"q","isOpen":false}))?;
+        assert_eq!((map["nodes"][0]["state"].as_str(), map["nodes"][0]["isOpen"].as_bool()), (Some("done"), Some(false)));
+        let map = up(json!({"id":"q","isOpen":true}))?;
+        assert!(map["nodes"][0].get("state").is_none(), "reopening drops the closing state");
+        let map = up(json!({"id":"q","state":"dropped"}))?;
+        assert_eq!(map["nodes"][0]["isOpen"], json!(false));
+        let map = up(json!({"id":"q","state":"postponed"}))?;
+        assert_eq!(map["nodes"][0]["isOpen"], json!(true));
+        let map = command(dir.path(), "s", Some(json!({"upsert": [{"id":"o","label":"option","isOpen":true,"parent":"q"},
+            {"id":"d","label":"decided","isOpen":false,"links":[{"to":"q","rel":"resolves"}]}]})))?;
+        let get = |id: &str| map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).cloned().unwrap();
+        assert_eq!((get("q")["state"].as_str(), get("o")["isOpen"].as_bool()), (Some("done"), Some(false)), "resolves settles the problem and what is open under it");
+        let memid = get("q")["memid"].clone();
+        let map = command(dir.path(), "s", Some(json!({"nodes": [{"id":"q","label":"regrouped","isOpen":true}]})))?;
+        let map = json!({"nodes": [map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "q").unwrap()]});
+        assert_eq!(map["nodes"][0]["memid"], memid, "a regrouping keeps the memory id");
+        Ok(())
+    }
+
+    #[test]
+    fn conditions_name_nodes_with_and_or_not() -> Result<()> {
+        assert_eq!(condition_ids("a ∧ (b ∨ ¬c)")?, ["a", "b", "c"]);
+        for bad in ["a ∧", "(a", "a b", "∧ a", "a)"] { assert!(condition_ids(bad).is_err(), "{bad}"); }
+        let dir = tempfile::tempdir()?;
+        command(dir.path(), "s", Some(json!({"upsert": [{"id":"a","label":"A","isOpen":true}]})))?;
+        assert!(command(dir.path(), "s", Some(json!({"upsert": [{"id":"b","label":"B","isOpen":true,"requires":"a ∧ x"}]}))).is_err(), "x is not in the map");
+        command(dir.path(), "s", Some(json!({"upsert": [{"id":"b","label":"B","isOpen":true,"requires":"a","due":"2026-12-01"}]})))?;
+        Ok(())
+    }
 
     #[test]
     fn invalid_map_cannot_replace_a_valid_map() -> Result<()> {

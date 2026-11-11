@@ -3,12 +3,20 @@ export type MapNode = {
   label: string
   parent?: string
   isOpen: boolean
-  // For a part of something being built: planned, being worked on, finished, or changed since finished.
-  state?: 'plan' | 'doing' | 'done' | 'changed'
-  // Filled by Claude when a map style needs them.
-  kind?: 'question' | 'option' | 'pro' | 'con' | 'conclusion' | 'note'
+  // done, dropped and removed (the trash) close a node; the others, and none, leave it open.
+  state?: 'plan' | 'doing' | 'done' | 'changed' | 'dropped' | 'postponed' | 'removed'
+  kind?: 'question' | 'option' | 'pro' | 'con' | 'conclusion' | 'note' | 'idea'
   reason?: string
-  links?: { to: string; rel: 'cause' | 'leads' | 'blocks' | 'replaces' | 'related' }[]
+  links?: { to: string; rel: 'cause' | 'leads' | 'replaces' | 'related' | 'resolves' }[]
+  // The memory id: nodes about the same problem, in any session, share it.
+  memid?: string
+  // When and on what the node depends: a time, a due date, and conditions over node ids with ∧ ∨ ¬.
+  at?: string
+  due?: string
+  requires?: string
+  assumes?: string
+  // Set by the person only: important (!).
+  mark?: 'important'
   // Where a node taken up from an imported map came from (Whaybench's continue-from-this-map).
   source?: { file: string; node: string; title?: string; path?: string[] }
   // Recorded by the mod itself, never by Claude: when the node opened, last changed and closed,
