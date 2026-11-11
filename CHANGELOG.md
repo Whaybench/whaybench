@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
 ### Added
 
 - Memory: every change to a conversation map is appended as an event (CloudEvents 1.0) to
@@ -42,7 +44,6 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Map marks: ✕ for a dropped node and ‖ for one on hold, in the map panel, its styles and Claude's map text.
 - `whaybench statusline`: a Claude Code status line showing context and the 5-hour and weekly plan usage with
   their reset times; the same numbers appear under the alerts panel. The README shows the setting to add.
-
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).
 - `keep_days` and `keep_mb` in the data directory's `settings.json` limit how long and how much conversation
