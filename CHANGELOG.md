@@ -23,6 +23,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Alerts panel: nodes with a time or due date, the person's marked ones, what changed since they last looked, AI
   suggestions, held nodes and the trash. Right click: done, drop, hold, reopen, move to trash, mark important,
   open the session. The person's choices are written to that session's map and recorded as theirs.
+- Map nodes: kinds `task`, `appointment`, `problem`, `fact` and `rule`, and a `detail` field for what does not fit
+  the short label (shown on hover in the map and alerts panels, searched by `whaybench memory search`). Claude is
+  told a label rule per kind.
 
 - An imported map can be handed to the session whole: Refer to the map (whole map), next to Refer to the map
   (this branch).

@@ -140,6 +140,11 @@ question = 질문
 option = 선택지
 conclusion = 결론
 note = 메모
+kind-task = 할 일
+kind-appointment = 약속
+kind-problem = 문제
+kind-fact = 사실
+kind-rule = 규칙
 open-below = {" "}<span class='cnt'>· 하위 미완료 { $o }</span>
 done-folded = <li class='fold'>완료 { $hidden }개 접힘</li>
 open-2 = <li class='{ $a1 } one'><span class='g'>{ $a2 }</span><span class='t' data-n='{ $a3 }'>{ $a4 }</span> <span class='cnt'>· 미완료 { $o }</span></li>

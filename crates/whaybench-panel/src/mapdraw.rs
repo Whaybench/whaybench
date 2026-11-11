@@ -14,7 +14,7 @@ fn cut(t: &str, n: usize) -> String { t.chars().take(n).collect() }
 fn is_open(n: &Value) -> bool { n.get("isOpen") != Some(&Value::Bool(false)) && s(n, "state") != "done" }
 
 fn kind_of(k: &str) -> Option<(&'static str, &'static str)> {
-    Some(match k { "question" => (wb_core::i18n::t("question"), "#8839ef"), "option" => (wb_core::i18n::t("option"), "#7c7f93"), "pro" => ("+", "#40a02b"), "con" => ("−", "#d20f39"), "conclusion" => (wb_core::i18n::t("conclusion"), "#1e66f5"), "note" => (wb_core::i18n::t("note"), "#9ca0b0"), _ => return None })
+    Some(match k { "question" => (wb_core::i18n::t("question"), "#8839ef"), "option" => (wb_core::i18n::t("option"), "#7c7f93"), "pro" => ("+", "#40a02b"), "con" => ("−", "#d20f39"), "conclusion" => (wb_core::i18n::t("conclusion"), "#1e66f5"), "note" => (wb_core::i18n::t("note"), "#9ca0b0"), "idea" => (wb_core::i18n::t("idea"), "#ea76cb"), "task" => (wb_core::i18n::t("kind-task"), "#fe640b"), "appointment" => (wb_core::i18n::t("kind-appointment"), "#179299"), "problem" => (wb_core::i18n::t("kind-problem"), "#e64553"), "fact" => (wb_core::i18n::t("kind-fact"), "#5c5f77"), "rule" => (wb_core::i18n::t("kind-rule"), "#df8e1d"), _ => return None })
 }
 
 fn glyph(n: &Value, current: &str) -> &'static str {

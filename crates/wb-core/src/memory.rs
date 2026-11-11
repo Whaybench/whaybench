@@ -164,11 +164,11 @@ pub fn show(data: &Path, key: &str) -> Value {
     json!({"nodes": found, "events": evs})
 }
 
-/// Nodes of every session whose label holds any of the words (any case), most recent first.
+/// Nodes of every session whose label or detail holds any of the words (any case), most recent first.
 pub fn search(data: &Path, words: &[String], limit: usize) -> Vec<String> {
     let words: Vec<String> = words.iter().map(|w| w.to_lowercase()).filter(|w| !w.is_empty()).collect();
     let mut hits: Vec<(String, Value)> = maps(data).into_iter().flat_map(|(s, nodes, _)| nodes.into_iter().map(move |n| (s.clone(), n)))
-        .filter(|(_, n)| n["label"].as_str().is_some_and(|l| { let l = l.to_lowercase(); words.iter().any(|w| l.contains(w)) })).collect();
+        .filter(|(_, n)| { let l = format!("{} {}", n["label"].as_str().unwrap_or(""), n["detail"].as_str().unwrap_or("")).to_lowercase(); words.iter().any(|w| l.contains(w)) }).collect();
     hits.sort_by_key(|(_, n)| std::cmp::Reverse(when(n)));
     hits.iter().take(limit).map(|(s, n)| line(s, n)).collect()
 }
@@ -310,7 +310,7 @@ mod tests {
         let map = |nodes: Value| json!({"nodes": nodes, "updatedAt": now}).to_string();
         fs::write(dir.path().join(format!("{me}.json")), map(json!([{"id":"q","label":"Pick a store","isOpen":true,"memid":"m1"},{"id":"x","label":"old","isOpen":false}]))).unwrap();
         fs::write(dir.path().join(format!("{other}.json")), map(json!([{"id":"a","label":"Store choice","isOpen":true,"memid":"m1","opened":{"at":1}},
-            {"id":"b","label":"unrelated","isOpen":true,"memid":"m9","opened":{"at":now}}]))).unwrap();
+            {"id":"b","label":"unrelated","detail":"the long sentence about a Warehouse","isOpen":true,"memid":"m9","opened":{"at":now}}]))).unwrap();
         let lines = list(dir.path(), me, 10);
         assert!(lines[0].starts_with("m1 · Pick a store"), "own open node first");
         assert!(!lines.iter().any(|l| l.contains("Store choice")), "same memory id: one line");
@@ -328,6 +328,7 @@ mod tests {
         assert_eq!(d.len(), 2, "the change on its memory id and the person's mark, not an unrelated node: {d:?}");
         assert!(delta(dir.path(), me).is_empty(), "seen once");
         assert_eq!(search(dir.path(), &["store".into()], 5).len(), 2);
+        assert_eq!(search(dir.path(), &["warehouse".into()], 5).len(), 1, "the detail is searched too");
         assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 2);
     }
 

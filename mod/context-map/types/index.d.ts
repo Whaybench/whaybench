@@ -5,7 +5,9 @@ export type MapNode = {
   isOpen: boolean
   // done, dropped and removed (the trash) close a node; the others, and none, leave it open.
   state?: 'plan' | 'doing' | 'done' | 'changed' | 'dropped' | 'postponed' | 'removed'
-  kind?: 'question' | 'option' | 'pro' | 'con' | 'conclusion' | 'note' | 'idea'
+  kind?: 'question' | 'option' | 'pro' | 'con' | 'conclusion' | 'task' | 'appointment' | 'problem' | 'idea' | 'fact' | 'rule' | 'note'
+  // What does not fit the short label: the full sentence, a reason, symptoms.
+  detail?: string
   reason?: string
   links?: { to: string; rel: 'cause' | 'leads' | 'replaces' | 'related' | 'resolves' }[]
   // The memory id: nodes about the same problem, in any session, share it.

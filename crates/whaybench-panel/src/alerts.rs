@@ -44,6 +44,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
             let label = gtk::Label::new(Some(item["line"].as_str().unwrap_or("")));
             label.set_xalign(0.0);
             label.set_wrap(true);
+            if let Some(t) = item["node"].get("detail").and_then(Value::as_str) { label.set_tooltip_text(Some(t)); }
             let row = gtk::ListBoxRow::new();
             row.set_child(Some(&label));
             row.set_widget_name(&format!("{}\t{}\t{}", item["session"].as_str().unwrap_or(""), item["node"]["id"].as_str().unwrap_or(""), item["node"].get("mark").is_some()));

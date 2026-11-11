@@ -146,7 +146,7 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value, person: bool) 
             let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             merged["memid"] = json!(format!("m{:x}-{:x}-{n:x}", stamp["at"].as_u64().unwrap_or(0), std::process::id()));
         }
-        for key in ["parent", "reason"] {
+        for key in ["parent", "reason", "detail"] {
             if merged[key] == "" { merged.as_object_mut().unwrap().shift_remove(key); }
         }
         if let Some(old) = &before {

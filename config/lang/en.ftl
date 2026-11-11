@@ -140,6 +140,11 @@ question = Question
 option = Option
 conclusion = Conclusion
 note = Note
+kind-task = Task
+kind-appointment = Appointment
+kind-problem = Problem
+kind-fact = Fact
+kind-rule = Rule
 open-below = {" "}<span class='cnt'>· { $o } open below</span>
 done-folded = <li class='fold'>{ $hidden } done, folded</li>
 open-2 = <li class='{ $a1 } one'><span class='g'>{ $a2 }</span><span class='t' data-n='{ $a3 }'>{ $a4 }</span> <span class='cnt'>· { $o } open</span></li>

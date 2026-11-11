@@ -9,7 +9,7 @@ import { PATCHES } from './paths'
 
 // Fields a side worker filled for a map style, outside the conversation: Whaybench's
 // A map style's fill runs the map fill (whaybench-panel mapfill), which writes <session id>.json here; only these keys are taken.
-const KINDS = ['question', 'option', 'pro', 'con', 'conclusion', 'note', 'idea']
+const KINDS = ['question', 'option', 'pro', 'con', 'conclusion', 'task', 'appointment', 'problem', 'idea', 'fact', 'rule', 'note']
 const RELS = ['cause', 'leads', 'replaces', 'related', 'resolves']
 
 export async function applyPatches($: EngineInterface, sessionId: string) {

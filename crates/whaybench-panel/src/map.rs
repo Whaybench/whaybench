@@ -545,6 +545,7 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
             label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
             label.set_hexpand(true);
             if here { label.add_css_class("now"); } else if !is_open(n) { label.add_css_class("dim"); }
+            if let Some(t) = n.get("detail").and_then(Value::as_str) { label.set_tooltip_text(Some(t)); }
             area.append(&label);
             // Came from an imported map: marked, a double press opens it where it was.
             if let Some(src) = n.get("source").filter(|x| !s(x, "file").is_empty()).cloned() {
