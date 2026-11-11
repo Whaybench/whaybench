@@ -8,6 +8,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Claude Code connects the way Codex does: the `context-map` plugin is now only configuration, standard hooks that
+  call `whaybench hook claude` and the MCP server `whaybench mcp` for the map tool, with no code of its own. The
+  relay allows the map tool when it starts Claude Code, types queued requests into the tab as a paste once the turn
+  is over (for both agents), and notes `/background` and `/rewind` for the hooks. A map style's fill is written
+  to the map directly.
 - `whaybench hook claude|codex`: one handler for both agents' standard hook events. Codex sessions now get what
   Claude Code sessions get: the memory list at the start and after a compaction, the memory changes and the files
   the person changed on each prompt, the view panel note, and file records for what `apply_patch` changed.
@@ -30,6 +35,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- The plugin's TypeScript code, its map pane inside Claude Code outside Whaybench and its `/map` command: the
+  Whaybench map panel shows the map. Outside a Whaybench tab the map tool has no session to write to.
+- Requests to a session that no tab shows (one in the background): they can only be typed into a tab now.
 - The context percentage in the sessions panel: nothing wrote it. Context and plan usage show in Claude Code's
   status line and under the alerts panel.
 

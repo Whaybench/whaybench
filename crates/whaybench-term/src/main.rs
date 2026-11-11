@@ -19,6 +19,8 @@ use wb_core::{log as record, paths::{self, Data}, sessions};
 const TICK: Duration = Duration::from_secs(2);
 /// An attach that ends this soon did not attach.
 const ATTACH_FAILS_WITHIN: Duration = Duration::from_secs(3);
+/// The map tool as Claude Code names it: the plugin `context-map`, its MCP server `whaybench`.
+const MAP_TOOL: &str = "mcp__plugin_context-map_whaybench__context_map";
 /// After /background, how long Claude Code gets before its program is stopped.
 const AFTER_BACKGROUND: Duration = Duration::from_secs(4);
 /// After ending a session, how long until its tab goes.
@@ -79,7 +81,10 @@ impl Relay {
         } else { sessions::claude_program() };
         let c_program = CString::new(program.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
         let mut argv: Vec<CString> = vec![c_program.clone()];
-        let args = if codex { wb_core::codex::args(args) } else { args.to_vec() };
+        let mut args = if codex { wb_core::codex::args(args) } else { args.to_vec() };
+        // The map is kept every turn: its tool (the plugin's MCP server) runs without asking. Attaching to a session
+        // in the background takes no options; that session was started with them.
+        if !codex && args.first().is_none_or(|a| a != "attach") { args.extend(["--allowedTools".into(), MAP_TOOL.into()]); }
         for a in &args { argv.push(CString::new(a.as_bytes()).map_err(|e| e.to_string())?); }
         let mut ptrs: Vec<*const libc::c_char> = argv.iter().map(|a| a.as_ptr()).collect();
         ptrs.push(std::ptr::null());
@@ -157,7 +162,16 @@ impl Relay {
     /// A session in the background: /exit ends it for real and closes the tab; /background does nothing,
     /// because on a background session Claude Code would start an empty one.
     fn slash(&mut self, name: &str) {
+        // The agent's hooks cannot see these commands: the map does not roll back, and the next session takes it over.
+        if ["rewind", "checkpoint", "undo"].contains(&name) {
+            if let Some(s) = &self.session { wb_core::hook::note_rewind(&self.data.root, s); }
+            write_all(self.master, b"\r");
+            return;
+        }
         let in_background = self.session.as_deref().is_some_and(sessions::background);
+        if !in_background && (name == "background" || name == "bg") {
+            if let Some(s) = &self.session { wb_core::hook::note_fork(&self.data.root, s); }
+        }
         record::decide("session", "typed command", if in_background { "a background session" } else { "this tab's session" }, &[("tab", self.tab.clone()), ("command", name.to_string())]);
         if !in_background {
             write_all(self.master, b"\r");
@@ -188,6 +202,7 @@ impl Relay {
         let hand_over = self.running && !self.attached && self.session.as_deref().is_some_and(|s| sessions::alive(&self.data, s) && sessions::has_conversation(&self.data, s));
         if hand_over {
             // Started in this tab: hand it to the supervisor instead of ending it.
+            if let Some(s) = &self.session { wb_core::hook::note_fork(&self.data.root, s); }
             write_all(self.master, b"/background\r");
             record::decide("session", "moved to the background", "the tab closed; the session goes on", &[("session", self.session.clone().unwrap_or_default())]);
             self.leave_at = Some(Instant::now() + AFTER_BACKGROUND);
@@ -296,8 +311,8 @@ impl Relay {
 
     /// Text the program or a panel wants typed into this session: `{"text": "...", "enter": true}`.
     fn requests(&mut self) {
-        // Do not paste a queued prompt into Codex's permission dialog or an active turn.
-        if wb_core::codex::active() {
+        // Do not paste a queued prompt into a permission dialog or an active turn, whatever the agent.
+        {
             if let Some(s) = &self.session {
                 let ready = fs::read_to_string(sessions::state_dir(&self.data).join(format!("{s}.json"))).ok()
                     .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
@@ -321,10 +336,10 @@ impl Relay {
                     }
                 }
             }
-            let codex = wb_core::codex::active();
-            if codex { write_all(self.master, b"\x1b[200~"); }
+            // As a paste, so a request of several lines arrives whole instead of each line being sent.
+            write_all(self.master, b"\x1b[200~");
             write_all(self.master, text.as_bytes());
-            if codex { write_all(self.master, b"\x1b[201~"); }
+            write_all(self.master, b"\x1b[201~");
             if v.get("enter").and_then(|e| e.as_bool()).unwrap_or(false) {
                 // Claude Code reads pasted text and Enter apart only with a moment between them.
                 std::thread::sleep(Duration::from_millis(150));

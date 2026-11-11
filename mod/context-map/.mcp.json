@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "whaybench": {
+      "command": "${HOME}/.local/bin/whaybench",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

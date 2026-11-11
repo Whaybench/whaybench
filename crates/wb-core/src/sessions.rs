@@ -536,9 +536,8 @@ pub fn request_kind(text: &str) -> String {
     "person's input".into()
 }
 
-/// Queues text for a session's map mod to submit as if typed. Only for a session running now: the mod submits
-/// whatever is queued when a session next starts, so a request left for a stopped one would run hours later,
-/// after the work was done elsewhere. True when queued.
+/// Queues text for a session's tab to type in, as if typed. Only for a session running now: a request left for a
+/// stopped one would run hours later, after the work was done elsewhere. True when queued.
 pub fn queue_prompt(d: &Data, id: &str, text: &str) -> bool {
     let now = current_id(d, id);
     let kind = request_kind(text);
@@ -546,19 +545,16 @@ pub fn queue_prompt(d: &Data, id: &str, text: &str) -> bool {
         record::decide("request", "request not sent", "the session is not running (no heartbeat)", &[("session", id.to_string()), ("kind", kind)]);
         return false;
     }
-    if record_of(d, &now).and_then(|r| r.get("agent").and_then(Value::as_str).map(String::from)).as_deref() == Some("codex") {
-        let Some(tab) = open_tabs(d).into_iter().find(|t| t.session.as_deref() == Some(&now)) else { return false };
-        let seq = SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0);
-        return write_atomic(&tab_inbox(d, &tab.tab).join(format!("{seq}.json")), &serde_json::json!({"text": text, "enter": true}).to_string()).is_ok();
-    }
-    let path = d.cache().join("inbox").join(format!("{now}.json"));
-    let mut queued = read_json(&path).and_then(|v| v.as_array().cloned()).unwrap_or_default();
-    let seq = SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_micros() as u64).unwrap_or(0);
-    queued.push(serde_json::json!({"seq": seq, "text": text}));
-    let skip = queued.len().saturating_sub(20);
-    let kept: Vec<Value> = queued.into_iter().skip(skip).collect();
-    if write_atomic(&path, &Value::Array(kept).to_string()).is_err() { return false; }
-    record::decide("request", "request queued", "the session is running", &[("request", seq.to_string()), ("session", now), ("kind", kind), ("chars", text.chars().count().to_string())]);
+    // The tab's relay types it in once the session has finished its turn, whatever the agent. A session no tab
+    // shows (one running in the background) cannot be typed into.
+    let tab = open_tabs(d).into_iter().find(|t| t.session.as_deref() == Some(&now)).map(|t| t.tab);
+    let Some(tab) = tab else {
+        record::decide("request", "request not sent", "no tab shows the session", &[("session", now), ("kind", kind)]);
+        return false;
+    };
+    let seq = SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0);
+    if write_atomic(&tab_inbox(d, &tab).join(format!("{seq}.json")), &serde_json::json!({"text": text, "enter": true}).to_string()).is_err() { return false; }
+    record::decide("request", "request queued", "the session is running", &[("request", seq.to_string()), ("session", now), ("tab", tab), ("kind", kind), ("chars", text.chars().count().to_string())]);
     true
 }
 
@@ -653,19 +649,18 @@ mod tests {
         assert_eq!(session_of_tab(&d, "t1").as_deref(), Some("new"));
     }
     #[test]
-    fn requests_go_only_to_a_running_session_and_keep_the_last_20() {
+    fn requests_go_only_to_a_running_session_in_a_tab() {
         let d = data("queue");
         fs::create_dir_all(alive_dir(&d)).unwrap();
         rec(&d, "old", serde_json::json!({"id":"old","movedTo":"new"}));
         rec(&d, "new", serde_json::json!({"id":"new"}));
         assert!(!queue_prompt(&d, "old", "text"), "not running");
-        assert!(!d.cache().join("inbox/new.json").exists());
         fs::write(alive_dir(&d).join("new"), "1").unwrap();
-        for i in 0..25 { assert!(queue_prompt(&d, "old", &format!("text{i}"))); }
-        let q = read_json(&d.cache().join("inbox/new.json")).unwrap();
-        let q = q.as_array().unwrap();
-        assert_eq!(q.len(), 20, "goes to where the session lives now");
-        assert_eq!(q[19]["text"], "text24");
+        assert!(!queue_prompt(&d, "old", "text"), "no tab shows it");
+        write_tab(&d, "t1", Some("new"), false);
+        assert!(queue_prompt(&d, "old", "first line\nsecond"), "goes to the tab where the session lives now");
+        let queued: Vec<_> = fs::read_dir(tab_inbox(&d, "t1")).unwrap().flatten().collect();
+        assert_eq!(queued.len(), 1);
     }
     #[test]
     fn codex_requests_require_a_tab_and_go_to_its_relay() {

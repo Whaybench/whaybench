@@ -6,10 +6,12 @@
     cargo test --workspace
     cargo run --release -p whaybench -- --app alacritty
 
-After changing `mod/context-map`, run `claude plugin validate mod/context-map`. It does not catch every syntax
-error, so also run one short session with a temporary data folder and check that it logs:
+After changing `mod/context-map` or the hook and MCP code (`crates/wb-core/src/hook.rs`, `map_tool.rs`,
+`crates/whaybench/src/mcp.rs`), run `claude plugin validate mod/context-map`, build the release binary (the plugin
+calls `~/.local/bin/whaybench`), and run one short session with a temporary data folder that uses the map tool:
 
-    d=$(mktemp -d); WHAYBENCH_DATA_DIR=$d claude -p "Reply ok." && ls $d/logs/sessions
+    d=$(mktemp -d); WHAYBENCH_DATA_DIR=$d WHAYBENCH_TAB=t1 claude -p "Add a topic 'test' with the context_map tool." \
+      --allowedTools=mcp__plugin_context-map_whaybench__context_map && ls $d/sessions && cat $d/*-*.json
 
 ## Rules
 

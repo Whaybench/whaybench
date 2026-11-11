@@ -154,8 +154,10 @@ Map nodes you delete wait in the Deleted section of the alerts panel, where they
 Whaybench is a nested Wayland compositor written in Rust with [Smithay](https://github.com/Smithay/smithay). Each
 panel is its own app in its own area: GTK 4 apps for the product panels, Alacritty for the terminals, WebKit and
 Firefox for views. The agent runs unchanged in the terminal; a small relay between Alacritty and the agent knows
-which session a tab holds. The Claude Code plugin and the Codex hooks write what the panels read through one
-command, `whaybench`, so the files are the same whichever agent wrote them.
+which session a tab holds. Both agents connect the same way: their standard hooks call `whaybench hook`, and the
+conversation map tool is the MCP server `whaybench mcp` (for Claude Code through the `context-map` plugin, which
+holds only that configuration). So the files the panels read are the same whichever agent wrote them, and a
+session of one agent sees what the other decided.
 
 ## FAQ
 

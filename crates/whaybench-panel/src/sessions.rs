@@ -35,9 +35,6 @@ fn pairs(d: &Data, info: &Value) -> Vec<(&'static str, String)> {
     }
     let read = |p: std::path::PathBuf| std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
     if let Some(a) = read(d.root.join("answers").join(format!("{id}.json"))) { out.push((wb_core::i18n::t("answer"), text(&a, "text").to_string())); }
-    if let Some(q) = read(d.cache().join("inbox").join(format!("{id}.json"))) {
-        for m in q.as_array().into_iter().flatten() { out.push((wb_core::i18n::t("input"), text(m, "text").to_string())); }
-    }
     out
 }
 

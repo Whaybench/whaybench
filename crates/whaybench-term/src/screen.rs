@@ -1,6 +1,6 @@
 //! Reading what Claude Code draws, and keeping its window titles from reaching the terminal.
 
-const COMMANDS: [&str; 4] = ["exit", "quit", "background", "bg"];
+const COMMANDS: [&str; 7] = ["exit", "quit", "background", "bg", "rewind", "checkpoint", "undo"];
 
 /// The command on Claude Code's input line, when it is the only thing typed there. The line is read as drawn:
 /// a prompt mark, then the command, then possibly the input box's right border.

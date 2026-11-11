@@ -323,6 +323,27 @@ fn map_nodes(data: &Path, sid: &str) -> Result<Vec<Value>> {
     Ok(read_json(&data.join(format!("{}.json", safe_id(sid)?)), json!({"nodes":[]}))?["nodes"].as_array().cloned().unwrap_or_default())
 }
 
+/// A side worker's fill for a map style: only kind, reason and links of nodes that exist, with known values.
+/// shortcut: recorded as the session's own change, like before; a worker source is not told apart yet.
+pub fn fill(data: &Path, sid: &str, items: &[Value]) -> Result<usize> {
+    const KINDS: [&str; 12] = ["question", "option", "pro", "con", "conclusion", "task", "appointment", "problem", "idea", "fact", "rule", "note"];
+    const RELS: [&str; 5] = ["cause", "leads", "replaces", "related", "resolves"];
+    let nodes = map_nodes(data, sid)?;
+    let ids: HashSet<&str> = nodes.iter().filter_map(|n| n["id"].as_str()).collect();
+    let ups: Vec<Value> = items.iter().filter(|p| p["id"].as_str().is_some_and(|i| ids.contains(i))).map(|p| {
+        let mut c = json!({"id": p["id"]});
+        if let Some(k) = p["kind"].as_str().filter(|k| KINDS.contains(k)) { c["kind"] = json!(k); }
+        if let Some(r) = p["reason"].as_str().map(str::trim).filter(|r| !r.is_empty()) { c["reason"] = json!(r.chars().take(80).collect::<String>()); }
+        if let Some(links) = p["links"].as_array() {
+            c["links"] = json!(links.iter().filter(|l| l["to"].as_str().is_some_and(|t| ids.contains(t)) && l["rel"].as_str().is_some_and(|r| RELS.contains(&r))).cloned().collect::<Vec<_>>());
+        }
+        c
+    }).collect();
+    if ups.is_empty() { return Ok(0); }
+    change_by(data, sid, json!({"upsert": ups}), false, false, None)?;
+    Ok(ups.len())
+}
+
 /// The person moves a node to the trash: with its whole branch, or alone, its children moving up to its parent.
 /// The events share one action number, the one `restore` takes.
 pub fn trash(data: &Path, sid: &str, id: &str, branch: bool) -> Result<String> {
@@ -458,6 +479,16 @@ pub fn free_path(dir: &Path, name: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fill_takes_only_known_fields_of_existing_nodes() {
+        let dir = tempfile::tempdir().unwrap();
+        command(dir.path(), "s", Some(json!({"upsert": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]}))).unwrap();
+        let n = fill(dir.path(), "s", &[json!({"id": "a", "kind": "task", "label": "renamed", "reason": "r", "links": [{"to": "b", "rel": "leads"}, {"to": "zz", "rel": "leads"}, {"to": "b", "rel": "blocks"}]}),
+            json!({"id": "gone", "kind": "task"}), json!({"id": "b", "kind": "nonsense"})]).unwrap();
+        let a = map_nodes(dir.path(), "s").unwrap().into_iter().find(|x| x["id"] == "a").unwrap();
+        assert_eq!((n, a["kind"].as_str(), a["label"].as_str(), a["links"].as_array().unwrap().len()), (2, Some("task"), Some("A"), 1));
+    }
 
     #[test]
     fn writers_at_the_same_time_lose_nothing() {

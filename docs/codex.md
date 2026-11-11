@@ -21,13 +21,13 @@ Without `--agent` the agent is Claude Code, and nothing on that path changes.
 
 | | Claude Code | Codex |
 |---|---|---|
-| Who writes the map | The plugin calls `whaybench map` | The agent calls the MCP tool `context_map`; `whaybench hook codex` counts turns |
-| Who writes session, state, heartbeat, answers | The plugin calls `whaybench record` | `whaybench hook codex`, through the same functions |
+| Who writes the map | The agent calls the MCP tool `context_map` (`mcp__plugin_context-map_whaybench__context_map`, allowed when the relay starts Claude Code); `whaybench hook claude` counts turns | The agent calls the MCP tool `context_map`; `whaybench hook codex` counts turns |
+| Who writes session, state, heartbeat, answers | `whaybench hook claude` | `whaybench hook codex`, through the same functions |
 | Running sessions | `claude agents --json` | Hook records and the relay's heartbeat (every 2 seconds) |
 | Closing a tab | A session with a conversation goes to the background (`/background`) | It ends and its heartbeat goes to 0; reopening uses `codex resume` |
-| Sending a request | The plugin reads the session's inbox | The relay pastes the tab's queue into the terminal, only while the state is `done` |
+| Sending a request | The relay pastes the tab's queue into the terminal, only while the state is `done` | The same |
 | Running hooks | Installing the plugin is enough | Codex runs a hook only after the person trusts it in `/hooks`; trust again when the program's path changes |
-| Answer | The turn's answer | The last assistant message of Stop |
+| Answer | The turn's whole text, from the transcript | The last assistant message of Stop |
 
 ## Data
 

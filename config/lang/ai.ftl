@@ -49,3 +49,11 @@ files-changed = Files you read or changed earlier in this session were changed o
 file-decisions = Decisions recorded in the conversation map for the work { $path } belongs to (follow them; if the task needs something else, ask the person first):{"\u000A"}{ $lines }
 edit-changed = { $path } was changed on disk at { $at }, after you last read or changed it: most likely the person saved it in an editor. Read it again and make your change on top of theirs.
 edit-in-vim = { $path } is open in vim right now (pid { $pid }, { $dirty }). Changing it under vim makes one save overwrite the other. Tell the person and ask before changing it (they may save and close it, or reload it in vim with :e afterwards); if they agree, make the same change again and it goes through.
+# A session that started from another session's map, and one that was rewound.
+carried-head = This session started by taking over the conversation map of { $from }. The conversation itself did not come along: for details read the memory files or ask the user (no guessing).
+carried-session = session { $id }
+carried-position = Current position: { $path }
+carried-open = Open questions and ideas:{"\u000A"}{ $lines }
+carried-later = Put-off work:{"\u000A"}{ $lines }
+carried-decided = Decided (recent):{"\u000A"}{ $lines }
+rewind-note = The conversation was rewound (/rewind) since your last reply. The conversation map was not: nodes added, closed or decided after the point rewound to may no longer hold. Check the map (show: true); mark nodes whose result changed with state "changed", reopen questions that are unsettled again, and remove nodes for work that no longer exists.

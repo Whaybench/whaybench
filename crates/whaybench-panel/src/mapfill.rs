@@ -87,11 +87,10 @@ pub fn run(d: &Data, session: &str, style: &Style, scope: Option<&str>) {
         log(true, format!("answer not understood · {} {}", text.chars().take(200).collect::<String>(), String::from_utf8_lossy(&out.stderr).chars().take(200).collect::<String>()));
         return;
     };
-    let dir = d.root.join("map-patches");
-    let _ = fs::create_dir_all(&dir);
-    let tmp = dir.join(format!(".{session}.tmp"));
-    if fs::write(&tmp, Value::Array(items.clone()).to_string()).is_ok() { let _ = fs::rename(&tmp, dir.join(format!("{session}.json"))); }
-    log(false, format!("{}/{} nodes written · {}s", items.len(), wanted.len(), started.elapsed().as_secs()));
+    match wb_core::map::fill(&d.root, session, &items) {
+        Ok(n) => log(false, format!("{n}/{} nodes written · {}s", wanted.len(), started.elapsed().as_secs())),
+        Err(e) => log(true, format!("map not written: {e}")),
+    }
 }
 
 #[cfg(test)]
