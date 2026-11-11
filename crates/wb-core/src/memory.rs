@@ -121,8 +121,9 @@ pub fn list(data: &Path, sid: &str, limit: usize) -> Vec<String> {
     let due_soon = |n: &Value| n.get("due").or_else(|| n.get("at")).and_then(Value::as_str).and_then(|d| chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d").ok()).is_some_and(|d| d <= soon);
     let (mut out, mut seen) = (Vec::new(), std::collections::HashSet::new());
     let mut push = |s: &str, n: &Value, out: &mut Vec<String>| {
-        // A carried map repeats nodes under another session: one line per memory id.
-        let key = n.get("memid").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("{s}/{}", n["id"]));
+        // A carried map repeats nodes under another session: one line for the same node (memory id and label). Another
+        // node about the same problem, such as a decision made elsewhere, is shown.
+        let key = n.get("memid").and_then(Value::as_str).map(|m| format!("{m}\u{0}{}", n["label"].as_str().unwrap_or(""))).unwrap_or_else(|| format!("{s}/{}", n["id"]));
         if out.len() < limit && seen.insert(key) { out.push(line(s, n)); }
     };
     for n in own.iter().filter(|n| is_open(n)) { push(sid, n, &mut out); }
@@ -340,11 +341,12 @@ mod tests {
         let now = chrono::Local::now().timestamp_millis();
         let map = |nodes: Value| json!({"nodes": nodes, "updatedAt": now}).to_string();
         fs::write(dir.path().join(format!("{me}.json")), map(json!([{"id":"q","label":"Pick a store","isOpen":true,"memid":"m1"},{"id":"x","label":"old","isOpen":false}]))).unwrap();
-        fs::write(dir.path().join(format!("{other}.json")), map(json!([{"id":"a","label":"Store choice","isOpen":true,"memid":"m1","opened":{"at":1}},
+        fs::write(dir.path().join(format!("{other}.json")), map(json!([{"id":"a","label":"Store choice","isOpen":true,"memid":"m1","opened":{"at":1}},{"id":"copy","label":"Pick a store","memid":"m1"},
             {"id":"b","label":"unrelated","detail":"the long sentence about a Warehouse","isOpen":true,"memid":"m9","opened":{"at":now}}]))).unwrap();
         let lines = list(dir.path(), me, 10);
         assert!(lines[0].starts_with("m1 · Pick a store"), "own open node first");
-        assert!(!lines.iter().any(|l| l.contains("Store choice")), "same memory id: one line");
+        assert!(lines.iter().any(|l| l.contains("Store choice")), "another node on the same problem is shown");
+        assert_eq!(lines.iter().filter(|l| l.contains("Pick a store")).count(), 1, "a carried copy of the same node: one line");
         assert!(lines.iter().any(|l| l.contains("unrelated")), "recent nodes of other sessions follow");
         assert!(!lines.iter().any(|l| l.contains("old")), "own closed nodes are not listed");
         mark_seen(dir.path(), me);
@@ -358,9 +360,9 @@ mod tests {
         let d = delta(dir.path(), me);
         assert_eq!(d.len(), 2, "the change on its memory id and the person's mark, not an unrelated node: {d:?}");
         assert!(delta(dir.path(), me).is_empty(), "seen once");
-        assert_eq!(search(dir.path(), &["store".into()], 5).len(), 2);
+        assert_eq!(search(dir.path(), &["store".into()], 5).len(), 3);
         assert_eq!(search(dir.path(), &["warehouse".into()], 5).len(), 1, "the detail is searched too");
-        assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 2);
+        assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 3);
     }
 
     #[test]

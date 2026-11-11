@@ -36,7 +36,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   crossed out under Done. Questions shows ideas, and a decision that resolves a question as its answer. Focus and
   the other styles count dropped nodes as closed.
 - To approve: when Claude is not sure a node is finished or still needed, it leaves it open with `suggest`
-  (done or dropped, and why); the alerts panel lists it, and the person approves or declines.
+  (done or dropped, and why); the alerts panel lists it, and the person approves or declines. Claude looks for
+  such nodes when it gets the memory list, when another session's change reaches it, and on Tidy. The memory
+  list shows other nodes on the same problem (a decision made elsewhere), not only one line per memory id.
 - Map marks: ✕ for a dropped node and ‖ for one on hold, in the map panel, its styles and Claude's map text.
 - `whaybench statusline`: a Claude Code status line showing context and the 5-hour and weekly plan usage with
   their reset times; the same numbers appear under the alerts panel. The README shows the setting to add.
