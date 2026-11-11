@@ -54,7 +54,7 @@ fn first_question_two_turns_and_resume_keep_the_map_visible() {
     let context = run(data, &["hook", "codex"], Some(&prompt));
     let text = context["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
     assert!(text.contains("automatically from the first question"));
-    assert!(text.contains(" map codex-map-test --write"));
+    assert!(text.contains("context_map"), "the map is kept with the MCP tool");
 
     let first = json!({"upsert":[{"id":"map", "label":"map connection", "isOpen":true, "state":"doing"}], "current":"map"});
     let first = run(data, &["map", "codex-map-test", "--write"], Some(&first));
@@ -118,8 +118,8 @@ fn startup_and_every_prompt_provide_localized_map_instructions() {
             assert_eq!(output["hookSpecificOutput"]["hookEventName"], name);
             let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
             assert!(context.contains("automatically from the first question"), "the agent's text is English in every language");
-            assert!(context.contains("state") && !context.contains("isOpen"));
-            assert!(context.contains(" map codex-map-test --write"));
+            assert!(!context.contains("isOpen"));
+            assert!(context.contains("context_map"));
             assert!(!context.contains("{ $"));
         }
     }

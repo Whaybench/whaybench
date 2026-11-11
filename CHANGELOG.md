@@ -8,6 +8,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `whaybench mcp`: the conversation map tool `context_map` over MCP, with the same description and input as
+  Claude Code's. Codex now keeps its map with this tool instead of shell commands; Whaybench registers the
+  server in Codex's own config and lets the tool run without asking.
 - The important mark shows as `!` before a node's name in the alerts panel and the map panel, and the map panel's
   node menu can mark and unmark.
 - In the memory list, a decision carries the first sentence of its reason (`why:`), so another session sees why,

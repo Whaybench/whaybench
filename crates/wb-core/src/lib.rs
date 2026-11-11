@@ -4,6 +4,7 @@ pub mod codex;
 pub mod i18n;
 pub mod log;
 pub mod map;
+pub mod map_tool;
 pub mod memory;
 pub mod paths;
 pub mod records;

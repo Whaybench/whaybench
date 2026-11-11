@@ -109,6 +109,29 @@ fn model_config(source: &Path) -> Result<String> {
     Ok(toml::to_string(&config)?)
 }
 
+/// The map tool as Codex's MCP server `whaybench`, written each time like the hooks; the rest of the file is the person's.
+/// Codex passes an MCP server only the variables it lists, so the tab that tells the session is listed.
+fn register_mcp(config: &Path, data: &Path, exe: &Path) -> Result<()> {
+    let text = fs::read_to_string(config)?;
+    let mut table: toml::Table = text.parse()?;
+    let mut server = toml::Table::new();
+    server.insert("command".into(), exe.to_str().ok_or("command path is not UTF-8")?.into());
+    server.insert("args".into(), toml::Value::Array(vec!["mcp".into(), "--data-dir".into(), data.to_str().ok_or("data path is not UTF-8")?.into()]));
+    server.insert("env_vars".into(), toml::Value::Array(vec!["WHAYBENCH_TAB".into()]));
+    // The map is kept every turn, so its tool runs without asking each time; Codex asks for MCP tools otherwise.
+    let mut tool = toml::Table::new();
+    tool.insert("approval_mode".into(), "approve".into());
+    let mut tools = toml::Table::new();
+    tools.insert(crate::map_tool::NAME.into(), toml::Value::Table(tool));
+    server.insert("tools".into(), toml::Value::Table(tools));
+    let servers = table.entry("mcp_servers").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(servers) = servers else { return Err("mcp_servers in Codex's config.toml is not a table".into()) };
+    if servers.get("whaybench") == Some(&toml::Value::Table(server.clone())) { return Ok(()); }
+    servers.insert("whaybench".into(), toml::Value::Table(server));
+    fs::write(config, toml::to_string(&table)?)?;
+    Ok(())
+}
+
 fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
     match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
         Ok(mut file) => { file.write_all(bytes)?; Ok(()) },
@@ -134,6 +157,7 @@ pub fn prepare(data: &Path, source: &Path, exe: &Path) -> Result<PathBuf> {
     }
     let config = home.join("config.toml");
     if !config.exists() { create_private(&config, model_config(source)?.as_bytes())?; }
+    register_mcp(&config, data, exe)?;
     write_json(&home.join("hooks.json"), &hook_config(exe)?)?;
     Ok(home)
 }
@@ -180,7 +204,11 @@ mod tests {
         assert_eq!(fs::metadata(home.join("auth.json"))?.permissions().mode() & 0o777, 0o600);
         let config: toml::Table = fs::read_to_string(home.join("config.toml"))?.parse()?;
         assert_eq!(config["model"].as_str(), Some("chosen-model"));
-        assert_eq!(config.len(), 2);
+        let mcp = &config["mcp_servers"]["whaybench"];
+        assert_eq!((mcp["args"][0].as_str(), mcp["env_vars"][0].as_str()), (Some("mcp"), Some("WHAYBENCH_TAB")), "the map tool is Codex's MCP server");
+        assert_eq!(mcp["tools"]["context_map"]["approval_mode"].as_str(), Some("approve"), "kept every turn without asking");
+        assert_eq!(fs::metadata(home.join("config.toml"))?.permissions().mode() & 0o777, 0o600, "still private after the server is added");
+        assert_eq!(config.len(), 3, "model, effort and the MCP server; nothing else is copied");
         fs::write(home.join("auth.json"), "refreshed-login")?;
         prepare(&data, &source, &exe)?;
         assert_eq!(fs::read_to_string(home.join("auth.json"))?, "refreshed-login");
