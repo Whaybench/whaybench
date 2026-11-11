@@ -28,7 +28,12 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     let shown = prompt.filter(|p| !p.starts_with('/') && !p.starts_with('[')).map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect::<String>());
     let tab = a.tab.map(safe_id).transpose()?;
     let agent = (a.name == "codex").then_some("codex");
-    let mut record = session_record::touch(data, sid, session_record::Touch { prompt: shown.as_deref(), tab, cwd: event.get("cwd").and_then(Value::as_str), agent })?;
+    // Only a start or a prompt is activity: the other events must not undo what a record says of the past, such as
+    // the person having ended the session (the end comes after Whaybench marks it).
+    let existing = read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null)?;
+    let mut record = if name == "SessionStart" || name == "UserPromptSubmit" || existing.is_null() {
+        session_record::touch(data, sid, session_record::Touch { prompt: shown.as_deref(), tab, cwd: event.get("cwd").and_then(Value::as_str), agent })?
+    } else { existing };
     let (state, note) = match name {
         "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => ("working", None),
         "PermissionRequest" => ("waiting", None),
@@ -382,6 +387,22 @@ mod tests {
         run(data, &a, &ev(sid, "Stop", json!({"transcript_path": transcript, "last_assistant_message": "Done."}))).unwrap();
         let answer = read_json(&data.join("answers").join(format!("{sid}.json")), Value::Null).unwrap();
         assert!(answer.to_string().contains("First part.\\n\\nDone."), "{answer}");
+    }
+
+    #[test]
+    fn a_session_the_person_ended_stays_ended() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let exe = data.join("whaybench");
+        let a = Agent { name: "claude", tab: Some("t1"), inside: true, exe: &exe };
+        let sid = "aaaaaaaa-0000-0000-0000-000000000002";
+        run(data, &a, &ev(sid, "SessionStart", json!({}))).unwrap();
+        let d = crate::paths::Data::new(data.to_path_buf());
+        crate::sessions::mark_ended(&d, sid);
+        for name in ["Stop", "SessionEnd"] { run(data, &a, &ev(sid, name, json!({}))).unwrap(); }
+        assert_eq!(read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null).unwrap()["ended"], true, "the end does not undo the person's end");
+        run(data, &a, &ev(sid, "UserPromptSubmit", json!({"prompt": "again"}))).unwrap();
+        assert!(read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null).unwrap().get("ended").is_none(), "talked to again: active");
     }
 
     #[test]
