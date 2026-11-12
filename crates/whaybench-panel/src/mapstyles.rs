@@ -6,7 +6,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf};
 use serde_json::{Value, json};
 use wb_core::paths::Data;
 
-use crate::{Store, arr, read, s, write_json};
+use wb_store::{arr, read, s, sha, write_json};
 
 pub const DEFAULT: &str = "default";
 const FRAMES: [&str; 5] = ["tree", "columns", "route", "time", "questions"];
@@ -140,20 +140,33 @@ pub fn draw_request(style: &Style, d: &Data, session: &str, scope: Option<(&str,
     wb_core::i18n::ai_f("map-style-show-in-the-style", &[("a1", (style.name).to_string()), ("target", (target).to_string()), ("a2", (map.display()).to_string()), ("a3", (style.instruction().trim()).to_string()), ("title", (title).to_string())])
 }
 
-impl Store {
-    /// A style's free text may be used: it is the one the person confirmed. One with none has nothing to confirm.
-    pub fn style_allowed(&self, style: &Style) -> bool {
-        let text = style.free_text();
-        text.is_empty() || self.trusted(&style.path.to_string_lossy(), &text)
-    }
-    pub fn allow_style(&self, style: &Style) { let _ = self.trust(&style.path.to_string_lossy(), &style.free_text()); }
+// A style's free text goes into the AI as written, so it is used only after the person read and confirmed it;
+// a confirmation holds for that exact text.
+fn trust_file(d: &Data) -> PathBuf { d.root.join("addon-trust.json") }
+
+/// A style's free text may be used: it is the one the person confirmed. One with none has nothing to confirm.
+pub fn allowed(d: &Data, style: &Style) -> bool {
+    let text = style.free_text();
+    text.trim().is_empty() || read(&trust_file(d)).is_some_and(|k| s(&k, &style.path.to_string_lossy()) == sha(&text))
+}
+
+pub fn allow(d: &Data, style: &Style) {
+    let mut k = read(&trust_file(d)).unwrap_or_else(|| json!({}));
+    k[style.path.to_string_lossy().as_ref()] = Value::String(sha(&style.free_text()));
+    let _ = write_json(&trust_file(d), &k);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch;
-    fn put(st: &Store, id: &str, text: &str) {
+    struct St { data: Data }
+    fn scratch(name: &str) -> St {
+        let d = std::env::temp_dir().join(format!("wb-panel-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        St { data: Data::new(d) }
+    }
+    fn put(st: &St, id: &str, text: &str) {
         let dir = st.data.root.join("addons/map-styles").join(id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("style.json"), text).unwrap();
@@ -194,10 +207,10 @@ mod tests {
         assert_eq!(m.node_items().len(), 2);
         assert_eq!(m.frame(), None);
         assert_eq!(fill_item("{branch} {id}", "n", "top › n", "i"), "top › n i");
-        assert!(!st.style_allowed(&m), "free text from elsewhere waits for the person");
-        st.allow_style(&m);
-        assert!(st.style_allowed(&m));
+        assert!(!allowed(&st.data, &m), "free text from elsewhere waits for the person");
+        allow(&st.data, &m);
+        assert!(allowed(&st.data, &m));
         fs::write(&m.path, r#"{"node_menu":[{"label":"summary","do":"request","arg":"other text"}]}"#).unwrap();
-        assert!(!st.style_allowed(&find(&st.data, "m").unwrap()), "changed text is confirmed again");
+        assert!(!allowed(&st.data, &find(&st.data, "m").unwrap()), "changed text is confirmed again");
     }
 }

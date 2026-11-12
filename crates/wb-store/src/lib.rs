@@ -13,11 +13,9 @@ pub mod docaddons;
 pub mod documents;
 pub mod history;
 pub mod items;
-pub mod mapstyles;
 pub mod markdown;
 pub mod projects;
 pub mod queue;
-pub mod trust;
 
 use std::{
     fs,

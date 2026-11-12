@@ -2418,9 +2418,6 @@ dependencies = [
 name = "wb-store"
 version = "0.3.0"
 dependencies = [
- "gio",
- "glob",
- "libc",
  "regex",
  "serde_json",
  "sha1",
@@ -2517,6 +2514,16 @@ dependencies = [
  "libc",
  "serde_json",
  "vt100",
+ "wb-core",
+]
+
+[[package]]
+name = "whaybench-tools"
+version = "0.3.0"
+dependencies = [
+ "gio",
+ "glob",
+ "serde_json",
  "wb-core",
 ]
 

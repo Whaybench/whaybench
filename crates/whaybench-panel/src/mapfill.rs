@@ -5,7 +5,8 @@ use std::{fs, io::Write, path::{Path, PathBuf}, process::{Command, Stdio}, time:
 
 use serde_json::{Value, json};
 use wb_core::{log as record, paths::Data, sessions};
-use wb_store::{arr, mapstyles::{self, Style}, s};
+use wb_store::{arr, s};
+use crate::mapstyles::{self, Style};
 
 const TRANSCRIPT_LIMIT: usize = 90_000;
 

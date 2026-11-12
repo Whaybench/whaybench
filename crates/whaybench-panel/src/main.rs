@@ -9,6 +9,7 @@ mod map;
 mod mapdraw;
 mod mapfill;
 mod mapimport;
+mod mapstyles;
 mod menu;
 mod project;
 mod web;

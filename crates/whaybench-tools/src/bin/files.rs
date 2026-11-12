@@ -3,7 +3,6 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use serde_json::{Map, Value, json};
 use wb_core::{paths::{self, Data}, sessions};
-use wb_store::{read, write_json};
 
 const HELP: &str = "Attaches files to a map node, so the node lists them even if Claude has not touched them yet.
 
@@ -55,9 +54,10 @@ fn run(mut args: Vec<String>, data: &Data) -> Result<(), String> {
         }
         _ => return Err(HELP.into()),
     }
-    fs::create_dir_all(data.root.join("node-files")).map_err(|e| e.to_string())?;
-    write_json(&path, &Value::Object(table))
+    paths::write_atomic(&path, serde_json::to_string_pretty(&Value::Object(table)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
+
+fn read(path: &Path) -> Option<Value> { serde_json::from_str(&fs::read_to_string(path).ok()?).ok() }
 
 fn main() {
     let Some(root) = paths::resolve(None, |k| std::env::var(k).ok()) else { eprintln!("error: no data directory"); std::process::exit(1) };

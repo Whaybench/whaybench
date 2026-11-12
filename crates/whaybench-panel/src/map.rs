@@ -6,7 +6,8 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, rc::Rc};
 use gtk::{gdk, gio, glib, prelude::*};
 use serde_json::{Value, json};
 use wb_core::{log as record, paths::Data, records, sessions, status};
-use wb_store::{Store, mapstyles, s};
+use wb_store::{Store, s};
+use crate::mapstyles;
 use webkit6::prelude::*;
 
 use crate::{common::{cut, every}, mapimport};
@@ -363,7 +364,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
     // After the standard items: what the panel's style adds. It cannot take any away.
     if let Some(style) = mapstyles::find(d, &mapstyles::current(d, panel_key(scope))) {
         let own = items.sub();
-        let allowed = Store::new(d.clone()).style_allowed(&style);
+        let allowed = mapstyles::allowed(d, &style);
         let (id, label) = node.map_or((String::new(), String::new()), |n| (s(n, "id").to_string(), s(n, "label").to_string()));
         let path = if node.is_some() { let mut f = flow_of(data, &id); f.push(label.clone()); f.join(" › ") } else { String::new() };
         let mut any = false;
@@ -421,7 +422,7 @@ fn confirm_style(win: &gtk::ApplicationWindow, d: &Data, style: mapstyles::Style
     body.append(&row);
     dlg.set_child(Some(&body));
     { let w = dlg.clone(); cancel.connect_clicked(move |_| w.close()); }
-    { let (w, d2) = (dlg.clone(), d.clone()); ok.connect_clicked(move |_| { Store::new(d2.clone()).allow_style(&style); w.close(); then(); }); }
+    { let (w, d2) = (dlg.clone(), d.clone()); ok.connect_clicked(move |_| { mapstyles::allow(&d2, &style); w.close(); then(); }); }
     dlg.present();
 }
 
@@ -437,7 +438,7 @@ fn style_menu(win: &gtk::ApplicationWindow, on: &gtk::Button, d: &Data, key: &st
         items.add(&label, true, move || {
             let (d3, k3, id) = (d2.clone(), k.clone(), style.id.clone());
             let choose = move || mapstyles::set_current(&d3, &k3, &id);
-            if Store::new(d2.clone()).style_allowed(&style) { choose(); } else { confirm_style(&w2, &d2, style.clone(), choose); }
+            if mapstyles::allowed(&d2, &style) { choose(); } else { confirm_style(&w2, &d2, style.clone(), choose); }
         });
     }
     let (x, y) = (0.0, on.height() as f64);

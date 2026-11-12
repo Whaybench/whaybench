@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 use chrono::TimeZone;
 use serde_json::Value;
 use wb_core::{paths::Data, theme};
-use wb_store::{arr, mapstyles::{self, Style}, s};
+use wb_store::{arr, s};
+use crate::mapstyles::{self, Style};
 
 const LANES: [&str; 10] = ["#1e66f5", "#d20f39", "#8839ef", "#40a02b", "#fe640b", "#179299", "#df8e1d", "#ea76cb", "#7287fd", "#9ca0b0"];
 
