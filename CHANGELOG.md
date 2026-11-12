@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-12
+
 ### Fixed
 
 - The answer panel draws the answer as a web page: tables are real tables with lines and wrapping cells, and a
@@ -13,6 +15,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
   in the view panel. HTML written in an answer is shown as text.
 - A frame that cannot be drawn, or an app that cannot connect, no longer stops Whaybench: the frame is left out
   and tried again, and the failure is written to the log.
+- Two programs writing the same file at once no longer take each other's temporary file: session records,
+  themes, requests to the compositor, panel zoom and the answer history now name it by process, as the maps did.
+- The alerts panel reads each file once a refresh. A session's name read every record and map again for each
+  map on the board, so the reading grew with the square of the sessions; it went from 229 file opens a second
+  to 43 here.
 
 ## [0.3.0] - 2026-11-12
 
