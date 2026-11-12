@@ -12,6 +12,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   a panel of the layout raised over a floating one was counted as floating too, so it stayed above it.
 - Tooltips, such as a map node's detail, take the theme's colours. They kept GTK's dark background with the
   theme's text colour, so only the black theme could read them.
+- Running the install command again while Whaybench runs updates it: copying over a running program failed with
+  "Text file busy" and stopped the install. It also updates the Claude Code plugin, which install alone left as it
+  was.
 
 ### Changed
 

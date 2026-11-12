@@ -33,21 +33,25 @@ fi
 tar xzf "$tmp/$NAME.tar.gz" -C "$tmp"
 
 mkdir -p "$LIB" "$BIN"
-cp "$tmp/$NAME"/whaybench* "$LIB"/
-cp "$tmp/$NAME"/NOTICE "$tmp/$NAME"/*LICENSE* "$LIB"/
+# A running program's file cannot be written over ("Text file busy"): the old file is removed and a new one made,
+# so an update works while Whaybench runs, which then shows that a new version waits for a restart.
 # Alacritty, for the terminal tabs, comes with the release.
-cp "$tmp/$NAME"/alacritty "$LIB"/
+for f in "$tmp/$NAME"/whaybench* "$tmp/$NAME"/alacritty; do rm -f "$LIB/${f##*/}"; cp "$f" "$LIB"/; done
+cp "$tmp/$NAME"/NOTICE "$tmp/$NAME"/*LICENSE* "$LIB"/
 ln -sf "$LIB/whaybench" "$BIN/whaybench"
 say "Installed $("$LIB/whaybench" --version 2>/dev/null || echo whaybench) in $LIB"
 
 if command -v claude >/dev/null; then
     # An existing marketplace makes add fail; only a failed install is reported, with the reason.
     added=$(claude plugin marketplace add Whaybench/whaybench 2>&1)
-    if claude plugin install context-map@whaybench >/dev/null 2>&1; then say "Claude Code plugin context-map installed"
+    # A marketplace added before keeps the catalogue of then, and install leaves an installed plugin as it is.
+    claude plugin marketplace update whaybench >/dev/null 2>&1 || true
+    if claude plugin install context-map@whaybench >/dev/null 2>&1 && claude plugin update context-map@whaybench >/dev/null 2>&1; then
+        say "Claude Code plugin context-map is installed and up to date (a new version applies to sessions started after it)"
     else
         say "Claude Code plugin was not installed:"
         printf '%s\n' "$added" | sed 's/^/    /'
-        say "Then run:  claude plugin marketplace add Whaybench/whaybench && claude plugin install context-map@whaybench"
+        say "Then run:  claude plugin marketplace add Whaybench/whaybench && claude plugin install context-map@whaybench && claude plugin update context-map@whaybench"
     fi
 else
     say "Claude Code was not found. With Codex CLI start Whaybench with --agent codex."

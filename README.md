@@ -114,7 +114,8 @@ the alerts panel, add this to `~/.claude/settings.json`. Whaybench does not chan
 
 If you already have a status line script, pass it the same input: `echo "$input" | ~/.local/bin/whaybench statusline`.
 
-To update, run the install command again. To remove Whaybench, delete `~/.local/lib/whaybench` and
+To update, run the install command again; it updates the Claude Code plugin too. Whaybench may keep running: the
+status line then says a new version is waiting, and Whaybench → Restart starts it. To remove Whaybench, delete `~/.local/lib/whaybench` and
 `~/.local/bin/whaybench`; your data stays (see below).
 
 ### Build from source
