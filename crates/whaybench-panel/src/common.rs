@@ -90,6 +90,8 @@ button:hover {{ background: alpha({accent}, 0.18); }}
 button:disabled {{ color: {soft}; }}
 button.flat {{ background: transparent; border: none; padding: 0 4px; }}
 button.flat.chosen {{ background: alpha({accent}, 0.22); font-weight: bold; }}
+/* The chosen one of a row of tabs (a stack switcher), drawn like a chosen flat button. */
+stackswitcher > button:checked {{ background: alpha({accent}, 0.22); font-weight: bold; }}
 flowboxchild {{ padding: 0; min-height: 0; }}
 .code {{ font-family: '{mono}', monospace; background: {bar}; border-radius: 6px; padding: 6px 8px; }}
 .cell {{ padding: 3px 8px; border: 1px solid {line}; }}

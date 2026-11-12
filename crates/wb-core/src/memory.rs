@@ -85,7 +85,7 @@ pub fn line(sid: &str, n: &Value) -> String {
 }
 
 /// Every event in the log, oldest first. shortcut: reads all month files each time; keep an index when the log grows large.
-pub(crate) fn events(data: &Path) -> Vec<Value> {
+pub fn events(data: &Path) -> Vec<Value> {
     let mut files: Vec<PathBuf> = fs::read_dir(data.join("memory").join("events")).into_iter().flatten().flatten().map(|f| f.path()).collect();
     files.sort();
     files.iter().flat_map(|f| fs::read_to_string(f).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect::<Vec<Value>>()).collect()

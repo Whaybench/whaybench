@@ -6,6 +6,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The notifications panel has two tabs: Now, the sections as before, and History, every change to every map node,
+  newest first, only to read: created, state and kind as before → after, renamed, marked, links, maps taken over and
+  nodes deleted for good, with who did it. It reads the memory again only while it is on show and the memory grew.
+
 ### Fixed
 
 - A floating panel, such as the input panel, stays on top after a restart. Each panel that opens is raised, and

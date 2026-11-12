@@ -110,10 +110,25 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     usage.set_xalign(0.0);
     usage.set_wrap(true);
     usage.add_css_class("dim");
-    body.append(&seen);
-    body.append(&scroll);
+    // Two tabs: what to see now, and the history of every node, only to read.
+    let now = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    now.append(&seen);
+    now.append(&scroll);
+    let stack = gtk::Stack::new();
+    stack.set_vexpand(true);
+    stack.add_titled(&now, Some("now"), t("notify-tab-now"));
+    let (history_page, history_refresh) = history_tab(&d);
+    stack.add_titled(&history_page, Some("history"), t("notify-tab-history"));
+    let switcher = gtk::StackSwitcher::new();
+    switcher.set_stack(Some(&stack));
+    body.append(&switcher);
+    body.append(&stack);
     body.append(&usage);
     win.set_child(Some(&body));
+    {
+        let (stack2, refresh) = (stack.clone(), history_refresh.clone());
+        stack.connect_visible_child_name_notify(move |_| if stack2.visible_child_name().as_deref() == Some("history") { refresh(); });
+    }
     let view = Rc::new(RefCell::new(View { shown: String::new(), trash_open: false }));
     {
         let (d, list2, view) = (d.clone(), list.clone(), view.clone());
@@ -196,5 +211,70 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     } };
     show_usage();
     let (d2, l2, v2) = (d.clone(), list.clone(), view.clone());
-    every(2000, move || { redraw(&d2, &l2, &v2, false); show_usage(); });
+    every(2000, move || {
+        redraw(&d2, &l2, &v2, false);
+        show_usage();
+        if stack.visible_child_name().as_deref() == Some("history") { history_refresh(); }
+    });
+}
+
+const HISTORY_STEP: usize = 200;
+
+/// The History tab and what brings it up to date: the memory is read again only when its files changed.
+fn history_tab(d: &Data) -> (gtk::Box, Rc<dyn Fn()>) {
+    let list = gtk::ListBox::new();
+    list.set_selection_mode(gtk::SelectionMode::None);
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.set_child(Some(&list));
+    scroll.set_vexpand(true);
+    let more = gtk::Button::new();
+    more.add_css_class("flat");
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    page.append(&scroll);
+    page.append(&more);
+    struct Hist { sig: String, rows: Vec<crate::history::Row>, shown: usize }
+    let hist = Rc::new(RefCell::new(Hist { sig: String::new(), rows: Vec::new(), shown: HISTORY_STEP }));
+    let draw = { let (list, more, scroll, hist) = (list.clone(), more.clone(), scroll.clone(), hist.clone()); move || {
+        let h = hist.borrow();
+        let top = scroll.vadjustment().value();
+        while let Some(r) = list.row_at_index(0) { list.remove(&r); }
+        let mut day = "";
+        let add = |text: &str, class: Option<&str>, tip: &str| {
+            let label = gtk::Label::new(Some(text));
+            label.set_xalign(0.0);
+            label.set_wrap(true);
+            label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            if let Some(c) = class { label.add_css_class(c); }
+            if !tip.is_empty() { label.set_tooltip_text(Some(tip)); }
+            list.append(&label);
+        };
+        if h.rows.is_empty() { add(t("notify-none"), Some("dim"), ""); }
+        for r in h.rows.iter().take(h.shown) {
+            if r.day != day { day = &r.day; add(day, Some("head"), ""); }
+            add(&r.line, None, &r.tip);
+        }
+        let left = h.rows.len().saturating_sub(h.shown);
+        more.set_visible(left > 0);
+        more.set_label(&wb_core::i18n::f("history-more", &[("n", left.min(HISTORY_STEP).to_string())]));
+        scroll.vadjustment().set_value(top);
+    } };
+    let draw: Rc<dyn Fn()> = Rc::new(draw);
+    {
+        let (hist, draw) = (hist.clone(), draw.clone());
+        more.connect_clicked(move |_| { hist.borrow_mut().shown += HISTORY_STEP; draw(); });
+    }
+    let d = d.clone();
+    let refresh: Rc<dyn Fn()> = Rc::new(move || {
+        // Each month's file and its size: the log only grows, so a change in size is a change.
+        let mut files: Vec<String> = std::fs::read_dir(d.root.join("memory").join("events")).into_iter().flatten().flatten()
+            .map(|f| format!("{}:{}", f.file_name().to_string_lossy(), f.metadata().map(|m| m.len()).unwrap_or(0))).collect();
+        files.sort();
+        let sig = files.join(",");
+        if hist.borrow().sig == sig { return; }
+        let mut names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let rows = crate::history::rows(&memory::events(&d.root), |s| names.entry(s.to_string()).or_insert_with(|| wb_core::sessions::session_name(&d, s)).clone());
+        { let mut h = hist.borrow_mut(); h.sig = sig; h.rows = rows; }
+        draw();
+    });
+    (page, refresh)
 }

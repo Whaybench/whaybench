@@ -3,6 +3,7 @@
 mod answer;
 mod common;
 mod files;
+mod history;
 mod input;
 mod map;
 mod mapdraw;
