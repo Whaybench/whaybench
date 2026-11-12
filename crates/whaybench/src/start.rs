@@ -65,6 +65,31 @@ fn fields(v: &[(String, String)]) -> String {
 }
 fn var(k: &str) -> String { std::env::var(k).unwrap_or_default() }
 
+/// Whether fcitx5 inside Whaybench is the input method: when it is installed and settings.json does not say
+/// `"input_method": "host"`.
+pub fn builtin_input_method(data: &paths::Data) -> bool {
+    let host = std::fs::read_to_string(data.root.join("settings.json")).ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .is_some_and(|v| v["input_method"] == "host");
+    let fcitx = Command::new("fcitx5").arg("--version").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
+    record::decide("input", "input method", if host { "settings.json says host" } else if fcitx { "fcitx5 is installed" } else { "no fcitx5" }, &[("built_in", (fcitx && !host).to_string())]);
+    fcitx && !host
+}
+
+/// Asks the running fcitx5 to attach to this display too; with none running (a WSL session has none), starts one on
+/// it. Off the main thread: fcitx5 connects back, which needs the event loop running.
+pub fn attach_input_method(socket: &OsStr) {
+    let path = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_default().join(socket);
+    std::thread::spawn(move || {
+        let quiet = || std::process::Stdio::null();
+        let asked = Command::new("dbus-send").args(["--session", "--print-reply", "--dest=org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1.OpenWaylandConnection", &format!("string:{}", path.display())])
+            .stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
+        if asked { return record::decide("input", "fcitx5 attached", "the running fcitx5 opened this display", &[]); }
+        let started = Command::new("fcitx5").arg("-d").env("WAYLAND_DISPLAY", &path).stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
+        if started { record::decide("input", "fcitx5 started", "none was running", &[]); } else { record::warn("input", "no input method", "fcitx5 did not start; Korean and other composed input will not work", &[]); }
+    });
+}
+
 fn input_method() -> String {
     ["XMODIFIERS", "GTK_IM_MODULE", "QT_IM_MODULE"].iter().map(|k| var(k)).find(|v| !v.is_empty()).unwrap_or_default()
 }

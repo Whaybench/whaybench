@@ -20,6 +20,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The input method lives inside Whaybench: fcitx5 attaches to its display (input-method-v2), so composed input such
+  as Korean works the same on every desktop, WSL's included, where it did not work before. fcitx5 joins the system
+  packages; without it, or with `"input_method": "host"` in settings.json, the desktop's input method reaches the
+  apps through the window as before. The input method's candidate list (Hanja, for one) is not drawn yet.
 - Whaybench → About shows the version alone; `whaybench --version` and the logs keep the commit.
 
 ## [0.4.0] - 2026-11-12

@@ -114,4 +114,44 @@ impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for App {
 
 impl OutputHandler for App {}
 
+//
+// Input method (fcitx5 inside) and the virtual keyboard it gives keys back through
+//
+
+// shortcut: the input method's own popups (a candidate list, as for Hanja) are not drawn; Hangul composes in the app.
+// Draw them over their parent when a language needs a list.
+impl smithay::wayland::input_method::InputMethodHandler for App {
+    fn new_popup(&mut self, _surface: smithay::wayland::input_method::PopupSurface) {}
+    fn dismiss_popup(&mut self, _surface: smithay::wayland::input_method::PopupSurface) {}
+    fn popup_repositioned(&mut self, _surface: smithay::wayland::input_method::PopupSurface) {}
+    fn parent_geometry(&self, _parent: &WlSurface) -> smithay::utils::Rectangle<i32, smithay::utils::Logical> { Default::default() }
+}
+
+impl smithay::wayland::virtual_keyboard::VirtualKeyboardHandler for App {
+    fn process_virtual_keyboard_event(&mut self, event: smithay::backend::input::InputEvent<smithay::wayland::virtual_keyboard::VirtualKeyboardBackend>) {
+        use smithay::backend::input::{Event, InputEvent, KeyboardKeyEvent};
+        use smithay::input::keyboard::FilterResult;
+        use smithay::wayland::{input_method::InputMethodSeat, virtual_keyboard::VirtualKeyboardSpecialEvent as Special};
+        let keyboard = self.seat.get_keyboard().unwrap();
+        match event {
+            // Its keycodes mean something only under its own keymap (fcitx5 sends back the seat's).
+            InputEvent::DeviceAdded { device } | InputEvent::Special(Special::KeymapChanged { device }) => {
+                if let Some(keymap) = device.keymap() { let _ = keyboard.set_keymap_from_keymap_file(self, keymap); }
+            }
+            InputEvent::Keyboard { event } => {
+                let (serial, time) = (smithay::utils::SERIAL_COUNTER.next_serial(), Event::time(&event));
+                let device = event.device();
+                // A key the input method gives back goes past its own grab, or it would come round again for ever.
+                let from_ime = self.seat.input_method().keyboard_grab_client().is_some_and(|c| Some(c) == device.client());
+                if from_ime { keyboard.input_forward_bypassing_grab(self, event.key_code(), event.state(), serial, time, true); }
+                else { keyboard.input_from_source::<(), _>(device.source(), self, event.key_code(), event.state(), serial, time, |_, _, _| FilterResult::Forward); }
+            }
+            InputEvent::Special(Special::Modifiers { mods_depressed, mods_latched, mods_locked, group, .. }) => {
+                keyboard.with_xkb_state(self, |mut context| context.set_modifier_mask(mods_depressed, mods_latched, mods_locked, group));
+            }
+            _ => {}
+        }
+    }
+}
+
 smithay::delegate_dispatch2!(App);

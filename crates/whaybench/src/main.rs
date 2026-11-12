@@ -183,6 +183,7 @@ fn serve(data: &paths::Data, run_id: &str, apps: Vec<String>, no_session: bool) 
         }
     }
 
+    if state.builtin_ime { start::attach_input_method(&state.socket_name); }
     if !no_session { ctl::open_first_tabs(data); }
 
     event_loop.run(None, &mut state, |_| {}).map_err(|e| e.to_string())?;

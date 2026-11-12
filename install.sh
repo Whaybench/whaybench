@@ -59,15 +59,17 @@ fi
 
 # What the programs need from the system.
 missing=""
-for c in wl-paste firefox; do command -v "$c" >/dev/null || missing="$missing $c"; done
+for c in wl-paste firefox fcitx5; do command -v "$c" >/dev/null || missing="$missing $c"; done
 [ -x "$LIB/alacritty" ] || command -v alacritty >/dev/null || missing="$missing alacritty"
 for l in libgtk-4.so.1 libwebkitgtk-6.0.so.4; do ldconfig -p 2>/dev/null | grep -q "$l" || missing="$missing $l"; done
 if [ -n "$missing" ]; then
     say "Missing:$missing. Install them with one of:"
-    say "  Fedora:            sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox"
-    say "  Ubuntu, Debian:    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox"
-    say "  Arch:              sudo pacman -S gtk4 webkitgtk-6.0 wl-clipboard firefox"
+    say "  Fedora:            sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox fcitx5"
+    say "  Ubuntu, Debian:    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5"
+    say "  Arch:              sudo pacman -S gtk4 webkitgtk-6.0 wl-clipboard firefox fcitx5"
     say "  AlmaLinux, Rocky:  sudo dnf install epel-release && sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox && sudo dnf upgrade \"gstreamer1*\""
+    say "With fcitx5, add the engine for your language, e.g. fcitx5-hangul, fcitx5-mozc or fcitx5-chinese-addons."
+    say "AlmaLinux and Rocky Linux 10 have no fcitx5; Whaybench then takes the desktop's input method."
 fi
 
 case ":$PATH:" in *":$BIN:"*) ;; *) say "Add $BIN to your PATH to run whaybench." ;; esac

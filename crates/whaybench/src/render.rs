@@ -476,7 +476,7 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
     let mut frame_failing = false;
     let (mut times, mut since, mut sent_frames) = (Vec::with_capacity(400), Instant::now(), 0usize);
     #[allow(deprecated)] // The newer call needs a capability set.
-    backend.window().set_ime_allowed(true);
+    backend.window().set_ime_allowed(!state.builtin_ime);
 
     // Only what changed goes to the desktop. A frame with nothing new is not sent at all: sending the whole window
     // every frame makes the desktop redraw it and its title bar 60 times a second, which shows as a flicker there.

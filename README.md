@@ -65,21 +65,26 @@ another distribution with GTK 4.12 or newer (AlmaLinux and Rocky Linux 10 with E
 
 Fedora:
 
-    sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox
+    sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox fcitx5
 
 Ubuntu and Debian:
 
-    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox
+    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5
 
 Arch:
 
-    sudo pacman -S gtk4 webkitgtk-6.0 wl-clipboard firefox
+    sudo pacman -S gtk4 webkitgtk-6.0 wl-clipboard firefox fcitx5
 
 AlmaLinux and Rocky Linux 10:
 
     sudo dnf install epel-release
     sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox
     sudo dnf upgrade "gstreamer1*"   # webkitgtk6.0 from EPEL needs GStreamer 1.26
+
+fcitx5 is the input method inside Whaybench, the same on every desktop. Add the engine for your language, for
+example `fcitx5-hangul` (Korean), `fcitx5-mozc` (Japanese), `fcitx5-chinese-addons` (Chinese), `fcitx5-unikey`
+(Vietnamese) or `fcitx5-m17n` (many other scripts). AlmaLinux and Rocky Linux 10 do not package fcitx5; there
+Whaybench takes the desktop's input method instead.
 
 The release brings its own Alacritty for the terminal tabs. LibreOffice is optional, for Word and spreadsheet
 templates.

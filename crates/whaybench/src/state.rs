@@ -21,7 +21,9 @@ use smithay::{
         shell::xdg::{ToplevelSurface, XdgShellState, XdgToplevelSurfaceData, decoration::XdgDecorationState},
         shm::ShmState,
         socket::ListeningSocketSource,
+        input_method::InputMethodManagerState,
         text_input::{TextInputActivation, TextInputManagerState, TextInputSeat},
+        virtual_keyboard::VirtualKeyboardManagerState,
     },
 };
 use wb_core::{log as record, paths::Data, theme::{self, Theme}};
@@ -124,6 +126,8 @@ pub struct App {
     pub clip: crate::clipboard::Bridge,
     pub popups: PopupManager,
     pub seat: Seat<Self>,
+    /// Whether fcitx5 inside is the input method; else the desktop's, through the window.
+    pub builtin_ime: bool,
 }
 
 pub fn read_layout(data: &Data) -> SavedLayout {
@@ -149,10 +153,18 @@ impl App {
         seat.add_keyboard(Default::default(), 200, 25).unwrap();
         seat.add_pointer();
 
-        // The host's input method reaches the app in the focused panel: the compositor acts as
-        // the input method and passes on what the window receives.
         TextInputManagerState::new::<Self>(&dh);
-        seat.text_input().set_compositor_input_method(true);
+        // The input method lives inside: fcitx5 attaches to this display (input-method-v2, with a virtual keyboard for
+        // the keys it gives back), so typing works the same whatever the desktop offers. WSLg, for one, has only the
+        // old text-input-v1 the window cannot use. Without fcitx5, or with `"input_method": "host"` in settings.json,
+        // the desktop's input method reaches the apps through the window as before.
+        let builtin_ime = crate::start::builtin_input_method(&data);
+        if builtin_ime {
+            InputMethodManagerState::new::<Self, _>(&dh, |_| true);
+            VirtualKeyboardManagerState::new::<Self, _>(&dh, |_| true);
+        } else {
+            seat.text_input().set_compositor_input_method(true);
+        }
 
         let socket_name = Self::init_wayland_listener(display, event_loop);
         let loop_signal = event_loop.get_signal();
@@ -177,7 +189,7 @@ impl App {
             shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
             compositor_state, xdg_shell_state, shm_state, output_manager_state, seat_state, data_device_state, clip,
-            popups: PopupManager::default(), seat,
+            popups: PopupManager::default(), seat, builtin_ime,
         }
     }
 
