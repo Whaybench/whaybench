@@ -44,6 +44,9 @@ impl Maker {
     }
 }
 
+/// Where people can support the project; it opens in the view panel's browser.
+const SUPPORT: &str = "https://ko-fi.com/whaybench";
+
 fn whaybench_menu(d: &Data, k: &Maker) -> gio::Menu {
     let m = gio::Menu::new();
     let d2 = d.clone();
@@ -56,7 +59,21 @@ fn whaybench_menu(d: &Data, k: &Maker) -> gio::Menu {
     k.add(&m, wb_core::i18n::t("quit"), move || { let _ = status::post(&d3, &json!({"cmd": "quit"})); });
     // The version, shown only: an item without an action cannot be chosen.
     let about = gio::Menu::new();
-    about.append(Some(&format!("Whaybench {} ({})", env!("CARGO_PKG_VERSION"), env!("WB_COMMIT"))), None);
+    about.append(Some(&format!("Whaybench {}", env!("CARGO_PKG_VERSION"))), None);
+    if let Some(v) = wb_core::update::newer(d) {
+        let d4 = d.clone();
+        k.add(&about, &wb_core::i18n::f("update-to", &[("v", v.clone())]), move || {
+            status::say(&d4, &wb_core::i18n::f("updating", &[("v", v.clone())]), 120);
+            let d5 = d4.clone();
+            // Off the screen's thread: the download takes a while. Done, Whaybench restarts with the tabs kept.
+            std::thread::spawn(move || match wb_core::update::run(&d5) {
+                Ok(()) => { let _ = status::post(&d5, &json!({"cmd": "restart"})); }
+                Err(log) => status::say(&d5, &wb_core::i18n::f("update-failed", &[("log", log)]), 15),
+            });
+        });
+    }
+    let d6 = d.clone();
+    k.add(&about, wb_core::i18n::t("support"), move || { let _ = wb_core::view::open(&d6, SUPPORT, None); });
     m.append_submenu(Some(wb_core::i18n::t("about")), &about);
     m
 }
@@ -193,7 +210,7 @@ fn make(d: &Data) -> (gio::Menu, gio::SimpleActionGroup) {
 }
 
 /// What the menus depend on; they are made again only when it changes.
-fn signature(d: &Data) -> String { format!("{:?} {:?} {} {:?} {:?} {} {:?}", open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), crate::mapstyles::current(d, "map"), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
+fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {} {:?} {:?} {} {:?}", wb_core::update::newer(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), crate::mapstyles::current(d, "map"), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
 
 /// Whether one of the bar's menus is showing.
 fn menu_open(w: &gtk::Widget) -> bool {
@@ -218,6 +235,11 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     bar.add_controller(hover);
     // Never under the pointer or with a menu showing: replacing the menus then pulls the widgets out from under the
     // event being handled, and the app falls over.
+    // The latest release, looked up at start and then every six hours (the check itself skips when it is too soon).
+    if wb_core::update::installed_release() {
+        let d2 = d.clone();
+        std::thread::spawn(move || loop { wb_core::update::check(&d2); std::thread::sleep(std::time::Duration::from_secs(3600)); });
+    }
     let (w, last) = (win.clone(), RefCell::new(signature(&d)));
     glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
         if inside.get() || menu_open(bar.upcast_ref()) { return glib::ControlFlow::Continue; }

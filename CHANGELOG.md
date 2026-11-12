@@ -6,6 +6,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Whaybench → About offers a newer release when there is one: it installs it and Whaybench restarts with the tabs
+  kept. Whaybench looks the latest release up on GitHub at start and every six hours, only when it was installed with
+  install.sh; nothing is sent.
+- Whaybench → About → Support Whaybench opens https://ko-fi.com/whaybench in the view panel.
+
+### Changed
+
+- Whaybench → About shows the version alone; `whaybench --version` and the logs keep the commit.
+
 ## [0.4.0] - 2026-11-12
 
 The notifications panel now shows the whole memory too: every change to every map node, in time order.
