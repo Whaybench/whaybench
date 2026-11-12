@@ -12,6 +12,13 @@ use serde_json::Value;
 
 use crate::{log as record, paths::{Data, write_atomic}, versions};
 
+mod names;
+mod retention;
+mod tabs;
+pub use names::*;
+pub use retention::*;
+pub use tabs::*;
+
 pub fn sessions_dir(d: &Data) -> PathBuf { d.root.join("sessions") }
 pub fn alive_dir(d: &Data) -> PathBuf { d.cache().join("alive") }
 pub fn state_dir(d: &Data) -> PathBuf { d.cache().join("state") }
@@ -299,213 +306,6 @@ pub fn all(d: &Data) -> Vec<Value> {
 
 pub fn map_of(d: &Data, id: &str) -> Option<Value> { read_json(&d.root.join(format!("{id}.json"))) }
 
-/// A conversation's numbers: this one and every number that moved on into it (/resume, /background).
-fn chain(all: &[Value], last: &str) -> Vec<String> {
-    let (mut ids, mut i) = (vec![last.to_string()], 0);
-    while i < ids.len() {
-        let here = ids[i].clone();
-        let before = all.iter().filter(|s| s.get("movedTo").and_then(Value::as_str) == Some(&here)).filter_map(|s| s["id"].as_str().map(String::from));
-        for b in before.collect::<Vec<_>>() { if !ids.contains(&b) { ids.push(b); } }
-        i += 1;
-    }
-    ids
-}
-
-/// How long conversation records are kept: `keep_days` and `keep_mb` in the data directory's settings.json. Missing
-/// or 0 means no limit, the default.
-pub fn retention(d: &Data) -> (u64, u64) {
-    let s = read_json(&d.root.join("settings.json")).unwrap_or(Value::Null);
-    (s["keep_days"].as_u64().unwrap_or(0), s["keep_mb"].as_u64().unwrap_or(0))
-}
-
-/// What the program keeps of one session number: its map, record, answers, files read and changed, pages shown.
-fn session_paths(d: &Data, id: &str) -> Vec<PathBuf> {
-    let mut out = vec![d.root.join(format!("{id}.json")), sessions_dir(d).join(format!("{id}.json")), d.root.join("answers").join(format!("{id}.json")),
-        d.root.join("answer-log").join(format!("{id}.jsonl")), d.root.join("node-files").join(format!("{id}.json")), d.root.join("show").join(id)];
-    out.extend(fs::read_dir(d.root.join("files")).into_iter().flatten().flatten().map(|f| f.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(id))));
-    out
-}
-
-fn size_of(p: &Path) -> u64 {
-    match fs::metadata(p) {
-        Ok(m) if m.is_dir() => fs::read_dir(p).into_iter().flatten().flatten().map(|e| size_of(&e.path())).sum(),
-        Ok(m) => m.len(),
-        Err(_) => 0,
-    }
-}
-
-/// Drops whole conversations (every number of one, so its map and answers go together) older than `keep_days`,
-/// then the oldest until all of them fit in `keep_mb`. Running ones stay; saved maps (the maps folder) are not
-/// conversation records and stay too. The number of conversations dropped.
-pub fn prune(d: &Data) -> usize {
-    let (days, mb) = retention(d);
-    if days == 0 && mb == 0 { return 0; }
-    let all = all(d);
-    // Each conversation is its last number with the numbers that moved on into it; most recently active first.
-    let mut convs: Vec<(i64, Vec<String>)> = all.iter().filter(|r| r.get("movedTo").and_then(Value::as_str).is_none_or(str::is_empty))
-        .filter_map(|r| Some((r.get("lastActive").and_then(Value::as_i64).unwrap_or(0), chain(&all, r.get("id")?.as_str()?)))).collect();
-    // A kept conversation that took its map from another reads that one's answers for those nodes: it stays.
-    let inherited: Value = read_json(&d.root.join("forks/inherited.json")).unwrap_or(Value::Null);
-    let parents: Vec<&str> = inherited.as_object().into_iter().flatten().filter(|(child, _)| record_of(d, child).is_some()).filter_map(|(_, p)| p.as_str()).collect();
-    convs.sort_by_key(|c| std::cmp::Reverse(c.0));
-    let now = chrono::Local::now().timestamp_millis();
-    let sizes: Vec<u64> = convs.iter().map(|c| c.1.iter().flat_map(|id| session_paths(d, id)).map(|p| size_of(&p)).sum()).collect();
-    let mut total: u64 = sizes.iter().sum();
-    let mut dropped = 0;
-    for (i, (at, ids)) in convs.iter().enumerate().rev() {
-        let old = days > 0 && now - at > days as i64 * 86_400_000;
-        let over = mb > 0 && total > mb * 1024 * 1024;
-        if !(old || over) || ids.iter().any(|id| alive(d, id) || parents.contains(&id.as_str())) { continue; }
-        for p in ids.iter().flat_map(|id| session_paths(d, id)) { let _ = if p.is_dir() { fs::remove_dir_all(&p) } else { fs::remove_file(&p) }; }
-        record::decide("session", "records dropped", if old { "older than the kept days" } else { "over the kept size" }, &[("session", ids[0].clone()), ("numbers", ids.len().to_string())]);
-        total = total.saturating_sub(sizes[i]);
-        dropped += 1;
-    }
-    dropped
-}
-
-/// When a conversation went on, in ms: from its start to its last activity. Records from before the start was
-/// kept fall back to its answers, then to its map's own stamps (which, in a map carried over from another
-/// conversation, are that one's), then to now.
-pub fn span(d: &Data, id: &str, nodes: &[Value]) -> (i64, i64) {
-    let rec = record_of(d, id).unwrap_or(Value::Null);
-    let all = all(d);
-    // /resume makes a new record; the conversation began with the first of its numbers.
-    let started = chain(&all, id).iter().filter_map(|n| all.iter().find(|r| r["id"].as_str() == Some(n.as_str()))?["started"].as_i64()).min();
-    let answers: Vec<i64> = if id.is_empty() { Vec::new() } else { crate::records::answers_of(d, &crate::records::lineage(d, id)).iter().filter_map(|r| r["at"].as_i64()).collect() };
-    let nodes = crate::map::node_span(nodes);
-    let now = chrono::Local::now().timestamp_millis();
-    let first = started.or(answers.iter().min().copied()).or(nodes.map(|n| n.0)).unwrap_or(now);
-    let last = rec["lastActive"].as_i64().or(answers.iter().max().copied()).or(nodes.map(|n| n.1)).unwrap_or(now);
-    (first, last.max(first))
-}
-
-/// Claude Code deletes old conversations (after 30 days unless set otherwise); their maps stay but the sessions
-/// leave the list. Each such map is saved once to the maps folder, as `auto-map-…` titled with the session's name.
-/// Only the last number of a conversation: an earlier one that carried on under another holds part of its map.
-pub fn save_lost_maps(d: &Data) -> usize {
-    let file = d.root.join("auto-saved.json");
-    let mut done: Vec<String> = read_json(&file).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
-    let all = all(d);
-    let mut saved = 0;
-    for r in &all {
-        let Some(id) = r.get("id").and_then(Value::as_str) else { continue };
-        let moved = r.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty() && m != id);
-        // Without a first prompt nothing was asked: a tab opened on a carried map and closed again holds only a copy.
-        let asked = r.get("firstPrompt").and_then(Value::as_str).is_some_and(|p| !p.is_empty());
-        if moved || !asked || done.iter().any(|x| x == id) || !ghost(d, &all, id) { continue; }
-        let Some(map) = map_of(d, id) else { continue };
-        let nodes = map.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
-        if nodes.is_empty() { continue; }
-        let path = crate::map::free_path(&d.maps(), &crate::map::file_name(span(d, id, &nodes), None, "auto-"));
-        let body = serde_json::json!({"format": "whaybench-map", "version": map.get("version"), "title": session_name(d, id),
-            "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": id, "auto": true, "nodes": nodes});
-        if fs::create_dir_all(d.maps()).and_then(|_| fs::write(&path, body.to_string())).is_ok() {
-            record::decide("session", "map saved", "its conversation is no longer kept", &[("session", id.to_string()), ("file", path.display().to_string())]);
-            done.push(id.to_string());
-            saved += 1;
-        }
-    }
-    if saved > 0 { let _ = write_atomic(&file, &Value::from(done).to_string()); }
-    saved
-}
-
-/// A node label as a name: the part before ' → ' (the topic, not its conclusion).
-fn short(label: &str, n: usize) -> String {
-    let head = label.split(" → ").next().unwrap_or("").trim();
-    if head.chars().count() <= n { head.to_string() } else { format!("{}…", head.chars().take(n - 1).collect::<String>()) }
-}
-
-/// (main topic, what it is on now): the top branch with the most nodes, and the step under it holding the current one.
-pub fn map_topics(map: &Value) -> (String, String) {
-    let nodes = map.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
-    if nodes.is_empty() { return Default::default(); }
-    let sid = |n: &Value| n.get("id").and_then(Value::as_str).unwrap_or("").to_string();
-    let parent = |n: &Value| n.get("parent").and_then(Value::as_str).unwrap_or("").to_string();
-    let by: std::collections::HashMap<String, &Value> = nodes.iter().map(|n| (sid(n), n)).collect();
-    let top_of = |start: &Value| -> String {
-        let (mut x, mut seen) = (start, Vec::new());
-        while let Some(up) = by.get(&parent(x)) {
-            if seen.contains(&sid(x)) { break; }
-            seen.push(sid(x));
-            x = up;
-        }
-        sid(x)
-    };
-    let mut counts: Vec<(String, usize)> = Vec::new();
-    for n in &nodes {
-        let t = top_of(n);
-        match counts.iter_mut().find(|c| c.0 == t) { Some(c) => c.1 += 1, None => counts.push((t, 1)) }
-    }
-    // Most nodes; of equals, the one that comes last in the map.
-    let position = |id: &str| nodes.iter().position(|n| sid(n) == id).unwrap_or(0);
-    let main = counts.iter().max_by_key(|c| (c.1, position(&c.0))).map(|c| c.0.clone()).unwrap_or_default();
-    let label = |id: &str| by.get(id).and_then(|n| n.get("label")).and_then(Value::as_str).unwrap_or("").to_string();
-    let current = map.get("current").and_then(Value::as_str).unwrap_or("");
-    let mut now = String::new();
-    if let Some(cur) = by.get(current) {
-        if top_of(cur) != main {
-            now = label(&top_of(cur));
-        } else {
-            let mut step = (*cur).clone();
-            let mut guard = 0;
-            let mut last = String::new();
-            while sid(&step) != main && guard < 200 {
-                last = sid(&step);
-                match by.get(&parent(&step)) { Some(up) => step = (*up).clone(), None => break }
-                guard += 1;
-            }
-            if !last.is_empty() { now = label(&last); }
-        }
-    }
-    (short(&label(&main), 26), short(&now, 22))
-}
-
-/// Names from the maps, made distinct: main topic, then with what it is on, then with the date of last activity.
-pub fn map_titles(d: &Data) -> std::collections::HashMap<String, String> {
-    use std::collections::HashMap;
-    let mut rows: Vec<(String, String, String, i64)> = Vec::new();
-    for info in all(d) {
-        if info.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty()) { continue; }
-        let id = info["id"].as_str().unwrap_or("").to_string();
-        let Some(map) = map_of(d, &id) else { continue };
-        let (main, now) = map_topics(&map);
-        if !main.is_empty() { rows.push((id, main, now, info.get("lastActive").and_then(Value::as_i64).unwrap_or(0))); }
-    }
-    let mut names: HashMap<String, String> = HashMap::new();
-    for (id, main, now, _) in &rows {
-        let same = rows.iter().filter(|r| r.1 == *main).count();
-        names.insert(id.clone(), if same == 1 || now.is_empty() { main.clone() } else { format!("{main} · {now}") });
-    }
-    let snapshot = names.clone();
-    for (id, _, _, at) in &rows {
-        let name = &snapshot[id];
-        if snapshot.values().filter(|v| *v == name).count() > 1 {
-            let stamp = chrono::DateTime::from_timestamp_millis(*at).map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string()).unwrap_or_default();
-            names.insert(id.clone(), format!("{name} · {stamp}"));
-        }
-    }
-    names
-}
-
-/// The session's name: its main topic from its map; without a map, the name Claude Code gives it
-/// (without the " (n)" it adds per /background), remembered after the session stops; else the first prompt.
-pub fn session_name(d: &Data, id: &str) -> String {
-    let file = d.root.join("names.json");
-    let mut names = read_json(&file).unwrap_or_else(|| serde_json::json!({}));
-    let running = strip_count(agent(id).as_ref().and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or(""));
-    if !running.is_empty() && names.get(id).and_then(Value::as_str) != Some(&running) {
-        names[id] = Value::String(running.clone());
-        let _ = write_atomic(&file, &names.to_string());
-    }
-    if let Some(n) = map_titles(d).get(id) { return n.clone(); }
-    if !running.is_empty() { return running; }
-    if let Some(n) = names.get(id).and_then(Value::as_str) { return n.to_string(); }
-    record_of(d, id).and_then(|r| r.get("firstPrompt").and_then(Value::as_str).map(String::from)).unwrap_or_default()
-}
-
-pub fn tab_title(d: &Data, id: &str) -> String { session_name(d, id) }
-
 pub fn unend(d: &Data, id: &str) {
     let p = sessions_dir(d).join(format!("{id}.json"));
     if let Some(mut r) = read_json(&p) {
@@ -520,15 +320,6 @@ pub fn state_of(d: &Data, id: &str) -> Option<String> { read_json(&state_dir(d).
 pub fn clear_focus(d: &Data) { let _ = fs::remove_file(focus_file(d)); }
 
 pub fn latest(d: &Data) -> Option<String> { Some(current_id(d, read_json(&latest_map(d))?.get("sessionId")?.as_str()?)) }
-
-fn strip_count(name: &str) -> String {
-    let t = name.trim();
-    if let Some(open) = t.rfind(" (") {
-        let inner = &t[open + 2..];
-        if inner.ends_with(')') && inner[..inner.len() - 1].chars().all(|c| c.is_ascii_digit()) && inner.len() > 1 { return t[..open].trim().to_string(); }
-    }
-    t.to_string()
-}
 
 pub fn set_focus(d: &Data, id: &str, who: &str) {
     let before = read_json(&focus_file(d)).and_then(|v| v.get("sessionId").and_then(Value::as_str).map(String::from)).unwrap_or_default();
@@ -553,76 +344,16 @@ pub fn target(d: &Data) -> Option<String> {
     })
 }
 
-/// A request's kind for the record: its leading [tag], a slash command, or the person's own text.
-pub fn request_kind(text: &str) -> String {
-    let t = text.trim_start();
-    if t.starts_with('[') {
-        if let Some(end) = t.char_indices().take(40).find(|(_, c)| *c == ']').map(|(i, _)| i) { return t[1..end].to_string(); }
-    }
-    if t.starts_with('/') { return format!("command {}", t.split_whitespace().next().unwrap_or(t)); }
-    "person's input".into()
-}
-
-/// Queues text for a session's tab to type in, as if typed. Only for a session running now: a request left for a
-/// stopped one would run hours later, after the work was done elsewhere. True when queued.
-pub fn queue_prompt(d: &Data, id: &str, text: &str) -> bool {
-    let now = current_id(d, id);
-    let kind = request_kind(text);
-    if !alive(d, &now) {
-        record::decide("request", "request not sent", "the session is not running (no heartbeat)", &[("session", id.to_string()), ("kind", kind)]);
-        return false;
-    }
-    // The tab's relay types it in once the session has finished its turn, whatever the agent. A session no tab
-    // shows (one running in the background) cannot be typed into.
-    let tab = open_tabs(d).into_iter().find(|t| t.session.as_deref() == Some(&now)).map(|t| t.tab);
-    let Some(tab) = tab else {
-        record::decide("request", "request not sent", "no tab shows the session", &[("session", now), ("kind", kind)]);
-        return false;
-    };
-    let seq = SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0);
-    if write_atomic(&tab_inbox(d, &tab).join(format!("{seq}.json")), &serde_json::json!({"text": text, "enter": true}).to_string()).is_err() { return false; }
-    record::decide("request", "request queued", "the session is running", &[("request", seq.to_string()), ("session", now), ("tab", tab), ("kind", kind), ("chars", text.chars().count().to_string())]);
-    true
-}
-
-/// A tab's own record of what it shows, for the program and the other tabs.
-pub fn tab_file(d: &Data, tab: &str) -> PathBuf { tabs_dir(d).join(format!("{tab}.json")) }
-pub fn tab_inbox(d: &Data, tab: &str) -> PathBuf { tabs_dir(d).join(format!("{tab}.in")) }
-
-pub fn write_tab(d: &Data, tab: &str, session: Option<&str>, attached: bool) {
-    let v = serde_json::json!({"tab": tab, "pid": std::process::id(), "session": session, "attached": attached});
-    let _ = write_atomic(&tab_file(d, tab), &v.to_string());
-}
-
-pub struct OpenTab { pub tab: String, pub session: Option<String>, pub attached: bool }
-
-/// Tabs whose relay still runs.
-pub fn open_tabs(d: &Data) -> Vec<OpenTab> {
-    let mut out = Vec::new();
-    for f in fs::read_dir(tabs_dir(d)).into_iter().flatten().flatten() {
-        if f.path().extension().is_none_or(|e| e != "json") { continue; }
-        let Some(v) = read_json(&f.path()) else { continue };
-        let pid = v.get("pid").and_then(Value::as_u64).unwrap_or(0);
-        if pid == 0 || !Path::new(&format!("/proc/{pid}")).exists() { let _ = fs::remove_file(f.path()); continue; }
-        out.push(OpenTab {
-            tab: v.get("tab").and_then(Value::as_str).unwrap_or_default().to_string(),
-            session: v.get("session").and_then(Value::as_str).map(String::from),
-            attached: v.get("attached").and_then(Value::as_bool).unwrap_or(false),
-        });
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn data(name: &str) -> Data {
+    pub(crate) fn data(name: &str) -> Data {
         let d = std::env::temp_dir().join(format!("wb-s-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(d.join("sessions")).unwrap();
         Data::new(d)
     }
-    fn rec(d: &Data, id: &str, v: Value) { fs::write(sessions_dir(d).join(format!("{id}.json")), v.to_string()).unwrap(); }
+    pub(crate) fn rec(d: &Data, id: &str, v: Value) { fs::write(sessions_dir(d).join(format!("{id}.json")), v.to_string()).unwrap(); }
 
     #[test]
     fn moves_are_followed_to_the_end_and_a_loop_stops() {
@@ -683,35 +414,6 @@ mod tests {
         assert_eq!(session_of_tab(&d, "t1").as_deref(), Some("new"));
     }
     #[test]
-    fn requests_go_only_to_a_running_session_in_a_tab() {
-        let d = data("queue");
-        fs::create_dir_all(alive_dir(&d)).unwrap();
-        rec(&d, "old", serde_json::json!({"id":"old","movedTo":"new"}));
-        rec(&d, "new", serde_json::json!({"id":"new"}));
-        assert!(!queue_prompt(&d, "old", "text"), "not running");
-        fs::write(alive_dir(&d).join("new"), "1").unwrap();
-        assert!(!queue_prompt(&d, "old", "text"), "no tab shows it");
-        write_tab(&d, "t1", Some("new"), false);
-        assert!(queue_prompt(&d, "old", "first line\nsecond"), "goes to the tab where the session lives now");
-        let queued: Vec<_> = fs::read_dir(tab_inbox(&d, "t1")).unwrap().flatten().collect();
-        assert_eq!(queued.len(), 1);
-    }
-    #[test]
-    fn codex_requests_require_a_tab_and_go_to_its_relay() {
-        let d = data("codex-input");
-        rec(&d, "codex1", serde_json::json!({"id":"codex1","agent":"codex"}));
-        fs::create_dir_all(alive_dir(&d)).unwrap();
-        fs::write(alive_dir(&d).join("codex1"), "1").unwrap();
-        assert!(!queue_prompt(&d, "codex1", "hello"));
-        write_tab(&d, "codextab", Some("codex1"), false);
-        assert!(queue_prompt(&d, "codex1", "first line\nsecond line"));
-        let p = fs::read_dir(tab_inbox(&d, "codextab")).unwrap().next().unwrap().unwrap().path();
-        let v = read_json(&p).unwrap();
-        assert_eq!(v["text"], "first line\nsecond line");
-        assert_eq!(v["enter"], true);
-        assert!(!d.cache().join("inbox/codex1.json").exists());
-    }
-    #[test]
     fn a_session_without_a_transcript_resumes_where_its_conversation_is() {
         let d = data("resumable");
         rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b"}));
@@ -737,71 +439,6 @@ mod tests {
         assert!(!ghost(&d, &all, "b"), "a running one is no ghost");
     }
     #[test]
-    fn the_map_of_a_conversation_no_longer_kept_is_saved_once_from_its_last_number() {
-        let d = data("lost-maps");
-        rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b","firstPrompt":"q"}));
-        rec(&d, "b", serde_json::json!({"id":"b","firstPrompt":"q"}));
-        rec(&d, "tab", serde_json::json!({"id":"tab"}));
-        let map = |label: &str| serde_json::json!({"nodes":[{"id":"n","label":label,"opened":{"at":1_790_000_000_000_i64}}]}).to_string();
-        fs::write(d.root.join("a.json"), map("early")).unwrap();
-        fs::write(d.root.join("b.json"), map("whole")).unwrap();
-        fs::write(d.root.join("tab.json"), map("carried copy")).unwrap();
-        assert_eq!(save_lost_maps(&d), 1, "only the last number, and not a tab where nothing was asked");
-        let files: Vec<_> = fs::read_dir(d.maps()).unwrap().flatten().map(|f| f.path()).collect();
-        assert_eq!(files.len(), 1);
-        assert!(files[0].file_name().unwrap().to_string_lossy().starts_with("auto-map-"));
-        let v = read_json(&files[0]).unwrap();
-        assert_eq!((v["from"].as_str(), v["auto"].as_bool(), v["nodes"][0]["label"].as_str()), (Some("b"), Some(true), Some("whole")));
-        assert_eq!(save_lost_maps(&d), 0, "once");
-    }
-    #[test]
-    fn old_conversations_go_whole_and_only_when_a_limit_is_set() {
-        let d = data("prune");
-        let day = 86_400_000_i64;
-        let now = chrono::Local::now().timestamp_millis();
-        rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b"}));
-        rec(&d, "b", serde_json::json!({"id":"b","lastActive": now - 40 * day}));
-        rec(&d, "c", serde_json::json!({"id":"c","lastActive": now - day}));
-        for id in ["a", "b", "c"] {
-            fs::write(d.root.join(format!("{id}.json")), "{}").unwrap();
-            fs::create_dir_all(d.root.join("answer-log")).unwrap();
-            fs::write(d.root.join("answer-log").join(format!("{id}.jsonl")), "x\n").unwrap();
-        }
-        assert_eq!(prune(&d), 0, "no limit by default");
-        fs::write(d.root.join("settings.json"), r#"{"keep_days":30}"#).unwrap();
-        assert_eq!(prune(&d), 1);
-        assert!(!d.root.join("a.json").exists() && !d.root.join("answer-log/b.jsonl").exists(), "every number of it, map and answers");
-        assert!(d.root.join("c.json").exists() && record_of(&d, "c").is_some());
-    }
-    #[test]
-    fn over_the_size_the_oldest_go_first_and_a_map_another_took_stays() {
-        let d = data("prune-size");
-        let now = chrono::Local::now().timestamp_millis();
-        fs::create_dir_all(d.root.join("forks")).unwrap();
-        for (id, age) in [("p", 4), ("x", 3), ("y", 2), ("child", 1)] {
-            rec(&d, id, serde_json::json!({"id": id, "lastActive": now - age * 1000}));
-            fs::write(d.root.join(format!("{id}.json")), vec![b' '; 300 * 1024]).unwrap();
-        }
-        fs::write(d.root.join("forks/inherited.json"), r#"{"child":"p"}"#).unwrap();
-        fs::write(d.root.join("settings.json"), r#"{"keep_mb":1}"#).unwrap();
-        assert_eq!(prune(&d), 1);
-        assert!(d.root.join("p.json").exists(), "child took its map: kept");
-        assert!(!d.root.join("x.json").exists(), "the oldest of the others");
-        assert!(d.root.join("y.json").exists() && d.root.join("child.json").exists(), "under the size again: stops");
-    }
-    #[test]
-    fn a_conversation_spans_from_its_start_not_from_a_map_it_carried_over() {
-        let d = data("span");
-        let nodes = vec![serde_json::json!({"id":"n","opened":{"at":100}})];
-        rec(&d, "s", serde_json::json!({"id":"s","started":5000,"lastActive":9000}));
-        assert_eq!(span(&d, "s", &nodes), (5000, 9000));
-        rec(&d, "old", serde_json::json!({"id":"old","lastActive":9000}));
-        assert_eq!(span(&d, "old", &nodes), (100, 9000), "no start kept: the map's own stamps");
-        rec(&d, "r1", serde_json::json!({"id":"r1","started":2000,"movedTo":"r2"}));
-        rec(&d, "r2", serde_json::json!({"id":"r2","started":7000,"lastActive":9500}));
-        assert_eq!(span(&d, "r2", &nodes), (2000, 9500), "resumed under a new number: the first number's start");
-    }
-    #[test]
     fn a_move_that_did_not_hold_is_taken_back() {
         let d = data("moved-back");
         rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b","firstPrompt":"text"}));
@@ -809,12 +446,6 @@ mod tests {
         moved_back(&d, "a");
         assert_eq!(current_id(&d, "a"), "a");
         assert_eq!(record_of(&d, "a").unwrap()["firstPrompt"], "text");
-    }
-    #[test]
-    fn request_kinds() {
-        assert_eq!(request_kind("[map update] text"), "map update");
-        assert_eq!(request_kind("/exit now"), "command /exit");
-        assert_eq!(request_kind("plain text"), "person's input");
     }
     #[test]
     fn the_chosen_session_comes_first() {
@@ -847,43 +478,6 @@ mod tests {
         assert!(!heartbeat(&alive_dir(&d).join("none")));
     }
     #[test]
-    fn a_map_names_a_session_by_its_biggest_branch() {
-        let m = serde_json::json!({"current":"c","nodes":[{"id":"a","label":"small branch"},{"id":"b","label":"big topic → conclusion"},{"id":"c","parent":"b","label":"first step"},{"id":"d","parent":"c","label":"detail"}]});
-        assert_eq!(map_topics(&m), ("big topic".to_string(), "first step".to_string()));
-        assert_eq!(map_topics(&serde_json::json!({"nodes":[]})), Default::default());
-    }
-    #[test]
-    fn the_same_topic_in_two_sessions_is_told_apart() {
-        let d = data("titles");
-        rec(&d, "s1", serde_json::json!({"id":"s1","lastActive":1000}));
-        rec(&d, "s2", serde_json::json!({"id":"s2","lastActive":2000}));
-        rec(&d, "s3", serde_json::json!({"id":"s3","firstPrompt":"first question"}));
-        let map = |cur: &str| serde_json::json!({"current":cur,"nodes":[{"id":"a","label":"same topic"},{"id":"x","parent":"a","label":"one"},{"id":"y","parent":"a","label":"two"}]});
-        fs::write(d.root.join("s1.json"), map("x").to_string()).unwrap();
-        fs::write(d.root.join("s2.json"), map("y").to_string()).unwrap();
-        let t = map_titles(&d);
-        assert_eq!(t["s1"], "same topic · one");
-        assert_eq!(t["s2"], "same topic · two");
-        assert_eq!(session_name(&d, "s3"), "first question", "without a map, the first prompt");
-    }
-    #[test]
-    fn the_count_claude_code_adds_is_removed() {
-        assert_eq!(strip_count("tidy up (3)"), "tidy up");
-        assert_eq!(strip_count("tidy up"), "tidy up");
-        assert_eq!(strip_count("tidy (up)"), "tidy (up)");
-        assert_eq!(strip_count(""), "");
-    }
-    #[test]
-    fn tabs_with_a_dead_relay_do_not_count() {
-        let d = data("tabs");
-        write_tab(&d, "t1", Some("s1"), true);
-        fs::write(tab_file(&d, "t2"), r#"{"tab":"t2","pid":999999999,"session":"s2"}"#).unwrap();
-        let open = open_tabs(&d);
-        assert_eq!(open.len(), 1);
-        assert_eq!((open[0].tab.as_str(), open[0].session.as_deref(), open[0].attached), ("t1", Some("s1"), true));
-        assert!(!tab_file(&d, "t2").exists());
-    }
-    #[test]
     fn a_transcript_without_the_persons_words_is_not_a_conversation() {
         let dir = tempfile::tempdir().unwrap();
         let (empty, full) = (dir.path().join("e.jsonl"), dir.path().join("f.jsonl"));
@@ -893,5 +487,4 @@ mod tests {
         assert!(holds_conversation(&full));
         assert!(!holds_conversation(&dir.path().join("none.jsonl")));
     }
-
 }
