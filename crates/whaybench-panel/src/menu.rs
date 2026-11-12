@@ -247,7 +247,10 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     // The latest release, looked up at start and then every six hours (the check itself skips when it is too soon).
     if wb_core::update::installed_release() {
         let d2 = d.clone();
-        std::thread::spawn(move || loop { wb_core::update::check(&d2); std::thread::sleep(std::time::Duration::from_secs(3600)); });
+        std::thread::spawn(move || {
+            wb_core::update::check(&d2, true);
+            loop { std::thread::sleep(std::time::Duration::from_secs(3600)); wb_core::update::check(&d2, false); }
+        });
     }
     let (w, last) = (win.clone(), RefCell::new(signature(&d)));
     glib::timeout_add_local(std::time::Duration::from_secs(1), move || {

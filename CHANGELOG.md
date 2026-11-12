@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A start always looks the latest release up; a check less than six hours old kept a new release from being seen
+  after a restart.
+
 ## [0.5.0] - 2026-11-13
 
 Whaybench now tells when a new release is out and installs it from its own menu, takes composed input such as Korean

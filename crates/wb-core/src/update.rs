@@ -31,11 +31,12 @@ fn is_newer(a: &str, b: &str) -> bool {
     match (parts(a), parts(b)) { (Some(x), Some(y)) => x > y, _ => false }
 }
 
-/// Asks GitHub which release is the latest, unless it was asked less than six hours ago. Blocks up to 15 seconds:
-/// run it off the screen's thread.
-pub fn check(d: &Data) {
+/// Asks GitHub which release is the latest: always at start (`at_start`), otherwise not again within six hours. Blocks
+/// up to 15 seconds: run it off the screen's thread.
+pub fn check(d: &Data, at_start: bool) {
     let last = std::fs::read_to_string(latest_file(d)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
-    if last.as_ref().and_then(|v| v["checked"].as_u64()).is_some_and(|at| now_ms().saturating_sub(at) < EVERY.as_millis() as u64) { return; }
+    let recent = last.as_ref().and_then(|v| v["checked"].as_u64()).is_some_and(|at| now_ms().saturating_sub(at) < EVERY.as_millis() as u64);
+    if recent && !at_start { return; }
     // The latest release's page redirects to its tag; only the address is read.
     let out = Command::new("curl").args(["-fsSL", "--max-time", "15", "-o", "/dev/null", "-w", "%{url_effective}", &format!("{REPO}/releases/latest")])
         .stdin(Stdio::null()).stderr(Stdio::null()).output();
