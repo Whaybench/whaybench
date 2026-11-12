@@ -318,6 +318,7 @@ support = Whaybench 지원하기
 update-to = { $v } 버전으로 업데이트
 updating = { $v } 버전으로 업데이트 중 · 끝나면 Whaybench가 다시 시작함
 update-failed = 업데이트 실패 · { $log } 참고
+update-available = Whaybench { $v } 버전이 나왔습니다 · Whaybench → 정보에서 업데이트
 search-sessions = 세션 검색
 new-conversation-session = 새 대화 세션
 open-map = 지도 열기

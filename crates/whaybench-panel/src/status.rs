@@ -1,4 +1,5 @@
-//! The status line: the last system message for as long as it was given, else the notice of a newer program.
+//! The status line: the last system message for as long as it was given, else the notice of a newer program installed
+//! and waiting for a restart, else of a newer release to install from Whaybench → About.
 
 use gtk::prelude::*;
 use wb_core::{paths::Data, status};
@@ -12,7 +13,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     win.set_child(Some(&label));
     every(500, move || {
-        let text = status::current(&d).unwrap_or_else(|| if status::new_version_waiting(&d) { wb_core::i18n::t("new-version-available-whaybench-restart-tabs").to_string() } else { String::new() });
+        let text = status::current(&d).unwrap_or_else(|| if status::new_version_waiting(&d) { wb_core::i18n::t("new-version-available-whaybench-restart-tabs").to_string() }
+            else { wb_core::update::newer(&d).map(|v| wb_core::i18n::f("update-available", &[("v", v)])).unwrap_or_default() });
         label.set_text(&text);
     });
 }

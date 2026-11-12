@@ -318,6 +318,7 @@ support = Support Whaybench
 update-to = Update to { $v }
 updating = Updating to { $v } · Whaybench restarts when it is done
 update-failed = Update failed · see { $log }
+update-available = Whaybench { $v } is out · Whaybench → About to update
 search-sessions = Search sessions
 new-conversation-session = New conversation session
 open-map = Open map

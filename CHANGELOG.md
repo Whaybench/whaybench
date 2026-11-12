@@ -10,7 +10,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 - Whaybench → About offers a newer release when there is one: it installs it and Whaybench restarts with the tabs
   kept. Whaybench looks the latest release up on GitHub at start and every six hours, only when it was installed with
-  install.sh; nothing is sent.
+  install.sh; nothing is sent. The status line says so until it is installed.
 - Whaybench → About → Support Whaybench opens https://ko-fi.com/whaybench in the view panel.
 
 ### Changed
