@@ -6,6 +6,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-12
+
+The notifications panel now shows the whole memory too: every change to every map node, in time order.
+
 ### Added
 
 - The notifications panel has two tabs: Now, the sections as before, and History, every change to every map node,
