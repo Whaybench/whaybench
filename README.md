@@ -127,7 +127,7 @@ status line then says a new version is waiting, and Whaybench → Restart starts
 
 On a 64-bit PC with Windows 11, or Windows 10 21H2 or newer, download **WhaybenchSetup.exe** from the
 [latest release](https://github.com/whaybench/whaybench/releases/latest) and run it. The installer is not signed, so
-Windows may say it protected your PC: choose **More info**, then **Run anyway**.
+Windows shows a warning first; it installs only once you confirm it (**More info**, then **Run anyway**).
 
 It sets everything up in WSL, the Linux that comes with Windows: WSL itself (Windows asks for administrator rights,
 and may need one restart, after which the setup goes on by itself), an Ubuntu of its own named Whaybench (your other
