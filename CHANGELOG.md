@@ -6,6 +6,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
+Whaybench now tells when a new release is out and installs it from its own menu, takes composed input such as Korean
+through an input method of its own, and lets the map's look be set.
+
+Update to this version once with the install command, `curl -fsSL
+https://github.com/whaybench/whaybench/releases/latest/download/install.sh | sh`: the update offered in the menu starts
+with this version. Install fcitx5 and the engine for your language too (see the README).
+
 ### Added
 
 - Whaybench → About offers a newer release when there is one: it installs it and Whaybench restarts with the tabs

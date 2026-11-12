@@ -18,6 +18,7 @@ const PROBES: &[(&str, &str, &[&str])] = &[
     ("Firefox", "firefox", &["--version"]),
     ("wl-clipboard", "wl-paste", &["--version"]),
     ("GTK", "pkg-config", &["--modversion", "gtk4"]),
+    ("fcitx5", "fcitx5", &["--version"]),
     ("KDE", "plasmashell", &["--version"]),
 ];
 
