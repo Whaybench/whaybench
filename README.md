@@ -59,7 +59,7 @@ login and keeps everything in one folder on your computer.
 ## Install
 
 Whaybench runs on Linux (x86_64) in a Wayland desktop session: Fedora 39, Ubuntu 24.04, Debian 13 or newer, or
-another distribution with GTK 4.12 or newer (AlmaLinux and Rocky Linux 10 with EPEL). You need Claude Code or Codex CLI, installed and signed in.
+another distribution with GTK 4.12 or newer (AlmaLinux and Rocky Linux 10 with EPEL). You need Claude Code or Codex CLI, installed and signed in. On Windows it runs in WSL, with an installer of its own: see [Windows](#windows).
 
 ### 1. System packages
 
@@ -123,6 +123,21 @@ To update, run the install command again; it updates the Claude Code plugin too.
 status line then says a new version is waiting, and Whaybench → Restart starts it. To remove Whaybench, delete `~/.local/lib/whaybench` and
 `~/.local/bin/whaybench`; your data stays (see below).
 
+### Windows
+
+On a 64-bit PC with Windows 11, or Windows 10 21H2 or newer, download **WhaybenchSetup.exe** from the
+[latest release](https://github.com/whaybench/whaybench/releases/latest) and run it. The installer is not signed, so
+Windows may say it protected your PC: choose **More info**, then **Run anyway**.
+
+It sets everything up in WSL, the Linux that comes with Windows: WSL itself (Windows asks for administrator rights,
+and may need one restart, after which the setup goes on by itself), an Ubuntu of its own named Whaybench (your other
+WSL distributions are not touched), Firefox, the input method for your Windows display language, Claude Code and
+Whaybench. This takes a while. Then start Whaybench from the Start menu or the desktop, and the first time sign in to
+Claude in the browser that opens. If the setup stops, run the installer again: it goes on from where it stopped.
+
+Whaybench updates itself from its menu, as on Linux. To remove it, uninstall Whaybench in Windows Settings → Apps; it
+asks whether to delete the Whaybench Linux system too, with everything kept in it.
+
 ### Build from source
 
 You need Rust 1.87 or newer ([rustup](https://rustup.rs)), Git and the development packages:
@@ -167,7 +182,8 @@ session of one agent sees what the other decided.
 
 ## FAQ
 
-**macOS or Windows?** Not now. Whaybench needs a Linux Wayland desktop.
+**macOS or Windows?** Windows, through WSL: see [Windows](#windows). macOS: not now; Whaybench needs a Linux Wayland
+desktop.
 
 **Does it call the AI itself?** No. Your agent does the work in its terminal as usual. Whaybench only reads and
 shows what the agent records, and sends text to a session when you ask it to.

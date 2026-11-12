@@ -6,6 +6,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-13
+
+Whaybench installs on Windows.
+
+### Added
+
+- WhaybenchSetup.exe, in each release, installs Whaybench on Windows 11 or Windows 10 21H2 and newer: WSL when it is
+  missing, an Ubuntu distribution of its own named Whaybench, Firefox from Mozilla, the input method for the Windows
+  display language, Claude Code and Whaybench, then shortcuts in the Start menu and on the desktop. Run again, it goes
+  on from where it stopped. Uninstalling asks whether to delete the distribution too.
+
 ### Fixed
 
 - A start always looks the latest release up; a check less than six hours old kept a new release from being seen
