@@ -19,6 +19,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - The title bar text size goes up to 32 in the theme settings (was 18). The title bar keeps its height.
+- The alerts panel is called Notifications in English, and `notify` inside (`whaybench-panel notify`). A saved layout
+  and panel zoom from before find it by its old name.
 
 ## [0.3.1] - 2026-11-12
 

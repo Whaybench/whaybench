@@ -9,7 +9,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// Fields only the program writes; whatever an agent sends for them is dropped.
 const STAMPED: [&str; 3] = ["opened", "changed", "closed"];
-/// Fields only the person sets (through the alert panel); an agent's value is dropped.
+/// Fields only the person sets (through the notifications panel); an agent's value is dropped.
 const PERSON_ONLY: [&str; 1] = ["mark"];
 /// States that close a node; every other state, and none, leaves it open. `removed` is the trash.
 const CLOSING: [&str; 3] = ["done", "dropped", "removed"];
@@ -234,13 +234,13 @@ fn carried(data: &Path, sid: &str, source: &Value) {
 
 fn change(data: &Path, sid: &str, input: Value, latest: bool) -> Result<Value> { change_by(data, sid, input, latest, false, None) }
 
-/// The person's change from the alert panel: it may set the person's fields (the mark), and is recorded as the person's.
+/// The person's change from the notifications panel: it may set the person's fields (the mark), and is recorded as the person's.
 pub fn person(data: &Path, sid: &str, upsert: Value) -> Result<Value> { change_by(data, sid, json!({"upsert": upsert}), false, true, None) }
 
 /// `action` numbers the events of one person's action (a move to the trash), so it can be undone as one.
 fn change_by(data: &Path, sid: &str, input: Value, latest: bool, person: bool, action: Option<&str>) -> Result<Value> {
     let path = data.join(format!("{}.json", safe_id(sid)?));
-    // The session and the person (alerts panel, map menu) write the same map: one at a time, or a change is lost.
+    // The session and the person (notifications panel, map menu) write the same map: one at a time, or a change is lost.
     let locks = data.join("cache").join("map-locks");
     fs::create_dir_all(&locks)?;
     let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(locks.join(format!("{}.lock", safe_id(sid)?)))?;

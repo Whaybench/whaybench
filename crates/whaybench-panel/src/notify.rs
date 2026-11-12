@@ -1,4 +1,4 @@
-//! The alert panel (3.19): of everything in the memory, what the person should see now. Due dates, the person's
+//! The notifications panel (3.19): of everything in the memory, what the person should see now. Due dates, the person's
 //! marked nodes, what changed since they last looked, AI suggestions, held nodes, and the trash (hidden until opened).
 //! The person's choices (done, dropped, held, trash, reopen, mark) are written to that session's map as theirs.
 use std::{cell::RefCell, rc::Rc};
@@ -9,7 +9,7 @@ use wb_core::{i18n::t, memory, paths::Data, status};
 
 use crate::common::{ctl, every};
 
-const SECTIONS: [(&str, &str); 7] = [("due", "alerts-due"), ("marked", "alerts-marked"), ("changed", "alerts-changed"), ("check", "alerts-check"), ("open", "alerts-open"), ("held", "alerts-held"), ("trash", "alerts-trash")];
+const SECTIONS: [(&str, &str); 7] = [("due", "notify-due"), ("marked", "notify-marked"), ("changed", "notify-changed"), ("check", "notify-check"), ("open", "notify-open"), ("held", "notify-held"), ("trash", "notify-trash")];
 
 struct View { shown: String, trash_open: bool }
 
@@ -32,7 +32,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
         list.append(&row);
         if closed { continue; }
         if items.is_empty() {
-            let none = gtk::Label::new(Some(t("alerts-none")));
+            let none = gtk::Label::new(Some(t("notify-none")));
             none.set_xalign(0.0);
             none.add_css_class("dim");
             let row = gtk::ListBoxRow::new();
@@ -53,13 +53,13 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     }
 }
 
-fn say_error(d: &Data, e: impl std::fmt::Display) { status::say(d, &wb_core::i18n::f("alerts-not-written", &[("e", e.to_string())]), 8); }
+fn say_error(d: &Data, e: impl std::fmt::Display) { status::say(d, &wb_core::i18n::f("notify-not-written", &[("e", e.to_string())]), 8); }
 
 /// Back from the trash as the action left it; nodes changed since stay where they are, and the person is told.
 fn restore(d: &Data, action: &str) {
     match wb_core::map::restore(&d.root, action) {
-        Ok(kept) if kept.is_empty() => status::say(d, t("alerts-restored"), 5),
-        Ok(kept) => status::say(d, &wb_core::i18n::f("alerts-restored-kept", &[("n", kept.len().to_string())]), 8),
+        Ok(kept) if kept.is_empty() => status::say(d, t("notify-restored"), 5),
+        Ok(kept) => status::say(d, &wb_core::i18n::f("notify-restored-kept", &[("n", kept.len().to_string())]), 8),
         Err(e) => say_error(d, e),
     }
 }
@@ -99,8 +99,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::None);
     list.set_activate_on_single_click(true);
-    let seen = gtk::Button::with_label(t("alerts-seen"));
-    seen.set_tooltip_text(Some(t("alerts-seen-tip")));
+    let seen = gtk::Button::with_label(t("notify-seen"));
+    seen.set_tooltip_text(Some(t("notify-seen-tip")));
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&list));
     scroll.set_vexpand(true);
@@ -139,7 +139,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             if name == "__trash__" {
                 g.set_state(gtk::EventSequenceState::Claimed);
                 let (d2, again) = (d.clone(), again.clone());
-                item(&menu, &group, "empty", "alerts-empty-trash", move || {
+                item(&menu, &group, "empty", "notify-empty-trash", move || {
                     let all: Vec<(String, String)> = memory::board(&d2.root, None)["trash"].as_array().into_iter().flatten()
                         .map(|i| (i["session"].as_str().unwrap_or("").to_string(), i["node"]["id"].as_str().unwrap_or("").to_string())).collect();
                     purge(&d2, &all);
@@ -154,26 +154,26 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             if !action.is_empty() {
                 if action != "-" {
                     let (d2, a2, again) = (d.clone(), action.clone(), again.clone());
-                    item(&menu, &group, "restore", "alerts-restore", move || { restore(&d2, &a2); again(); });
+                    item(&menu, &group, "restore", "notify-restore", move || { restore(&d2, &a2); again(); });
                 }
                 let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
-                item(&menu, &group, "purge", "alerts-purge", move || { purge(&d2, &[(s2.clone(), n2.clone())]); again(); });
+                item(&menu, &group, "purge", "notify-purge", move || { purge(&d2, &[(s2.clone(), n2.clone())]); again(); });
                 popup(&list2, &menu, &group, x, y);
                 return;
             }
             // From To approve: the agent's suggestion first, approved as the person's own choice or declined.
             if !suggested.is_empty() {
-                for (name, label, change) in [("approve", "alerts-approve", json!({"state": suggested, "suggest": null})), ("decline", "alerts-decline", json!({"suggest": null}))] {
+                for (name, label, change) in [("approve", "notify-approve", json!({"state": suggested, "suggest": null})), ("decline", "notify-decline", json!({"suggest": null}))] {
                     let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
                     item(&menu, &group, name, label, move || { choose(&d2, &s2, &n2, change.clone()); again(); });
                 }
             }
             let items: [(&str, &str, Value); 5] = [
-                ("done", "alerts-done", json!({"state": "done"})),
-                ("dropped", "alerts-dropped", json!({"state": "dropped"})),
-                ("held", "alerts-hold", json!({"state": "postponed"})),
-                ("reopen", "alerts-reopen", json!({"state": null})),
-                ("mark", if marked == "true" { "alerts-unmark" } else { "alerts-mark" }, json!({"mark": if marked == "true" { Value::Null } else { json!("important") }})),
+                ("done", "notify-done", json!({"state": "done"})),
+                ("dropped", "notify-dropped", json!({"state": "dropped"})),
+                ("held", "notify-hold", json!({"state": "postponed"})),
+                ("reopen", "notify-reopen", json!({"state": null})),
+                ("mark", if marked == "true" { "notify-unmark" } else { "notify-mark" }, json!({"mark": if marked == "true" { Value::Null } else { json!("important") }})),
             ];
             for (name, label, change) in items {
                 let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
@@ -181,9 +181,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             }
             // To the trash alone: what is under it moves up, as the map panel's "node only".
             let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
-            item(&menu, &group, "trash", "alerts-to-trash", move || { if let Err(e) = wb_core::map::trash(&d2.root, &s2, &n2, false) { say_error(&d2, e); } again(); });
+            item(&menu, &group, "trash", "notify-to-trash", move || { if let Err(e) = wb_core::map::trash(&d2.root, &s2, &n2, false) { say_error(&d2, e); } again(); });
             let (d2, s2) = (d.clone(), sid.clone());
-            item(&menu, &group, "open", "alerts-open-session", move || ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "show".into(), s2.clone()]));
+            item(&menu, &group, "open", "notify-open-session", move || ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "show".into(), s2.clone()]));
             popup(&list2, &menu, &group, x, y);
         });
     }

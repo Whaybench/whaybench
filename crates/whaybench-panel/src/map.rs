@@ -277,9 +277,9 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
         if let Some(sid) = data.get("sessionId").and_then(Value::as_str).map(String::from) {
             let marked = n.get("mark").is_some();
             let (d2, id2) = (d.clone(), id.clone());
-            items.add(wb_core::i18n::t(if marked { "alerts-unmark" } else { "alerts-mark" }), true, move || {
+            items.add(wb_core::i18n::t(if marked { "notify-unmark" } else { "notify-mark" }), true, move || {
                 if let Err(e) = wb_core::map::person(&d2.root, &sid, json!([{"id": id2, "mark": if marked { Value::Null } else { json!("important") }}])) {
-                    status::say(&d2, &wb_core::i18n::f("alerts-not-written", &[("e", e.to_string())]), 8);
+                    status::say(&d2, &wb_core::i18n::f("notify-not-written", &[("e", e.to_string())]), 8);
                 }
             });
         }
@@ -335,7 +335,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
     }
     items.menu.append_section(None, &section.menu);
     if session.is_some() { let more = items.sub(); import_menu(d, &more); items.menu.append_section(None, &more.menu); }
-    // Deleting is a submenu, so it takes two presses; what goes waits in the trash, restorable from the alerts panel.
+    // Deleting is a submenu, so it takes two presses; what goes waits in the trash, restorable from the notifications panel.
     if let (Some(n), Some(target)) = (node, session.as_ref()) {
         let (id, label) = (s(n, "id").to_string(), s(n, "label").to_string());
         let below = tree.below(&id).len();
@@ -776,7 +776,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         let signature = format!("{}{text}{counts}{:?}", path.display(), wb_core::theme::load_active(&d));
         if panel.borrow().signature == signature { return; }
         panel.borrow_mut().signature = signature;
-        // The trash is the alerts panel's; the map shows what is left.
+        // The trash is the notifications panel's; the map shows what is left.
         let mut data: Option<Value> = serde_json::from_str(&text).ok();
         if let Some(arr) = data.as_mut().and_then(|m| m["nodes"].as_array_mut()) { arr.retain(|n| n["state"] != "removed"); }
         panel.borrow_mut().data = data;

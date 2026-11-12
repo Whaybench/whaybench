@@ -31,7 +31,7 @@ Open a node and its related answers come up: the replies from the turns where th
 When the agent reads a file, the decisions about it come along, so they survive a compacted context.
 
 **One memory across sessions.** Every change to every map is kept as an event, so a session is told what other
-sessions decided about the same problem, and the alerts panel gathers what needs you: due dates, the nodes you
+sessions decided about the same problem, and the notifications panel gathers what needs you: due dates, the nodes you
 marked, problems another session settled, what you put on hold, and what you deleted, which you can restore.
 
 **Sessions that do not get lost.** Every conversation is listed with a name taken from its map, its state
@@ -106,7 +106,7 @@ A conversation tab opens with the agent; ask it something and the map starts to 
 switches the interface language.
 
 To see context and plan usage (5-hour and weekly, with when they reset) in Claude Code's status line and under
-the alerts panel, add this to `~/.claude/settings.json`. Whaybench does not change your settings itself.
+the notifications panel, add this to `~/.claude/settings.json`. Whaybench does not change your settings itself.
 
 ```json
 "statusLine": { "type": "command", "command": "~/.local/bin/whaybench statusline" }
@@ -138,7 +138,7 @@ active) or `"keep_mb"` (the size all of them may take) in its `settings.json`, f
 A whole conversation goes at once, at the next start; saved maps in `maps` stay. Claude Code deletes its own
 conversations after 30 days unless its `cleanupPeriodDays` setting says otherwise; Whaybench then saves the map
 to `maps` as `auto-map-…`. Claude Code and Codex keep their own conversations where they always do.
-Map nodes you delete wait in the Deleted section of the alerts panel, where they can be restored as they were; after
+Map nodes you delete wait in the Deleted section of the notifications panel, where they can be restored as they were; after
 180 days they go for good at the next start (`"trash_days"` in `settings.json`, `0` to delete them for good only by hand).
 
 ## Make it yours

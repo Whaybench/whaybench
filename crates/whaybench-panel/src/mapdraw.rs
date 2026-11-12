@@ -135,7 +135,7 @@ fn state_column(n: &Value) -> &'static str {
     match s(n, "state") { "doing" => "doing", "plan" if open => "plan", "postponed" => "held", "done" | "changed" | "dropped" => "done", _ if !open => "done", _ => "idea" }
 }
 
-fn column_name(id: &str) -> &str { match id { "idea" => wb_core::i18n::t("idea"), "plan" => wb_core::i18n::t("planned"), "doing" => wb_core::i18n::t("in-progress"), "done" => wb_core::i18n::t("done"), "held" => wb_core::i18n::t("alerts-held"), o => o } }
+fn column_name(id: &str) -> &str { match id { "idea" => wb_core::i18n::t("idea"), "plan" => wb_core::i18n::t("planned"), "doing" => wb_core::i18n::t("in-progress"), "done" => wb_core::i18n::t("done"), "held" => wb_core::i18n::t("notify-held"), o => o } }
 
 fn frame_columns(nodes: &[Value], current: &str, style: &Style) -> String {
     let t = tree_of(nodes);

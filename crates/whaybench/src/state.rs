@@ -45,7 +45,7 @@ pub fn slot_of(app: &str) -> Option<&'static str> {
         "whaybench-term" => "term",
         "dev.whaybench.answer" => "answer",
         "dev.whaybench.input" => "input",
-        "org.mozilla.firefox" | "firefox" | "dev.whaybench.view-term" | "dev.whaybench.alerts" | "dev.whaybench.project" => "view",
+        "org.mozilla.firefox" | "firefox" | "dev.whaybench.view-term" | "dev.whaybench.notify" | "dev.whaybench.project" => "view",
         v if v == wb_core::view::VIEW_APP || v.starts_with("dev.whaybench.view.") => "view",
         v if v.starts_with("dev.whaybench.map.") => "map",
         _ => return None,

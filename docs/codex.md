@@ -44,7 +44,7 @@ not changed.
 Only `whaybench map` writes map files, whatever the agent:
 
 - `--write`: the plugin's map tool, a side worker's fill, imported branches. The MCP tool and the person's choices
-  (alerts panel, map menu) write through the same code in-process.
+  (notifications panel, map menu) write through the same code in-process.
 - `--take-over`: taking over another session's map (`/background`, `/resume`, a tab that keeps the map). Node
   times are kept and `latest.json` is left as it is.
 - `--start-from`: a new session from an imported map. Node times start over and `latest.json` is left as it is.

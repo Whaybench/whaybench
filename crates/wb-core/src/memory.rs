@@ -1,5 +1,5 @@
 //! The memory: every change to every conversation map, in time order, appended and never rewritten.
-//! A session's map file is what this log says about that session's nodes; the alert panel is another view of it.
+//! A session's map file is what this log says about that session's nodes; the notifications panel is another view of it.
 //! Events follow CloudEvents 1.0: `specversion`, `id`, `source`, `type`, `time`, `subject`, `data`.
 use std::{
     fs::{self, OpenOptions},
@@ -191,7 +191,7 @@ pub fn search(data: &Path, words: &[String], limit: usize) -> Vec<String> {
     hits.iter().take(limit).map(|(s, n)| line(s, n)).collect()
 }
 
-/// The alert panel's sections (3.19): nodes with a time or due date, the person's marked ones, what changed since the
+/// The notifications panel's sections (3.19): nodes with a time or due date, the person's marked ones, what changed since the
 /// person last looked, held ones and the trash. Each item is `{session, node, line}`; a carried node shows once.
 /// One node as the person reads it: `label · state · due · session name` (no ids).
 fn person_line(name: &str, n: &Value) -> String {
@@ -222,8 +222,8 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
             if !is_open(n) { continue; }
             // The agent's suggestion to close it: the person approves or declines.
             if let Some(sg) = n.get("suggest").filter(|v| v.is_object()) {
-                let to = crate::i18n::t(if sg["state"] == "dropped" { "alerts-dropped" } else { "alerts-done" });
-                let line = format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::f("alerts-suggested", &[("state", to.to_string()), ("why", sg["why"].as_str().unwrap_or("").to_string())]), names[s.as_str()]);
+                let to = crate::i18n::t(if sg["state"] == "dropped" { "notify-dropped" } else { "notify-done" });
+                let line = format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::f("notify-suggested", &[("state", to.to_string()), ("why", sg["why"].as_str().unwrap_or("").to_string())]), names[s.as_str()]);
                 check.push(json!({"session": s, "node": n, "line": line}));
             }
             if n.get("due").or_else(|| n.get("at")).is_some() { due.push(item); }
@@ -241,7 +241,7 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
         let subject = e["subject"].as_str().unwrap_or("");
         let (s, by) = subject.split_once('/').unwrap_or((subject, ""));
         let (Some(target), Some(decision)) = (node_of(s, e["data"]["to"].as_str().unwrap_or("")), node_of(s, by)) else { continue };
-        let line = format!("{} · {} · {}", target["label"].as_str().unwrap_or(""), crate::i18n::f("alerts-resolved", &[("by", decision["label"].as_str().unwrap_or("").to_string())]), names[s]);
+        let line = format!("{} · {} · {}", target["label"].as_str().unwrap_or(""), crate::i18n::f("notify-resolved", &[("by", decision["label"].as_str().unwrap_or("").to_string())]), names[s]);
         changed.push(json!({"session": s, "node": target, "line": line}));
     }
     // What can be done now: an open node whose condition holds since one of its nodes closed after the person last looked.
@@ -251,7 +251,7 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
             let closed_at = |id: &str| nodes.iter().find(|m| m["id"] == id).filter(|m| !is_open(m)).and_then(|m| m.get("closed")?.get("at")?.as_i64());
             let late = crate::map::condition_ids(expr).unwrap_or_default().iter().any(|id| closed_at(id).is_some_and(|at| at > since));
             if late && crate::map::condition_holds(expr, &|id| closed_at(id).is_some()) {
-                changed.push(json!({"session": s, "node": n, "line": format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::t("alerts-unblocked"), names[s.as_str()])}));
+                changed.push(json!({"session": s, "node": n, "line": format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::t("notify-unblocked"), names[s.as_str()])}));
             }
         }
     }

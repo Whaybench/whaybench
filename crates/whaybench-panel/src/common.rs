@@ -17,7 +17,8 @@ fn zoom_file(d: &Data) -> PathBuf { d.root.join("panel-zoom.json") }
 pub fn zoom(d: &Data) -> f64 {
     let Some(key) = PANEL.get() else { return 1.0 };
     std::fs::read_to_string(zoom_file(d)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| v.get(key).and_then(Value::as_f64)).unwrap_or(1.0).clamp(0.5, 3.0)
+        // Up to 0.3.1 the notifications panel was called alerts.
+        .and_then(|v| v.get(key).or_else(|| v.get(key.replace("dev.whaybench.notify", "dev.whaybench.alerts"))).and_then(Value::as_f64)).unwrap_or(1.0).clamp(0.5, 3.0)
 }
 
 fn set_zoom(d: &Data, z: f64) {

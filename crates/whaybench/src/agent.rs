@@ -66,7 +66,7 @@ pub fn memory(data: &Data, words: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Claude Code's status line command: the line it shows, and the numbers kept for the alerts panel. Never fails,
+/// Claude Code's status line command: the line it shows, and the numbers kept for the notifications panel. Never fails,
 /// so a bad input only leaves the line empty.
 pub fn statusline(data: &Data) -> Result<(), String> {
     let input: serde_json::Value = serde_json::from_reader(io::stdin().lock()).unwrap_or_default();

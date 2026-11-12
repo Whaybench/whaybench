@@ -24,7 +24,7 @@ whaybench memory [--data-dir DIR] list SESSION | changes SESSION | show MEMID|SE
 whaybench record [--data-dir DIR] SESSION touch|state|alive|off|answer|moved|carry-from ...    a session's record, state, heartbeat, answers
 whaybench hook [--data-dir DIR] claude|codex < EVENT.json    run by the agent's hooks
 whaybench mcp [--data-dir DIR]    the conversation map tool over MCP (stdio), for an agent in a Whaybench tab
-whaybench statusline [--data-dir DIR] < STATUS.json    a Claude Code status line: context and plan usage, kept for the alerts panel
+whaybench statusline [--data-dir DIR] < STATUS.json    a Claude Code status line: context and plan usage, kept for the notifications panel
 whaybench ctl [--data-dir DIR] session new [MAP-FROM] | show ID | type ID TEXT | end ID
 whaybench ctl [--data-dir DIR] quit
 whaybench ctl [--data-dir DIR] shot --out FILE.png [--panel N]    N: panel number, default the whole surface
@@ -167,7 +167,7 @@ fn serve(data: &paths::Data, run_id: &str, apps: Vec<String>, no_session: bool) 
         start::spawn_app(app, &state.socket_name, data, run_id);
     }
     if !no_session {
-        for panel in ["menu", "status", "map", "sessions", "files", "answer", "input", "project", "alerts"] {
+        for panel in ["menu", "status", "map", "sessions", "files", "answer", "input", "project", "notify"] {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench-panel");
             start::spawn_app(&format!("exec '{}' {panel}", exe.display()), &state.socket_name, data, run_id);
         }

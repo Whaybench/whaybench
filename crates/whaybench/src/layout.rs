@@ -607,6 +607,12 @@ impl SavedLayout {
     /// A file that cannot be read is an empty layout, never a failure. Unknown fields are ignored.
     pub fn parse(text: &str) -> Option<Self> {
         let mut l: Self = serde_json::from_str(text).ok()?;
+        // Up to 0.3.1 the notifications panel was called alerts.
+        for p in &mut l.panels {
+            for k in p.tabs.iter_mut().chain(std::iter::once(&mut p.active)) {
+                if let Some(rest) = k.strip_prefix("dev.whaybench.alerts#") { *k = format!("dev.whaybench.notify#{rest}"); }
+            }
+        }
         l.merge_stacked();
         Some(l)
     }
@@ -661,6 +667,12 @@ mod tests {
         assert_eq!(s.front(), Some(free), "a closed panel is passed over");
     }
 
+    #[test]
+    fn a_layout_from_before_finds_the_notifications_panel_by_its_old_name() {
+        let l = SavedLayout::parse(r#"{"format":1,"panels":[{"x":0,"y":0,"w":0.5,"h":0.5,"active":"dev.whaybench.alerts#1","tabs":["dev.whaybench.alerts#1","dev.whaybench.view#1"]}]}"#).unwrap();
+        assert_eq!(l.panels[0].tabs, ["dev.whaybench.notify#1", "dev.whaybench.view#1"]);
+        assert_eq!(l.panels[0].active, "dev.whaybench.notify#1");
+    }
     #[test]
     fn a_floating_panel_stays_on_top_when_a_panel_under_it_is_raised() {
         // Two panels side by side on the walls, and one floating over both, as the input panel lies.

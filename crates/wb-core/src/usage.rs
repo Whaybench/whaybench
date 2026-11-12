@@ -1,5 +1,5 @@
 //! Context and plan usage, as Claude Code hands them to its status line: `whaybench statusline` keeps the last of
-//! each session in the data folder and prints the line, and the alerts panel shows it under its sections.
+//! each session in the data folder and prints the line, and the notifications panel shows it under its sections.
 use std::{fs, path::Path};
 
 use serde_json::{Value, json};
