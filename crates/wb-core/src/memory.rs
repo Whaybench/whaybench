@@ -235,7 +235,8 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
     let node_of = |s: &str, id: &str| all.iter().find(|m| m.0 == s).and_then(|m| m.1.iter().find(|n| n["id"] == id)).cloned();
     let mut changed: Vec<Value> = Vec::new();
     // Settled by a decision since the person last looked: the problem, and the decision that settled it.
-    for e in events(data).into_iter().rev().filter(|e| e["type"] == "link.added" && e["data"]["rel"] == "resolves") {
+    let evs = events(data);
+    for e in evs.iter().rev().filter(|e| e["type"] == "link.added" && e["data"]["rel"] == "resolves") {
         if !chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since) { continue; }
         let subject = e["subject"].as_str().unwrap_or("");
         let (s, by) = subject.split_once('/').unwrap_or((subject, ""));
@@ -257,7 +258,7 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
     // The action that put each node in the trash: the last event that set it to removed.
     if !trash.is_empty() {
         let mut by: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
-        for e in events(data).into_iter().filter(|e| e["data"]["state"][1] == "removed") {
+        for e in evs.iter().filter(|e| e["data"]["state"][1] == "removed") {
             if let (Some(sub), Some(a)) = (e["subject"].as_str(), e.get("action")) { by.insert(sub.to_string(), a.clone()); }
         }
         for t in &mut trash { let sub = format!("{}/{}", t["session"].as_str().unwrap_or(""), t["node"]["id"].as_str().unwrap_or("")); t["action"] = by.get(&sub).cloned().unwrap_or(Value::Null); }

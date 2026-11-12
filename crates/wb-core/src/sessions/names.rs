@@ -79,6 +79,20 @@ pub fn map_titles(d: &Data) -> std::collections::HashMap<String, String> {
     names
 }
 
+static TITLES: Mutex<Option<(Instant, PathBuf, std::collections::HashMap<String, String>)>> = Mutex::new(None);
+
+/// `map_titles`, kept for a second: it reads every record and every map, and a list of sessions asks for
+/// each session's name in turn.
+fn titles_kept(d: &Data) -> std::collections::HashMap<String, String> {
+    let mut g = TITLES.lock().unwrap();
+    if let Some((at, root, titles)) = g.as_ref() {
+        if at.elapsed() < Duration::from_secs(1) && *root == d.root { return titles.clone(); }
+    }
+    let titles = map_titles(d);
+    *g = Some((Instant::now(), d.root.clone(), titles.clone()));
+    titles
+}
+
 /// The session's name: its main topic from its map; without a map, the name Claude Code gives it
 /// (without the " (n)" it adds per /background), remembered after the session stops; else the first prompt.
 pub fn session_name(d: &Data, id: &str) -> String {
@@ -89,7 +103,7 @@ pub fn session_name(d: &Data, id: &str) -> String {
         names[id] = Value::String(running.clone());
         let _ = write_atomic(&file, &names.to_string());
     }
-    if let Some(n) = map_titles(d).get(id) { return n.clone(); }
+    if let Some(n) = titles_kept(d).get(id) { return n.clone(); }
     if !running.is_empty() { return running; }
     if let Some(n) = names.get(id).and_then(Value::as_str) { return n.to_string(); }
     record_of(d, id).and_then(|r| r.get("firstPrompt").and_then(Value::as_str).map(String::from)).unwrap_or_default()
