@@ -10,6 +10,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 - A floating panel, such as the input panel, stays on top after a restart. Each panel that opens is raised, and
   a panel of the layout raised over a floating one was counted as floating too, so it stayed above it.
+- Tooltips, such as a map node's detail, take the theme's colours. They kept GTK's dark background with the
+  theme's text colour, so only the black theme could read them.
 
 ### Changed
 

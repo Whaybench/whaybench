@@ -100,6 +100,8 @@ listview > row, gridview > child {{ color: {text}; }}
 headerbar {{ background: {bar}; color: {text}; border-bottom: 1px solid {line}; box-shadow: none; }}
 headerbar label, headerbar .title {{ color: {text}; }}
 popover contents {{ background: {bg}; color: {text}; }}
+/* GTK's own tooltip is dark; the label rule above gave it the theme's text, which only a dark theme could read. */
+tooltip, tooltip.background {{ background: {bar}; color: {text}; border: 1px solid {line}; }} tooltip label {{ color: {text}; }}
 menubar {{ background: {bar}; color: {text}; min-height: 28px; font-size: {size}pt; }}
 menubar > item {{ padding: 2px 10px; color: {text}; }}
 menubar > item:hover, menubar > item:selected {{ background: alpha({accent}, 0.22); color: {text}; }}
