@@ -355,6 +355,8 @@ impl App {
             (d.title.clone(), d.app_id.clone(), d.parent.clone())
         });
         let app_id = app_id.filter(|a| !a.is_empty()).unwrap_or_else(|| "app".into());
+        // Ubuntu's Firefox is a snap, and a snap names its window <snap>_<app>: it is the view panel's browser all the same.
+        let app_id = if app_id == "firefox_firefox" { wb_core::view::FIREFOX_APP.to_string() } else { app_id };
         if app_id == STATUS_APP || app_id == MENU_APP {
             let (w, _) = self.window_size;
             let high = if app_id == STATUS_APP { STATUS_H } else { MENU_H };

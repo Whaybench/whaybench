@@ -13,6 +13,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
   install.sh; nothing is sent. The status line says so until it is installed.
 - Whaybench → About → Support Whaybench opens https://ko-fi.com/whaybench in the view panel.
 
+### Fixed
+
+- Ubuntu's Firefox, a snap, opens in the view panel and answers to Panels → Browser: it names its window
+  firefox_firefox, which Whaybench did not take for Firefox, so it opened as a panel of its own.
+
 ### Changed
 
 - Whaybench → About shows the version alone; `whaybench --version` and the logs keep the commit.
