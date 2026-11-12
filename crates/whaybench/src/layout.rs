@@ -163,8 +163,13 @@ impl Surface {
     fn lies_flat(&self) -> impl Fn(usize) -> bool + use<> {
         let held = self.held();
         let over = |a: &Rect, b: &Rect| a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom();
-        let floats: Vec<bool> = self.panels.iter().enumerate().map(|(i, p)| self.panels[..i].iter().any(|q| !q.modal && over(&p.rect, &q.rect))).collect();
-        move |i| held(i) && !floats.get(i).copied().unwrap_or(false)
+        // Only a panel below that lies flat counts: a panel of the layout raised over a floating one stays in the layout.
+        let mut flat: Vec<bool> = Vec::with_capacity(self.panels.len());
+        for (i, p) in self.panels.iter().enumerate() {
+            let on_flat = self.panels[..i].iter().zip(&flat).any(|(q, f)| *f && !q.modal && over(&p.rect, &q.rect));
+            flat.push(held(i) && !on_flat);
+        }
+        move |i| flat.get(i).copied().unwrap_or(false)
     }
 
     /// Panels that float, apart from settings windows: they lie above the joint lines too.
@@ -656,6 +661,15 @@ mod tests {
         assert_eq!(s.front(), Some(free), "a closed panel is passed over");
     }
 
+    #[test]
+    fn a_floating_panel_stays_on_top_when_a_panel_under_it_is_raised() {
+        // Two panels side by side on the walls, and one floating over both, as the input panel lies.
+        let mut s = surface(&[Rect::new(0.0, 0.0, 700.0, 900.0), Rect::new(708.0, 0.0, 792.0, 900.0), Rect::new(500.0, 300.0, 400.0, 100.0)]);
+        let (right, floating) = (s.panels[1].pid, s.panels[2].pid);
+        s.raise(right);
+        assert_eq!(s.panels.last().map(|p| p.pid), Some(floating), "a panel opening at start is raised; the floating one stays above");
+        assert_eq!(s.free(), vec![floating]);
+    }
     #[test]
     fn a_panel_over_others_floats_even_when_an_edge_touches() {
         // Two panels side by side, and one over both whose left edge sits on the wall.

@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A floating panel, such as the input panel, stays on top after a restart. Each panel that opens is raised, and
+  a panel of the layout raised over a floating one was counted as floating too, so it stayed above it.
+
 ## [0.3.1] - 2026-11-12
 
 ### Fixed
