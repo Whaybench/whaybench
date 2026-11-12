@@ -84,7 +84,7 @@ pub const FIELDS: &[(&str, &str, &str, Kind)] = &[
     ("base", "base", "background", Kind::Colour), ("base", "base", "surface", Kind::Colour),
     ("base", "base", "text", Kind::Colour), ("base", "base", "accent", Kind::Colour),
     ("font", "base", "font", Kind::Font), ("font", "base", "font_size", Kind::Number(6.0, 24.0)),
-    ("font", "base", "title_size", Kind::Number(8.0, 18.0)),
+    ("font", "base", "title_size", Kind::Number(8.0, 32.0)),
     ("font", "base", "terminal_font", Kind::Font), ("font", "base", "terminal_size", Kind::Number(6.0, 32.0)),
     ("panel", "frame", "outer", Kind::Number(0.0, 64.0)), ("panel", "frame", "gap", Kind::Number(0.0, 64.0)),
     ("panel", "frame", "pad", Kind::Number(0.0, 64.0)), ("panel", "frame", "radius", Kind::Number(0.0, 64.0)),
@@ -166,7 +166,7 @@ impl Theme {
             surface,
             font: text_of("font", "sans-serif"),
             font_size: size("font_size", 6.0..=24.0, 10.0),
-            title_size: size("title_size", 8.0..=18.0, 13.0),
+            title_size: size("title_size", 8.0..=32.0, 13.0),
             terminal_font: text_of("terminal_font", "monospace"),
             terminal_size: size("terminal_size", 6.0..=32.0, 12.0),
         })

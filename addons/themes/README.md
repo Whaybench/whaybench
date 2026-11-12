@@ -61,7 +61,7 @@ Panel apps take their text and background from these.
 |---|---|---|
 | `font` | Font of the panels | `sans-serif` |
 | `font_size` | Its size in points, 6 to 24 | `10` |
-| `title_size` | Size of the title bar text in pixels, 8 to 18 | `13` |
+| `title_size` | Size of the title bar text in pixels, 8 to 32 | `13` |
 | `terminal_font` | Font of the conversation terminals | `monospace` |
 | `terminal_size` | Its size in points, 6 to 32 | `12` |
 
