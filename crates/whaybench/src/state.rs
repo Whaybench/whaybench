@@ -188,7 +188,8 @@ impl App {
         let socket_name = listening_socket.socket_name().to_os_string();
         let loop_handle = event_loop.handle();
         loop_handle.insert_source(listening_socket, move |client_stream, _, state| {
-            state.display_handle.insert_client(client_stream, Arc::new(ClientState::default())).unwrap();
+            // One app that cannot connect does not stop the others.
+            if let Err(e) = state.display_handle.insert_client(client_stream, Arc::new(ClientState::default())) { record::error("run", "app not connected", &[("error", e.to_string())]); }
         }).expect("Failed to init the wayland event source.");
         loop_handle.insert_source(Generic::new(display, Interest::READ, Mode::Level), |_, display, state| {
             // Safety: we don't drop the display

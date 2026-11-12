@@ -11,6 +11,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - The answer panel draws the answer as a web page: tables are real tables with lines and wrapping cells, and a
   selection goes across paragraphs, lists, code and tables (a drag past a block, Ctrl+A, Ctrl+C). A link opens
   in the view panel. HTML written in an answer is shown as text.
+- A frame that cannot be drawn, or an app that cannot connect, no longer stops Whaybench: the frame is left out
+  and tried again, and the failure is written to the log.
 
 ## [0.3.0] - 2026-11-12
 

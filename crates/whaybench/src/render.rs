@@ -473,6 +473,7 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
     let mut last = Instant::now();
     let mut cursor = CursorIcon::Default;
     let mut shaders_failed = false;
+    let mut frame_failing = false;
     let (mut times, mut since, mut sent_frames) = (Vec::with_capacity(400), Instant::now(), 0usize);
     #[allow(deprecated)] // The newer call needs a capability set.
     backend.window().set_ime_allowed(true);
@@ -527,8 +528,9 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
 
             let size = backend.window_size();
             let age = backend.buffer_age().unwrap_or(0);
-            let damage = {
-                let (renderer, mut framebuffer) = backend.bind().unwrap();
+            // A frame that cannot be drawn is left out and tried again: stopping here would take every panel with it.
+            let drawn: Result<_, String> = 'frame: {
+                let (renderer, mut framebuffer) = match backend.bind() { Ok(b) => b, Err(e) => break 'frame Err(format!("{e:?}")) };
                 if state.shaders.is_none() && !shaders_failed {
                     match compile(renderer) {
                         Ok(sh) => state.shaders = Some(sh),
@@ -538,10 +540,18 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
                 if !state.shots.is_empty() { take_shots(state, renderer, size); }
                 let elements = window_elements(state, renderer);
                 let clear = premultiplied(state.theme.surface_top);
-                damage_tracker.render_output(renderer, &mut framebuffer, age, &elements, clear).unwrap().damage.cloned().unwrap_or_default()
+                damage_tracker.render_output(renderer, &mut framebuffer, age, &elements, clear).map(|r| r.damage.cloned().unwrap_or_default()).map_err(|e| format!("{e:?}"))
             };
-            let sent = !damage.is_empty();
-            if sent { backend.submit(Some(&damage)).unwrap(); sent_frames += 1; }
+            let drawn = drawn.and_then(|damage| if damage.is_empty() { Ok(false) } else { backend.submit(Some(&damage)).map(|_| true).map_err(|e| format!("{e:?}")) });
+            let sent = match drawn {
+                Ok(sent) => { frame_failing = false; sent }
+                Err(e) => {
+                    if !std::mem::replace(&mut frame_failing, true) { record::error("screen", "frame not drawn", &[("error", e)]); }
+                    idle.set(true);
+                    return;
+                }
+            };
+            if sent { sent_frames += 1; }
 
             state.space.elements().for_each(|window| {
                 window.send_frame(&output, state.start_time.elapsed(), Some(Duration::ZERO), |_, _| Some(output.clone()))
