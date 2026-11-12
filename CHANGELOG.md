@@ -6,6 +6,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- WhaybenchSetup.exe set the Linux side up only on a machine where an earlier setup had already done it: Windows
+  PowerShell broke the command that starts it, and the setup said it was done. A new machine got shortcuts to a
+  distribution without Whaybench.
+
 ## [0.5.1] - 2026-11-13
 
 Whaybench installs on Windows.

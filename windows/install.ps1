@@ -51,10 +51,11 @@ Say "setting up $Distro for $user (packages, Firefox, Claude Code, Whaybench; th
 $script = Join-Path $env:TEMP "whaybench-setup-wsl.sh"
 if (Test-Path (Join-Path $PSScriptRoot "setup-wsl.sh")) { Copy-Item (Join-Path $PSScriptRoot "setup-wsl.sh") $script -Force }
 else { Invoke-WebRequest -UseBasicParsing -Uri $Setup -OutFile $script }
-# Line ends as Linux reads them. The distribution reads the file where it is: text piped from PowerShell gets a
-# Windows line end added, which the shell would then run as a command.
+# Line ends as Linux reads them. The distribution reads the file where it is, from its folder (--cd takes a Windows
+# path): text piped from PowerShell gets a Windows line end added, which the shell would run as a command, and
+# Windows PowerShell breaks quotes inside arguments to wsl.exe.
 [IO.File]::WriteAllText($script, ([IO.File]::ReadAllText($script) -replace "`r`n", "`n"))
-& $wsl -d $Distro -u root -- sh -c 'sh "$(wslpath -a "$1")" "$2" "$3"' setup $script $user $lang
+& $wsl -d $Distro -u root --cd (Split-Path $script) -- sh (Split-Path -Leaf $script) $user $lang
 if ($LASTEXITCODE -ne 0) { Fail "the setup inside $Distro stopped. Run this again to continue." }
 # systemd and the default account apply from the next start of the distribution.
 & $wsl --terminate $Distro *> $null
