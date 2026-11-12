@@ -55,6 +55,9 @@ Unknown keys are ignored. A file that is not valid JSON is not listed.
 With `group: state`, the `columns` values are `idea`, `plan`, `doing`, `held` (postponed), `done` (dropped nodes show
 there crossed out). Nodes in the trash are never drawn.
 
+People change these settings in Conversation map → Display style settings…. Their values are kept beside the style
+as `settings.json` and go over the style's own; only the settings of the style's frame are read from it.
+
 The `route` and `time` frames are drawn from the memory's event log: the order and turn in which nodes were made and
 changed. A map without events (older, or imported) falls back to the stamps its nodes keep.
 

@@ -55,7 +55,7 @@ pub fn slot_of(app: &str) -> Option<&'static str> {
 }
 
 /// Apps whose window is a settings window, not a panel.
-const MODAL_APPS: [&str; 1] = ["dev.whaybench.theme"];
+const MODAL_APPS: [&str; 2] = ["dev.whaybench.theme", "dev.whaybench.mapstyle"];
 
 fn front_of_group(key: &str) -> bool { key.starts_with("dev.whaybench.sessions#") || key.starts_with("dev.whaybench.view#") }
 

@@ -1,7 +1,12 @@
 //! The conversation map panel: a tree the AI writes and the person reads, folds and
 //! acts on. With a branch: only that branch. The tree is the style `default`; every other style is an add-on, drawn in a
 //! page beside it (see `mapdraw`).
-use std::{cell::RefCell, collections::{HashMap, HashSet}, rc::Rc};
+use std::{cell::{Cell, RefCell}, collections::{HashMap, HashSet}, rc::Rc};
+
+thread_local! {
+    /// One level of the tree's indent, in pixels.
+    static INDENT: Cell<i32> = const { Cell::new(16) };
+}
 
 use gtk::{gdk, gio, glib, prelude::*};
 use serde_json::{Value, json};
@@ -501,7 +506,8 @@ fn style_chosen(d: &Data, panel: &Rc<RefCell<Panel>>, scope: Option<&(String, St
 
 fn escape(t: &str) -> String { glib::markup_escape_text(t).to_string() }
 
-fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option<&(String, String)>, unit: i32) {
+fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option<&(String, String)>) {
+    let unit = INDENT.with(Cell::get);
     let (data, flipped, picked) = {
         let p = panel.borrow();
         let Some(v) = p.data.clone() else { return };
@@ -527,10 +533,10 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
             arrow.add_css_class("flat");
             arrow.set_sensitive(kids.is_some());
             {
-                let (id2, panel2, d2, scope2, list2, unit2) = (id.clone(), panel.clone(), d.clone(), scope.clone(), list.clone(), *unit);
+                let (id2, panel2, d2, scope2, list2) = (id.clone(), panel.clone(), d.clone(), scope.clone(), list.clone());
                 arrow.connect_clicked(move |_| {
                     { let mut p = panel2.borrow_mut(); if !p.flipped.remove(&id2) { p.flipped.insert(id2.clone()); } }
-                    draw(&list2, &panel2, &d2, scope2.as_ref(), unit2);
+                    draw(&list2, &panel2, &d2, scope2.as_ref());
                 });
             }
             area.append(&arrow);
@@ -566,14 +572,14 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
                 let press = gtk::GestureClick::new();
                 press.set_button(1);
                 {
-                    let (d2, panel2, list2, id2, scope2, unit2) = (d.clone(), panel.clone(), list.clone(), id.clone(), scope.clone(), *unit);
+                    let (d2, panel2, list2, id2, scope2) = (d.clone(), panel.clone(), list.clone(), id.clone(), scope.clone());
                     press.connect_pressed(move |g, _, _, _| {
                         g.set_state(gtk::EventSequenceState::Claimed);
                         panel2.borrow_mut().picked = Some(id2.clone());
                         status::send(&d2, "files", json!({"node": id2}));
                         status::front_app(&d2, "dev.whaybench.files");
                         let (d3, panel3, list3, scope3) = (d2.clone(), panel2.clone(), list2.clone(), scope2.clone());
-                        glib::idle_add_local_once(move || draw(&list3, &panel3, &d3, scope3.as_ref(), unit2));
+                        glib::idle_add_local_once(move || draw(&list3, &panel3, &d3, scope3.as_ref()));
                     });
                 }
                 icon.add_controller(press);
@@ -650,8 +656,10 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
     area.append(&stack);
     win.set_child(Some(&area));
 
-    // One level of indent is four 'M' wide in the present font.
-    let unit = { let (w, _) = win.create_pango_layout(Some("MMMM")).pixel_size(); w.max(16) };
+    // One level of indent is a number of 'M' wide in the present font (Display style settings, Default).
+    let letter = { let (w, _) = win.create_pango_layout(Some("M")).pixel_size(); w.max(4) };
+    let indent_now = { let d = d.clone(); move || (mapstyles::default_indent(&d) as i32 * letter).max(8) };
+    INDENT.with(|c| c.set(indent_now()));
     let panel = Rc::new(RefCell::new(Panel { data: None, signature: String::new(), flipped: HashSet::new(), picked: None, style: String::new(), page: String::new() }));
     panel.borrow_mut().style = mapstyles::current(&d, panel_key(scope.as_ref()));
     if let Some(x) = mapstyles::find(&d, &panel.borrow().style) { change.set_label(&wb_core::i18n::f("change-2", &[("a1", (cut(&x.name, 8)).to_string())])); }
@@ -683,7 +691,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
                 p.picked = if p.picked.as_deref() == Some(&id) { None } else { Some(id) };
                 if imported_of(scope.as_ref()).is_none() { status::send(&d, "files", json!({"node": p.picked})); }
             }
-            draw(&list2, &panel, &d, scope.as_ref(), unit);
+            draw(&list2, &panel, &d, scope.as_ref());
         });
     }
     // Empty space: the whole map's menu.
@@ -721,7 +729,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
                         p.picked = if p.picked.as_deref() == Some(node.as_str()) { None } else { Some(node) };
                         status::send(&d, "files", json!({"node": p.picked}));
                     }
-                    draw(&list, &panel, &d, scope.as_ref(), unit);
+                    draw(&list, &panel, &d, scope.as_ref());
                     if let Some(me) = this2.borrow().clone() { show_style(&stack, &web, &panel, &d, scope.as_ref(), &me); }
                 }
                 true
@@ -745,7 +753,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
                         if let Some(n) = m.get("node").and_then(Value::as_str) {
                             panel.borrow_mut().picked = Some(n.to_string());
                             if imported_of(scope.as_ref()).is_none() { status::send(&d, "files", json!({"node": n})); }
-                            draw(&list, &panel, &d, scope.as_ref(), unit);
+                            draw(&list, &panel, &d, scope.as_ref());
                             show_style(&stack, &web, &panel, &d, scope.as_ref(), &on_web);
                         }
                     }
@@ -761,6 +769,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
                 }
             }
         }
+        // A new indent width from Display style settings: the tree is drawn again.
+        let unit = indent_now();
+        if INDENT.with(Cell::get) != unit { INDENT.with(|c| c.set(unit)); draw(&list, &panel, &d, scope.as_ref()); }
         // The style may have changed from a menu, or its folder may be gone.
         let now = mapstyles::current(&d, panel_key(scope.as_ref()));
         if panel.borrow().style != now {
@@ -773,14 +784,16 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         let path = imported_of(scope.as_ref()).map(std::path::PathBuf::from).or_else(|| sessions::target(&d).map(|t| d.root.join(format!("{t}.json")))).unwrap_or_else(|| sessions::latest_map(&d));
         let Ok(text) = std::fs::read_to_string(&path) else { return };
         let counts = sessions::target(&d).map(|t| { let mut c: Vec<_> = records::file_counts(&d, &t).into_iter().collect(); c.sort(); format!("{c:?}") }).unwrap_or_default();
-        let signature = format!("{}{text}{counts}{:?}", path.display(), wb_core::theme::load_active(&d));
+        // The style's settings too: a change in Display style settings draws the map again.
+        let settings = mapstyles::find(&d, &panel.borrow().style).map(|x| x.raw.to_string()).unwrap_or_default();
+        let signature = format!("{}{text}{counts}{:?}{settings}", path.display(), wb_core::theme::load_active(&d));
         if panel.borrow().signature == signature { return; }
         panel.borrow_mut().signature = signature;
         // The trash is the notifications panel's; the map shows what is left.
         let mut data: Option<Value> = serde_json::from_str(&text).ok();
         if let Some(arr) = data.as_mut().and_then(|m| m["nodes"].as_array_mut()) { arr.retain(|n| n["state"] != "removed"); }
         panel.borrow_mut().data = data;
-        draw(&list, &panel, &d, scope.as_ref(), unit);
+        draw(&list, &panel, &d, scope.as_ref());
         show_style(&stack, &web, &panel, &d, scope.as_ref(), &on_web);
     });
 }

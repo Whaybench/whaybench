@@ -121,6 +121,15 @@ fn map_menu(d: &Data, k: &Maker) -> gio::Menu {
     let sec = gio::Menu::new();
     { let d2 = d.clone(); k.add(&sec, wb_core::i18n::t("new-claude-tab-keep-map"), move || new_tab_with_map(&d2)); }
     m.append_section(None, &sec);
+    let sec = gio::Menu::new();
+    {
+        let d2 = d.clone();
+        k.add(&sec, wb_core::i18n::t("mapstyleset-open"), move || {
+            if open_keys(&d2).iter().any(|t| t.starts_with("dev.whaybench.mapstyle")) { status::focus_app(&d2, "dev.whaybench.mapstyle"); }
+            else { let _ = status::post(&d2, &json!({"cmd": "togglepanel", "key": "dev.whaybench.mapstyle", "command": panel_command("mapstyle")})); }
+        });
+    }
+    m.append_section(None, &sec);
     m
 }
 

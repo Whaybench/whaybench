@@ -49,10 +49,76 @@ impl Style {
 
 fn valid_id(id: &str) -> bool { id != DEFAULT && wb_core::addons::valid_id(id) }
 
+/// How a frame's setting is changed in Conversation map → Display style settings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Setting {
+    /// One of these values; the first is what a style without the setting gets.
+    Choice(&'static [&'static str]),
+    Flag,
+    Count(u64, u64),
+    /// Words in order, such as the columns.
+    List,
+}
+
+/// The settings a frame has (addons/map-styles/README.md). Only these are taken from a style's settings.json.
+pub fn settings_of(frame: &str) -> &'static [(&'static str, Setting)] {
+    match frame {
+        "tree" => &[("filter", Setting::Choice(&["", "path"])), ("show_kind", Setting::Flag)],
+        "columns" => &[("group", Setting::Choice(&["state", "kind", "top"])), ("columns", Setting::List), ("recent_done", Setting::Count(0, 50))],
+        "time" => &[("range", Setting::Choice(&["topic", "all", "decision"]))],
+        _ => &[],
+    }
+}
+
+fn fits(setting: Setting, v: &Value) -> bool {
+    match setting {
+        Setting::Choice(options) => v.as_str().is_some_and(|x| options.contains(&x)),
+        Setting::Flag => v.is_boolean(),
+        Setting::Count(lo, hi) => v.as_u64().is_some_and(|n| (lo..=hi).contains(&n)),
+        Setting::List => v.as_array().is_some_and(|a| a.iter().all(|x| x.as_str().is_some_and(|w| !w.is_empty()))),
+    }
+}
+
+/// The person's changes to a style live beside it: deleting the folder takes them along, and the style a program
+/// version brings is written again without losing them.
+fn settings_file(d: &Data, id: &str) -> PathBuf { d.root.join("addons/map-styles").join(id).join("settings.json") }
+
+/// Changes one setting of a style; `null` goes back to the style's own value.
+pub fn set(d: &Data, id: &str, key: &str, value: Value) -> wb_store::Res<()> {
+    if !valid_id(id) { return Err("no such style".into()); }
+    let mut over = read(&settings_file(d, id)).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    if value.is_null() { over.as_object_mut().map(|o| o.remove(key)); } else { over[key] = value; }
+    write_json(&settings_file(d, id), &over)
+}
+
+/// The tree, Default, is the program's own: its indent (letters per level) is in the data folder's settings.json.
+pub const INDENT: (u64, u64, u64) = (1, 8, 4);
+
+pub fn default_indent(d: &Data) -> u64 {
+    read(&d.root.join("settings.json")).and_then(|v| v["map_indent"].as_u64()).filter(|n| (INDENT.0..=INDENT.1).contains(n)).unwrap_or(INDENT.2)
+}
+
+pub fn set_default_indent(d: &Data, letters: u64) -> wb_store::Res<()> {
+    let path = d.root.join("settings.json");
+    let mut v = read(&path).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    v["map_indent"] = json!(letters.clamp(INDENT.0, INDENT.1));
+    write_json(&path, &v)
+}
+
+/// The style as it came, without the person's changes.
+pub fn reset(d: &Data, id: &str) { if valid_id(id) { let _ = fs::remove_file(settings_file(d, id)); } }
+
 pub fn find(d: &Data, id: &str) -> Option<Style> {
     if !valid_id(id) { return None; }
     let path = d.root.join("addons/map-styles").join(id).join("style.json");
-    let raw = read(&path)?;
+    let mut raw = read(&path)?;
+    // The person's settings over the style's own, only those its frame has and only valid ones: anything else in the
+    // file (an instruction, say) never reaches the AI from here.
+    if let (Some(frame), Some(over)) = (raw.get("frame").and_then(Value::as_str).map(String::from), read(&settings_file(d, id))) {
+        for (key, setting) in settings_of(&frame) {
+            if let Some(v) = over.get(*key).filter(|v| fits(*setting, v)) { raw[*key] = v.clone(); }
+        }
+    }
     // In the language in use if its add-on has it, then the file's own (English), then the folder's.
     let name = wb_core::i18n::name_in_language(&format!("map-style-{id}")).unwrap_or_else(|| if s(&raw, "name").is_empty() { id.to_string() } else { s(&raw, "name").to_string() });
     Some(Style { id: id.to_string(), name, raw, path })
@@ -212,5 +278,22 @@ mod tests {
         assert!(allowed(&st.data, &m));
         fs::write(&m.path, r#"{"node_menu":[{"label":"summary","do":"request","arg":"other text"}]}"#).unwrap();
         assert!(!allowed(&st.data, &find(&st.data, "m").unwrap()), "changed text is confirmed again");
+    }
+    #[test]
+    fn a_persons_settings_go_over_the_style_but_only_its_frames_and_only_valid_ones() {
+        let st = scratch("mset");
+        put(&st, "k", r#"{"name":"K","frame":"columns","group":"state","instruction":"as written"}"#);
+        set(&st.data, "k", "group", json!("kind")).unwrap();
+        set(&st.data, "k", "recent_done", json!(500)).unwrap();
+        set(&st.data, "k", "instruction", json!("do something else")).unwrap();
+        let k = find(&st.data, "k").unwrap();
+        assert_eq!(s(&k.raw, "group"), "kind");
+        assert!(k.raw.get("recent_done").is_none(), "out of its range");
+        assert_eq!(k.instruction(), "as written", "only the frame's settings come from the file");
+        set(&st.data, "k", "group", Value::Null).unwrap();
+        assert_eq!(s(&find(&st.data, "k").unwrap().raw, "group"), "state");
+        set(&st.data, "k", "group", json!("top")).unwrap();
+        reset(&st.data, "k");
+        assert_eq!(s(&find(&st.data, "k").unwrap().raw, "group"), "state");
     }
 }

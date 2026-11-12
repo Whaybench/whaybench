@@ -12,6 +12,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   kept. Whaybench looks the latest release up on GitHub at start and every six hours, only when it was installed with
   install.sh; nothing is sent. The status line says so until it is installed.
 - Whaybench → About → Support Whaybench opens https://ko-fi.com/whaybench in the view panel.
+- Conversation map → Display style settings… changes how the map is shown: the indent of Default, the tree (letters
+  per level, 4 before; kept as `map_indent` in settings.json), and, for each map style, the settings its frame has
+  (what a tree shows, how columns are made and ordered, a time flow's range). They are kept in the style's folder as
+  settings.json, so deleting the style takes them along and a new version of the style keeps them.
 
 ### Fixed
 
