@@ -6,6 +6,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-13
+
+Whaybench Setup for Windows installs Whaybench inside again; 0.5.1's made only the shortcuts on a new machine.
+
 ### Fixed
 
 - WhaybenchSetup.exe set the Linux side up only on a machine where an earlier setup had already done it: Windows
