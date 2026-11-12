@@ -24,8 +24,7 @@ fn set_zoom(d: &Data, z: f64) {
     let Some(key) = PANEL.get() else { return };
     let mut v = std::fs::read_to_string(zoom_file(d)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
     v[key.as_str()] = json!(z);
-    let tmp = zoom_file(d).with_extension("json.tmp");
-    if std::fs::write(&tmp, v.to_string()).is_ok() { let _ = std::fs::rename(&tmp, zoom_file(d)); }
+    let _ = wb_core::paths::write_atomic(&zoom_file(d), v.to_string());
 }
 
 /// Ctrl+wheel anywhere in the window makes this panel larger or smaller, in steps of 10%.

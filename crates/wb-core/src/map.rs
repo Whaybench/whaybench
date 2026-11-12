@@ -45,11 +45,7 @@ pub(crate) fn read_json(path: &Path, default: Value) -> Result<Value> {
 }
 
 pub(crate) fn write_json(path: &Path, value: &Value) -> Result<()> {
-    fs::create_dir_all(path.parent().ok_or("missing parent directory")?)?;
-    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
-    fs::write(&temp, serde_json::to_vec(value)?)?;
-    fs::rename(temp, path)?;
-    Ok(())
+    Ok(crate::paths::write_atomic(path, serde_json::to_vec(value)?)?)
 }
 
 pub(crate) fn safe_id(value: &str) -> Result<&str> {

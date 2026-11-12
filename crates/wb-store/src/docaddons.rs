@@ -13,7 +13,7 @@ const SHEETS: [&str; 3] = ["xlsx", "xls", "ods"];
 #[derive(Clone, Debug, PartialEq)]
 pub struct DocAddon { pub id: String, pub name: String, pub md: PathBuf, pub original: Option<PathBuf> }
 
-fn valid_id(id: &str) -> bool { !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') }
+use wb_core::addons::valid_id;
 fn ext(p: &Path) -> String { p.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default() }
 fn convertible(p: &Path) -> bool { let e = ext(p); WORDS.contains(&e.as_str()) || SHEETS.contains(&e.as_str()) }
 

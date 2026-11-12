@@ -28,7 +28,7 @@ fn bundle(text: &str, tag: &str) -> Bundle {
     b
 }
 
-fn valid_id(id: &str) -> bool { !id.is_empty() && id != DEFAULT && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') }
+fn valid_id(id: &str) -> bool { id != DEFAULT && crate::addons::valid_id(id) }
 fn root(d: &Data) -> std::path::PathBuf { d.root.join("addons/languages") }
 fn choice(d: &Data) -> std::path::PathBuf { d.root.join("language.json") }
 

@@ -51,6 +51,15 @@ pub fn work_dir(data: &Data, home: &Path) -> PathBuf {
     }
 }
 
+/// Writes a whole file or none of it: readers poll these files, and several programs write the same ones.
+/// The temporary name has the process number, so two writers do not share it.
+pub fn write_atomic(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() { std::fs::create_dir_all(dir)?; }
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(tmp, path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +92,15 @@ mod tests {
     fn empty_values_do_not_count_and_no_home_is_none() {
         assert_eq!(resolve(None, env(&[("WHAYBENCH_DATA_DIR", ""), ("HOME", "/h")])).unwrap(), Path::new("/h/.local/share/whaybench"));
         assert!(resolve(None, env(&[])).is_none());
+    }
+    #[test]
+    fn a_file_is_written_whole_into_a_folder_that_was_missing() {
+        let dir = std::env::temp_dir().join(format!("wb-atomic-{}", std::process::id()));
+        let file = dir.join("deep/a.json");
+        write_atomic(&file, "one").unwrap();
+        write_atomic(&file, "two").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "two");
+        assert_eq!(std::fs::read_dir(dir.join("deep")).unwrap().count(), 1, "no temporary file is left");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

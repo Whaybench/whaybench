@@ -28,6 +28,9 @@ const GUIDES: [(&str, &str); 4] = [
     ("project-docs", include_str!("../../../addons/project-docs/README.md")),
 ];
 
+/// An add-on's id is its folder's name: letters, digits, `-` and `_`, so it is safe in a path and in a file.
+pub fn valid_id(id: &str) -> bool { !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') }
+
 pub fn install_bundled(data: &Data) {
     let root = data.root.join("addons");
     for (kind, text) in GUIDES {

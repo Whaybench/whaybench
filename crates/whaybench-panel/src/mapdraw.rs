@@ -10,7 +10,7 @@ use wb_store::{arr, mapstyles::{self, Style}, s};
 const LANES: [&str; 10] = ["#1e66f5", "#d20f39", "#8839ef", "#40a02b", "#fe640b", "#179299", "#df8e1d", "#ea76cb", "#7287fd", "#9ca0b0"];
 
 fn e(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('\'', "&#39;").replace('"', "&quot;") }
-fn cut(t: &str, n: usize) -> String { t.chars().take(n).collect() }
+use crate::common::cut;
 use wb_core::map::is_open;
 
 /// A node change in the order it happened: turn, time in ms, node id, whether it closed.

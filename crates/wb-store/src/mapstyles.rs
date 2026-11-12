@@ -47,7 +47,7 @@ impl Style {
     }
 }
 
-fn valid_id(id: &str) -> bool { !id.is_empty() && id != DEFAULT && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') }
+fn valid_id(id: &str) -> bool { id != DEFAULT && wb_core::addons::valid_id(id) }
 
 pub fn find(d: &Data, id: &str) -> Option<Style> {
     if !valid_id(id) { return None; }

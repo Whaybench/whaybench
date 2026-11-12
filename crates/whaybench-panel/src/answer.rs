@@ -27,8 +27,7 @@ fn time_of(ms: i64, format: &str) -> String {
 fn history_file(d: &Data) -> std::path::PathBuf { d.root.join("answer-history.json") }
 
 fn save(d: &Data, h: &[Value]) {
-    let tmp = history_file(d).with_extension("tmp");
-    if std::fs::write(&tmp, Value::Array(h.to_vec()).to_string()).is_ok() { let _ = std::fs::rename(tmp, history_file(d)); }
+    let _ = wb_core::paths::write_atomic(&history_file(d), Value::Array(h.to_vec()).to_string());
 }
 
 struct Widgets { web: webkit6::WebView, where_: gtk::Label, back: gtk::Button, forward: gtk::Button, drop: gtk::Button, shown: RefCell<String> }

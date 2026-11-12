@@ -1,16 +1,10 @@
 //! Messages for the status line, requests to the compositor and between panels: small files, like the rest.
-use std::{fs, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
+use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
 
 use serde_json::json;
 
-use crate::paths::Data;
+use crate::paths::{Data, write_atomic as write};
 
-fn write(p: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(d) = p.parent() { fs::create_dir_all(d)?; }
-    let tmp = p.with_extension(format!("{}.tmp", std::process::id()));
-    fs::write(&tmp, text)?;
-    fs::rename(&tmp, p)
-}
 
 fn now_ms() -> u128 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0) }
 

@@ -10,7 +10,7 @@ use std::{
 
 use serde_json::Value;
 
-use crate::{log as record, paths::Data, versions};
+use crate::{log as record, paths::{Data, write_atomic}, versions};
 
 pub fn sessions_dir(d: &Data) -> PathBuf { d.root.join("sessions") }
 pub fn alive_dir(d: &Data) -> PathBuf { d.cache().join("alive") }
@@ -20,12 +20,6 @@ pub fn tabs_dir(d: &Data) -> PathBuf { d.cache().join("term") }
 
 fn read_json(p: &Path) -> Option<Value> { serde_json::from_str(&fs::read_to_string(p).ok()?).ok() }
 
-fn write_atomic(p: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(dir) = p.parent() { fs::create_dir_all(dir)?; }
-    let tmp = p.with_extension("tmp");
-    fs::write(&tmp, text)?;
-    fs::rename(&tmp, p)
-}
 
 pub fn record_of(d: &Data, id: &str) -> Option<Value> { read_json(&sessions_dir(d).join(format!("{id}.json"))) }
 

@@ -216,10 +216,7 @@ fn settings_file(data: &Data, name: &str) -> PathBuf {
 }
 
 fn write_json(path: &Path, v: &Value) -> std::io::Result<()> {
-    if let Some(d) = path.parent() { fs::create_dir_all(d)?; }
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, serde_json::to_string_pretty(v)?)?;
-    fs::rename(tmp, path)
+    crate::paths::write_atomic(path, serde_json::to_string_pretty(v)?)
 }
 
 /// A value the person changed in the theme settings: it goes in the theme's settings.json, over its theme.json.
@@ -268,7 +265,7 @@ pub fn write_terminal_config(data: &Data) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
-fn valid_id(id: &str) -> bool { !id.is_empty() && id != DEFAULT && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') }
+fn valid_id(id: &str) -> bool { id != DEFAULT && crate::addons::valid_id(id) }
 
 fn folder(data: &Data, id: &str) -> PathBuf { data.root.join("addons/themes").join(id) }
 
@@ -307,11 +304,7 @@ pub fn load_active(data: &Data) -> Theme {
 
 pub fn save_active(data: &Data, name: &str) -> std::io::Result<()> {
     let text = serde_json::json!({ "active": name }).to_string();
-    if let Some(d) = active_file(data).parent() { fs::create_dir_all(d)?; }
-    let p = active_file(data);
-    let tmp = Path::new(&p).with_extension("tmp");
-    fs::write(&tmp, text)?;
-    fs::rename(&tmp, p)
+    crate::paths::write_atomic(Path::new(&active_file(data)), text)
 }
 
 #[cfg(test)]

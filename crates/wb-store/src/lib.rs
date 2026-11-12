@@ -50,10 +50,7 @@ pub fn read(path: &Path) -> Option<Value> { serde_json::from_str(&fs::read_to_st
 pub fn text(path: &Path) -> String { fs::read_to_string(path).unwrap_or_default() }
 
 pub fn write_text(path: &Path, content: &str) -> Res<()> {
-    if let Some(d) = path.parent() { fs::create_dir_all(d).map_err(|e| e.to_string())?; }
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    fs::write(&tmp, content).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, path).map_err(|e| e.to_string())
+    wb_core::paths::write_atomic(path, content).map_err(|e| e.to_string())
 }
 
 pub fn write_json(path: &Path, v: &Value) -> Res<()> {

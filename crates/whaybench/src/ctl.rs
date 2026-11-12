@@ -44,11 +44,7 @@ pub fn write_instance(data: &Data, run: &str, socket: &str) -> std::io::Result<(
     write_atomic(&data.instance(), text.as_bytes())
 }
 
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, bytes)?;
-    fs::rename(&tmp, path)
-}
+pub use wb_core::paths::write_atomic;
 
 fn running(data: &Data) -> bool {
     fs::read_to_string(data.instance()).ok()
