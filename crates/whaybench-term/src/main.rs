@@ -560,6 +560,8 @@ fn main() {
     }
     if let Err(e) = relay.start(&argv) {
         record::error("session", "program not started", &[("error", e.clone())]);
+        // The tab closes with the program: the reason stays in the status bar (an agent not installed, for one).
+        wb_core::status::say(&relay.data, &wb_core::i18n::f("tab-not-opened", &[("e", e.clone())]), 15);
         let _ = writeln!(std::io::stderr(), "whaybench-term: {e}");
         std::process::exit(1);
     }

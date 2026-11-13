@@ -140,7 +140,7 @@ Windows shows a warning first; it installs only once you confirm it (**More info
 
 It sets everything up in WSL, the Linux that comes with Windows: WSL itself (Windows asks for administrator rights,
 and may need one restart, after which the setup goes on by itself), an Ubuntu of its own named Whaybench (your other
-WSL distributions are not touched), Firefox, the input method for your Windows display language, Claude Code and
+WSL distributions are not touched), Firefox, the input method for your Windows display language, Claude Code, Codex CLI and
 Whaybench. This takes a while. Then start Whaybench from the Start menu or the desktop, and the first time sign in to
 Claude in the browser that opens. If the setup stops, run the installer again: it goes on from where it stopped.
 

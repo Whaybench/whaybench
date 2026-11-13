@@ -6,6 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-14
+
+Security: signed updates installed whole with a way back, agent add-ons and cross-conversation text confirmed and
+marked, the view panel kept out of an agent's reach. Codex CLI comes with the Windows setup.
+
+### Added
+
+- The Windows setup installs Codex CLI too (OpenAI's standalone installer, no Node), so "New conversation · Codex" works
+  without installing anything by hand. Running the installer again adds it to an existing setup.
+
 ### Changed
 
 - A conversation that asks another with `whaybench ctl session type` gets the person back when the answer comes,
@@ -13,6 +23,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A conversation tab whose agent program is missing closed without a word; the reason now stays in the status bar.
 - Security: a `whaybench-view read` request named the reply file by path, so an agent that may write `view/` (Codex)
   could make the view panel, outside its sandbox, overwrite any file of the person's. The reply is now a plain name
   in `cache/view-read/`, written as a new file.

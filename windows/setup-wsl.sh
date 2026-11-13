@@ -4,7 +4,7 @@
 # USER is made (no password: the Windows account guards the distribution) and becomes the default user. LANGUAGE (ko,
 # ja, zh, vi or en) picks the input method engine. Everything comes from its official source: Ubuntu's archive,
 # Mozilla's archive for Firefox (Ubuntu's own is a snap, which cannot reach Whaybench's display in WSL), the
-# Whaybench release and Anthropic's Claude Code installer. Running it again finishes what a failed run left.
+# Whaybench release, Anthropic's Claude Code installer and OpenAI's Codex CLI installer (a standalone program, no Node). Running it again finishes what a failed run left.
 set -eu
 
 user="${1:?usage: setup-wsl.sh USER [LANGUAGE]}"
@@ -76,8 +76,10 @@ exec whaybench "$@"
 EOF
 chmod 0755 /usr/local/bin/whaybench-start
 
-say "Claude Code and Whaybench"
+say "Claude Code, Codex CLI and Whaybench"
 su - "$user" -c 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
+# Codex CLI for "New conversation · Codex"; it asks to sign in the first time a Codex tab opens.
+su - "$user" -c '[ -x "$HOME/.local/bin/codex" ] || command -v codex >/dev/null || curl -fsSL https://chatgpt.com/codex/install.sh | sh'
 # Not piped from the network: install.sh is checked against the release key first, and with minisign installed it
 # checks the package too.
 apt-get install -y -q minisign
