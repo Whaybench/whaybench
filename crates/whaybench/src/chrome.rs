@@ -10,7 +10,7 @@ use smithay::{
 use wb_core::log as record;
 
 /// Tab titles are cut here.
-pub const NAME_CHARS: usize = 32;
+pub const NAME_CHARS: usize = 44;
 
 pub fn cut_name(name: &str) -> String {
     if name.chars().count() > NAME_CHARS { format!("{}…", name.chars().take(NAME_CHARS).collect::<String>()) } else { name.to_string() }
@@ -163,10 +163,10 @@ mod tests {
     }
 
     #[test]
-    fn names_are_cut_at_32_characters() {
+    fn names_are_cut_at_the_limit() {
         assert_eq!(cut_name("short"), "short");
-        let cut = cut_name(&"é".repeat(40));
-        assert_eq!(cut.chars().count(), 33);
+        let cut = cut_name(&"é".repeat(NAME_CHARS + 8));
+        assert_eq!(cut.chars().count(), NAME_CHARS + 1);
         assert!(cut.ends_with('…'));
     }
 }

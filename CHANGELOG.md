@@ -11,6 +11,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Codex is now an agent add-on (`addons/agents/codex/`): its command, settings folder, hook and MCP templates and
   guidance are files, not code, so other agents with Claude Code-style hooks and MCP can be added as folders.
   See `addons/agents/README.md`.
+- Conversation tab titles and the input panel name the agent and the session's number (`Codex 01a1d60c`), so
+  side-by-side conversations are told apart at a glance. Tab names are cut at 44 characters instead of 32.
 - The agent is chosen per conversation: the session menu has `New conversation · <agent>` for Claude Code and each
   agent add-on, Claude Code and Codex tabs run side by side, a session opens again with its own agent, and the session
   list shows each session's agent. The `--agent` option is gone.

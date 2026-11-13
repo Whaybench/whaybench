@@ -78,6 +78,13 @@ pub fn name_of(data: &Path, agent: Option<&str>) -> String {
     }
 }
 
+/// A session as people tell sessions apart: its agent's name and the start of its number, `Codex 01a1d60c`.
+pub fn session_label(data: &Path, sid: &str) -> String {
+    let agent = crate::map::read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null).ok()
+        .and_then(|r| r["agent"].as_str().map(String::from));
+    format!("{} {}", name_of(data, agent.as_deref()), sid.chars().take(8).collect::<String>())
+}
+
 pub fn load(data: &Path, id: &str) -> Result<Agent> {
     if id == CLAUDE || !crate::addons::valid_id(id) { return Err(format!("not an agent add-on: {id}").into()); }
     let dir = data.join("addons/agents").join(id);
@@ -329,6 +336,9 @@ mod tests {
         assert_eq!(list(dir.path()), [("claude".to_string(), "Claude Code".to_string())]);
         with_addons(dir.path());
         assert_eq!(list(dir.path()).iter().map(|(i, _)| i.as_str()).collect::<Vec<_>>(), ["claude", "codex"]);
+        fs::create_dir_all(dir.path().join("sessions")).unwrap();
+        fs::write(dir.path().join("sessions/01a1d60c-6.json"), r#"{"agent":"codex"}"#).unwrap();
+        assert_eq!((session_label(dir.path(), "01a1d60c-6"), session_label(dir.path(), "a3cf3125-f")), ("Codex 01a1d60c".into(), "Claude Code a3cf3125".into()));
         assert_eq!((name_of(dir.path(), None), name_of(dir.path(), Some("codex")), name_of(dir.path(), Some("gone"))), ("Claude Code".into(), "Codex".into(), "gone".into()));
     }
 }

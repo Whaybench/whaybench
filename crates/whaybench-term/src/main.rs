@@ -27,7 +27,7 @@ const MAP_TOOL: &str = "mcp__plugin_context-map_whaybench__context_map";
 const AFTER_BACKGROUND: Duration = Duration::from_secs(4);
 /// After ending a session, how long until its tab goes.
 const AFTER_END: Duration = Duration::from_secs(3);
-const CUT_TITLE: usize = 32;
+const CUT_TITLE: usize = 44;
 
 static RESIZED: AtomicBool = AtomicBool::new(false);
 extern "C" fn on_winch(_: libc::c_int) { RESIZED.store(true, Ordering::Relaxed); }
@@ -289,7 +289,9 @@ impl Relay {
         if !self.running && self.title == wb_core::i18n::t("ended") { return; }
         if let Some(s) = self.session.clone() {
             let name = sessions::tab_title(&self.data, &s);
-            self.set_title(if name.is_empty() { wb_core::i18n::t("new-session") } else { &name });
+            // The agent and the number first: two conversations side by side are told apart at a glance.
+            let title = format!("{} · {}", wb_core::agents::session_label(&self.data.root, &s), if name.is_empty() { wb_core::i18n::t("new-session") } else { &name });
+            self.set_title(&title);
         }
     }
 
@@ -505,7 +507,10 @@ fn main() {
         screen: vt100::Parser::new(40, 120, 0), titles: Titles::default(), title: String::new(),
         leave_at: None, closing: false, map_from, resumed_at: None,
     };
-    relay.set_title(wb_core::i18n::t("new-session"));
+    // Before the session is known (an add-on agent tells it with its first hook): the agent's name.
+    let first = match &relay.session { Some(s) => format!("{} · {}", wb_core::agents::session_label(&relay.data.root, s), wb_core::i18n::t("new-session")),
+        None => format!("{} · {}", wb_core::agents::name_of(&relay.data.root, wb_core::agents::active().as_deref()), wb_core::i18n::t("new-session")) };
+    relay.set_title(&first);
     let argv: Vec<String> = match (&attach, &resume) {
         (Some(a), _) => vec!["attach".into(), sessions::attach_name(a)],
         (_, Some(r)) => vec!["--resume".into(), r.clone()],
