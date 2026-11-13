@@ -19,6 +19,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Starting Whaybench while it already runs on the same data folder started a second one beside it, whose tabs
   then closed conversations resumed in the new one (one tab per conversation). The new start now takes the place of
   the running one, as a restart does: it is asked to quit, keeping its panels and tabs, and stopped if it does not.
+- Two sessions changing a project's map at the same moment could drop one's change from the map (the change log kept
+  both). A change to the map now waits for the other to finish.
 
 ## [0.5.4] - 2026-11-13
 

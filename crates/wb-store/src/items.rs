@@ -22,6 +22,10 @@ impl Store {
     /// Upserts areas and items by id; `remove` drops items and their children.
     pub fn map_put(&self, pid: &str, data: &Value, session: &str) -> Res<Value> {
         if self.get_project(pid).is_none() { return Err(format!("no project: {pid}")); }
+        // Read, merge and write as one step: two sessions putting at once would each write the map without the other's
+        // change. Released when the file closes, at the end of this call.
+        let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.pdir(pid).join("map.lock")).map_err(|e| e.to_string())?;
+        lock.lock().map_err(|e| e.to_string())?;
         let m = self.project_map(pid);
         let (old_items, old_areas) = (by_id(arr(&m, "items")), by_id(arr(&m, "areas")));
         let mut areas = old_areas.clone();
@@ -90,6 +94,19 @@ impl Store {
 mod map_from_nodes_tests {
     use serde_json::json;
     use crate::{arr, s, scratch};
+    #[test]
+    fn sessions_writing_the_map_at_once_lose_nothing() {
+        let st = scratch("race");
+        st.create_project("p", "Test", "", "", Vec::new(), false).unwrap();
+        st.map_put("p", &json!({"areas": [{"id": "ar", "title": "Area"}]}), "").unwrap();
+        let root = st.data.root.clone();
+        let threads: Vec<_> = (0..8).map(|t| { let root = root.clone(); std::thread::spawn(move || {
+            let st = crate::Store::new(wb_core::paths::Data::new(root));
+            for i in 0..15 { st.map_put("p", &json!({"items": [{"id": format!("{t}-{i}"), "area": "ar", "text": "x", "stage": "idea"}]}), &format!("s{t}")).unwrap(); }
+        }) }).collect();
+        for t in threads { t.join().unwrap(); }
+        assert_eq!(arr(&st.project_map("p"), "items").len(), 8 * 15);
+    }
     #[test]
     fn a_conversation_map_starts_a_project_map() {
         let st = scratch("mf");
