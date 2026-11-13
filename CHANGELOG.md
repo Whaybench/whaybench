@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-11-13
+
 The memory keeps every map node once, in a database, as it was meant to: a node no longer disappears from the memory
 when it leaves a map. Data from before is not converted.
 
