@@ -89,6 +89,9 @@ pub fn post(data: &Data, request: &Request) -> Result<(), String> {
     write_atomic(&data.ctl().join(format!("{name}-{}.json", std::process::id())), &text).map_err(|e| e.to_string())
 }
 
+/// Where to go back to once an asked session answers (`session type` from another tab).
+pub fn return_file(data: &Data) -> std::path::PathBuf { data.cache().join("focus-return.json") }
+
 /// `whaybench ctl session ...`: decided here, not in the compositor, because asking Claude Code what runs
 /// can take seconds and the window must not wait.
 fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
@@ -119,6 +122,11 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             let name = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
             write_atomic(&dir.join(format!("{name}.json")), serde_json::json!({"text": text, "enter": true}).to_string().as_bytes()).map_err(|e| e.to_string())?;
+            // Asked from another conversation tab: when the answer comes, the person is taken back to the one that asked.
+            if let Some(from) = std::env::var("WHAYBENCH_TAB").ok().filter(|f| *f != tab.tab) {
+                let back = serde_json::json!({"session": id, "tab": from, "at": now_ms()});
+                write_atomic(&return_file(data), back.to_string().as_bytes()).map_err(|e| e.to_string())?;
+            }
             post(data, &Request::FocusTerm { tab: tab.tab })
         }
         Some("end") => {
@@ -180,6 +188,7 @@ struct Reattach {
 }
 
 fn now_secs() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
+pub fn now_ms() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0) }
 
 /// Closing the window: the tabs hand their sessions to the background, and the next start attaches them.
 pub fn remember_tabs(data: &Data) {
@@ -310,7 +319,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
             }
         }
         ticks += 1;
-        if ticks % 10 == 0 { state.sync_focus(); }
+        if ticks % 10 == 0 { state.return_focus(); state.sync_focus(); }
         TimeoutAction::ToDuration(Duration::from_millis(100))
     }).map_err(|e| e.to_string())?;
     Ok(())

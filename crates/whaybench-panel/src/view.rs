@@ -173,7 +173,7 @@ fn retitle(v: &V) {
             Some(s) => format!("{} · {}", wb_core::i18n::t("linked-to-session-tab"), wb_core::agents::session_label(&v.d.root, s)),
             None => wb_core::i18n::t("linked-to-session-tab").to_string(),
         }, String::new()),
-        Link::Session(s) => { let n = wb_core::agents::session_label(&v.d.root, s); (n.clone(), n) }
+        Link::Session(s) => { let n = wb_core::agents::session_label(&v.d.root, &sessions::current_id(&v.d, s)); (n.clone(), n) }
         Link::Target(_, t) => { let n: String = t.chars().take(20).collect(); (wb_core::i18n::f("pinned-view-2", &[("n", (n).to_string())]), n) }
     };
     v.tie.set_label(&wb_core::i18n::f("link", &[("tie", (tie).to_string())]));
@@ -272,22 +272,10 @@ fn link_menu(s: &Shared) {
 }
 
 /// `whaybench-view read`: the page's own text, without going through a screen picture.
-/// For the agent that reads: whose page this view shows, as two sessions read the same view.
-fn link_note(v: &V) -> String {
-    match &v.link {
-        Link::Follow => match &v.followed {
-            Some(s) => wb_core::i18n::ai_f("view-link-follow", &[("session", wb_core::agents::session_label(&v.d.root, s))]),
-            None => wb_core::i18n::ai("view-link-follow-none").to_string(),
-        },
-        Link::Session(s) => wb_core::i18n::ai_f("view-link-session", &[("session", wb_core::agents::session_label(&v.d.root, s))]),
-        Link::Target(..) => wb_core::i18n::ai("view-link-page").to_string(),
-    }
-}
-
 fn answer_read(v: &V, all: bool, reply: String) {
     let script = READ_SCRIPT.replace("ALL", if all { "true" } else { "false" });
     let url = v.hist.current().map(|c| c.0.clone()).unwrap_or_default();
-    let link = link_note(v);
+    let link = view::link_note(&v.d, &v.link, v.followed.as_deref());
     // The engine's PDF viewer keeps its text to itself, so a PDF is read from the file.
     if !view::is_web(&url) && url.to_lowercase().ends_with(".pdf") {
         let text = std::process::Command::new("pdftotext").args(["-layout", &url, "-"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();

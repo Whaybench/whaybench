@@ -29,6 +29,20 @@ pub enum Link {
     Target(String, String),
 }
 
+/// For an agent that reads a view: whose page it shows, as every session reads the same view. A view kept on one
+/// session names the number that session goes on under now.
+pub fn link_note(d: &Data, link: &Link, followed: Option<&str>) -> String {
+    let label = |s: &str| crate::agents::session_label(&d.root, &crate::sessions::current_id(d, s));
+    match link {
+        Link::Follow => match followed {
+            Some(s) => crate::i18n::ai_f("view-link-follow", &[("session", label(s))]),
+            None => crate::i18n::ai("view-link-follow-none").to_string(),
+        },
+        Link::Session(s) => crate::i18n::ai_f("view-link-session", &[("session", label(s))]),
+        Link::Target(..) => crate::i18n::ai("view-link-page").to_string(),
+    }
+}
+
 impl Link {
     pub fn to_json(&self) -> Value {
         match self {
@@ -345,6 +359,20 @@ pub fn vim(d: &Data, path: &str) -> std::io::Result<()> { terminal(d, &["vim".to
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_read_says_whose_page_and_follows_a_moved_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = Data::new(dir.path().to_path_buf());
+        std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
+        crate::addons::install_bundled(&d);
+        std::fs::write(dir.path().join("sessions/old11111.json"), r#"{"id":"old11111","movedTo":"new22222","agent":"codex"}"#).unwrap();
+        std::fs::write(dir.path().join("sessions/new22222.json"), r#"{"id":"new22222","agent":"codex"}"#).unwrap();
+        assert!(link_note(&d, &Link::Session("old11111".into()), None).contains("Codex new22222"), "the number it goes on under");
+        assert!(link_note(&d, &Link::Follow, Some("new22222")).contains("follows the conversation the person chose, now Codex new22222"));
+        assert!(link_note(&d, &Link::Follow, None).contains("none is chosen"));
+        assert!(link_note(&d, &Link::Target("/p".into(), "p".into()), None).contains("pinned"));
+    }
+
     #[test]
     fn addresses() {
         assert_eq!(address("https://a.b", Some(3)), "https://a.b");

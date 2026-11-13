@@ -6,6 +6,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- A conversation that asks another with `whaybench ctl session type` gets the person back when the answer comes,
+  unless they moved to another conversation meanwhile.
+
+### Fixed
+
+- A view kept on one session named the number it had when kept, not the one the conversation goes on under.
+- `whaybench-view read --firefox` now says the Firefox panel belongs to no session and every session reads the
+  same tab.
+
 ## [0.6.0] - 2026-11-14
 
 Agents are add-ons and chosen per conversation: Claude Code and Codex side by side, each tab and panel showing

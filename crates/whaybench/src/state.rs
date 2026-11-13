@@ -341,6 +341,24 @@ impl App {
         if let Some(w) = self.windows.get(&id) { w.toplevel().unwrap().send_close(); }
     }
 
+    /// A session asked from another tab has answered: back to the tab that asked, if the asked one is still in front
+    /// (the person has not gone elsewhere meanwhile). A question left unanswered for an hour is let go.
+    pub fn return_focus(&mut self) {
+        let file = crate::ctl::return_file(&self.data);
+        let Some(back) = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
+        let (Some(session), Some(tab), Some(at)) = (back["session"].as_str(), back["tab"].as_str(), back["at"].as_i64()) else { let _ = std::fs::remove_file(&file); return };
+        if crate::ctl::now_ms() - at > 3_600_000 { let _ = std::fs::remove_file(&file); return; }
+        let state = std::fs::read_to_string(wb_core::sessions::state_dir(&self.data).join(format!("{session}.json"))).ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).unwrap_or_default();
+        if state["state"] != "done" || state["at"].as_i64().unwrap_or(0) <= at { return; }
+        let _ = std::fs::remove_file(&file);
+        if self.focused_term.as_ref().and_then(|(_, s)| s.as_deref()) == Some(session) {
+            record::decide("session", "back to the asking tab", "the asked session answered", &[("session", session.to_string()), ("tab", tab.to_string())]);
+            let tab = tab.to_string();
+            self.focus_term(&tab);
+        }
+    }
+
     /// The conversation in front is the chosen session, so the map, answer and files panels follow it and requests go
     /// to it: the front tab of the conversation panel chosen last, whatever free panel lies above it, else any
     /// conversation tab left. With no conversation tab left, no session is chosen. Only a change counts.

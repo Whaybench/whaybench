@@ -135,7 +135,12 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
         Some("edit") => { let a = absolute(args.get(1).ok_or(HELP)?); view::vim(d, &a).map_err(|e| e.to_string()) }
         Some("read") => {
             let all = flag(&args, "--all");
-            print_read(&if flag(&args, "--firefox") { a11y::read_text(d, all)? } else { view::read_panel(d, view::FIRST_VIEW, all)? });
+            let read = if flag(&args, "--firefox") {
+                let mut v = a11y::read_text(d, all)?;
+                v["link"] = serde_json::json!(wb_core::i18n::ai("view-link-firefox"));
+                v
+            } else { view::read_panel(d, view::FIRST_VIEW, all)? };
+            print_read(&read);
             Ok(())
         }
         Some("where") => {
