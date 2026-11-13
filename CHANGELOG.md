@@ -6,6 +6,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-11-14
+
+Updates come by themselves, six more themes, and panel titles that read better.
+
 ### Changed
 
 - Updates come by themselves: a newer release found at start or in the six-hourly look is downloaded, checked against
