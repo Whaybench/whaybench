@@ -83,6 +83,21 @@ jobs:
           name: windows-setup
       # What Whaybench Setup's install.ps1 fetches when it runs on its own.
       - run: cp windows/setup-wsl.sh windows/whaybench.ico .
+      # Whaybench updates itself only with files signed here (crates/wb-core/src/update.rs checks them against the
+      # public key it carries); the trusted comment names the version and the file.
+      - name: Signatures
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          [ -n "$MINISIGN_SECRET_KEY" ] || { echo "the MINISIGN_SECRET_KEY secret is missing" >&2; exit 1; }
+          sudo apt-get install -y minisign
+          v="${GITHUB_REF_NAME#v}"
+          key="$RUNNER_TEMP/release.key"
+          (umask 077; printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key")
+          for f in install.sh whaybench-x86_64-linux.tar.gz setup-wsl.sh; do
+            minisign -S -s "$key" -m "$f" -x "$f.minisig" -t "whaybench $v $f"
+          done
+          rm -f "$key"
       - name: Release notes from the changelog
         run: |
           version="${GITHUB_REF_NAME#v}"; version="${version%%-*}"  # a pre-release shows the notes of the version it leads to
@@ -93,4 +108,4 @@ jobs:
         # A tag with a '-' (v0.2.0-rc.1) is a pre-release: never the latest one install.sh takes.
         run: |
           pre=""; case "$GITHUB_REF_NAME" in *-*) pre=--prerelease ;; esac
-          gh release create "$GITHUB_REF_NAME" $pre --title "Whaybench ${GITHUB_REF_NAME#v}" --notes-file notes.md whaybench-x86_64-linux.tar.gz whaybench-x86_64-linux.tar.gz.sha256 install.sh WhaybenchSetup.exe setup-wsl.sh whaybench.ico
+          gh release create "$GITHUB_REF_NAME" $pre --title "Whaybench ${GITHUB_REF_NAME#v}" --notes-file notes.md whaybench-x86_64-linux.tar.gz whaybench-x86_64-linux.tar.gz.sha256 whaybench-x86_64-linux.tar.gz.minisig install.sh install.sh.minisig WhaybenchSetup.exe setup-wsl.sh setup-wsl.sh.minisig whaybench.ico

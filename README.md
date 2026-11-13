@@ -118,6 +118,13 @@ the notifications panel, add this to `~/.claude/settings.json`. Whaybench does n
 
 If you already have a status line script, pass it the same input: `echo "$input" | ~/.local/bin/whaybench statusline`.
 
+Releases are signed with [minisign](https://jedisct1.github.io/minisign/). Whaybench updates itself only with files
+that check against this key, and `install.sh` checks the package with it when `minisign` is installed:
+
+    RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia
+
+To check a download yourself: `minisign -Vm whaybench-x86_64-linux.tar.gz -P <the key above>`.
+
 To update, run the install command again; it updates the Claude Code plugin too. Whaybench may keep running: the
 status line then says a new version is waiting, and Whaybench → Restart starts it. To remove Whaybench, delete `~/.local/lib/whaybench` and
 `~/.local/bin/whaybench`; your data stays (see below).

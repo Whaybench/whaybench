@@ -58,16 +58,28 @@ pub fn newer(d: &Data) -> Option<String> {
     v["version"].as_str().filter(|v| is_newer(v, env!("CARGO_PKG_VERSION"))).map(String::from)
 }
 
-/// Installs the latest release with its install.sh, as a person would; its output goes to the logs. Blocks.
+/// The update the person chose (About → Update): the newer release is fetched and checked like an automatic one; the
+/// restart that follows installs it. Never a script piped from the network. Blocks.
 pub fn run(d: &Data) -> Result<(), String> {
-    let log = d.logs().join("update.log");
-    let _ = std::fs::create_dir_all(d.logs());
-    let file = std::fs::File::create(&log).map_err(|e| e.to_string())?;
-    let err = file.try_clone().map_err(|e| e.to_string())?;
-    let status = install_sh(&format!("curl -fsSL {REPO}/releases/latest/download/install.sh | sh"))
-        .stdout(file).stderr(err).status().map_err(|e| e.to_string())?;
-    record::decide("update", "installed", "the person chose the update", &[("ok", status.success().to_string())]);
-    if status.success() { Ok(()) } else { Err(format!("{}", log.display())) }
+    let v = newer(d).ok_or("no newer release")?;
+    record::decide("update", "chosen", "the person chose the update", &[("version", v.clone())]);
+    fetch(d, &v)
+}
+
+/// The key the releases are signed with (minisign). Its secret half is only in the release workflow.
+const RELEASE_KEY: &str = "RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia";
+/// What runs or is installed from a release: each comes with `<file>.minisig`.
+const SIGNED: [&str; 2] = ["install.sh", PACKAGE];
+
+/// A file of release `v` is the one the release workflow signed: the signature checks against the built-in key, and
+/// its trusted comment names this file of this version, so a signed file of another release cannot stand in for it.
+fn signed(key: &str, data: &[u8], signature: &str, file: &str, v: &str) -> Result<(), String> {
+    let key = minisign_verify::PublicKey::from_base64(key).map_err(|e| format!("release key: {e}"))?;
+    let sig = minisign_verify::Signature::decode(signature).map_err(|e| format!("{file}: signature: {e}"))?;
+    key.verify(data, &sig, false).map_err(|e| format!("{file} of {v} is not signed by Whaybench: {e}"))?;
+    let want = format!("whaybench {v} {file}");
+    if sig.trusted_comment() != want { return Err(format!("{file}: signed for '{}', not '{want}'", sig.trusted_comment())); }
+    Ok(())
 }
 
 /// install.sh as the person would run it: with their umask, not Whaybench's private one.
@@ -92,17 +104,22 @@ pub fn ready(d: &Data) -> Option<String> {
     std::fs::read_to_string(ready_dir(d).join("version")).ok().map(|v| v.trim().to_string()).filter(|v| is_newer(v, env!("CARGO_PKG_VERSION")))
 }
 
-/// Downloads release `v` (its install.sh and package) and checks the package against its checksum, for the next start.
+/// Downloads release `v` (its install.sh and package) and checks both against their signatures, for the next start.
 /// Blocks for the download: run it off the screen's thread.
 pub fn fetch(d: &Data, v: &str) -> Result<(), String> {
     if ready(d).as_deref() == Some(v) { return Ok(()); }
     let part = d.cache().join("update.part");
     let _ = std::fs::remove_dir_all(&part);
     std::fs::create_dir_all(&part).map_err(|e| e.to_string())?;
-    for file in ["install.sh", PACKAGE, &format!("{PACKAGE}.sha256")] {
+    for file in ["install.sh", PACKAGE, &format!("{PACKAGE}.sha256"), "install.sh.minisig", &format!("{PACKAGE}.minisig")] {
         let ok = Command::new("curl").args(["-fsSL", "--max-time", "600", "-o", file, &format!("{REPO}/releases/download/v{v}/{file}")])
             .current_dir(&part).stdin(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
         if !ok { return Err(format!("{file} of {v} did not download")); }
+    }
+    for file in SIGNED {
+        let read = std::fs::read(part.join(file)).and_then(|b| std::fs::read_to_string(part.join(format!("{file}.minisig"))).map(|s| (b, s)));
+        let ok = read.map_err(|e| e.to_string()).and_then(|(b, s)| signed(RELEASE_KEY, &b, &s, file, v));
+        if let Err(e) = ok { let _ = std::fs::remove_dir_all(&part); record::warn("update", "not signed", &e, &[("version", v.to_string())]); return Err(e); }
     }
     let checked = Command::new("sha256sum").args(["-c", "--quiet", &format!("{PACKAGE}.sha256")]).current_dir(&part)
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
@@ -135,6 +152,21 @@ pub fn install_ready(d: &Data) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_update_runs_only_what_the_release_key_signed_for_that_version_and_file() {
+        // A key made for this test only, and install.sh signed with it for 9.9.9 and, separately, for 9.9.8.
+        const KEY: &str = "RWQ9Cg5ooQtD22yrR/PfMb/N7uQfxTZ+qB8PHxTRSye4ykRxmdEgeJ7B";
+        const FOR_999: &str = "untrusted comment: signature from minisign secret key\nRUQ9Cg5ooQtD24+rDUaIMXqMtcBhvUghr98znoqwPG6b5fjUq5Bq4Ta1cHtiPW2W3xmis7HWPB1UKYqQJ5QPoT9ixt/eNhhibwc=\ntrusted comment: whaybench 9.9.9 install.sh\nFTyB5tvGeSP5SAfWHPFYRoz9S0YLVFEIR4FihVWbHnZ1dSrFqWPqEFv85LU1F2a6ppM2dI/DiD8L3r4W8FMnBg==\n";
+        const FOR_998: &str = "untrusted comment: signature from minisign secret key\nRUQ9Cg5ooQtD24+rDUaIMXqMtcBhvUghr98znoqwPG6b5fjUq5Bq4Ta1cHtiPW2W3xmis7HWPB1UKYqQJ5QPoT9ixt/eNhhibwc=\ntrusted comment: whaybench 9.9.8 install.sh\n+M2HAfcscj35mVsMC/XRfBKrXbjzXOLVC2694QtSWYAvO9LH1QiA4Z29TFKh0oxCaqpnZHwIIUpdG0vhGn3aDQ==\n";
+        let file = b"echo install";
+        assert!(signed(KEY, file, FOR_999, "install.sh", "9.9.9").is_ok());
+        assert!(signed(KEY, b"echo changed", FOR_999, "install.sh", "9.9.9").is_err(), "a changed file");
+        assert!(signed(KEY, file, FOR_998, "install.sh", "9.9.9").is_err(), "a signed file of another release");
+        assert!(signed(KEY, file, FOR_999, PACKAGE, "9.9.9").is_err(), "a signature for another file");
+        assert!(signed(RELEASE_KEY, file, FOR_999, "install.sh", "9.9.9").is_err(), "another key");
+        assert!(minisign_verify::PublicKey::from_base64(RELEASE_KEY).is_ok(), "the release key is a minisign key");
+    }
+
     #[test]
     fn the_tag_is_read_from_the_address_and_compared_by_number() {
         assert_eq!(tag_of("https://github.com/Whaybench/whaybench/releases/tag/v0.4.1\n").as_deref(), Some("0.4.1"));

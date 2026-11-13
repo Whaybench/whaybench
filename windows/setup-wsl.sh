@@ -78,6 +78,11 @@ chmod 0755 /usr/local/bin/whaybench-start
 
 say "Claude Code and Whaybench"
 su - "$user" -c 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
-su - "$user" -c 'PATH="$HOME/.local/bin:$PATH" sh -c "curl -fsSL https://github.com/Whaybench/whaybench/releases/latest/download/install.sh | sh"'
+# Not piped from the network: install.sh is checked against the release key first, and with minisign installed it
+# checks the package too.
+apt-get install -y -q minisign
+key=RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia
+dl=https://github.com/Whaybench/whaybench/releases/latest/download
+su - "$user" -c "cd \$(mktemp -d) && curl -fsSLO $dl/install.sh && curl -fsSLO $dl/install.sh.minisig && minisign -Vq -m install.sh -P $key && PATH=\"\$HOME/.local/bin:\$PATH\" sh install.sh"
 
 say "done"

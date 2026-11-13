@@ -7,6 +7,8 @@
 set -eu
 
 REPO="${WHAYBENCH_REPO:-https://github.com/Whaybench/whaybench}"
+# The key Whaybench releases are signed with (minisign). With minisign installed, the package is checked against it.
+KEY=RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia
 NAME=whaybench-x86_64-linux
 LIB="$HOME/.local/lib/whaybench"
 BIN="$HOME/.local/bin"
@@ -24,12 +26,20 @@ trap 'rm -rf "$tmp"' EXIT
 if [ -f "$NAME.tar.gz" ] && [ -f "$NAME.tar.gz.sha256" ]; then
     say "Installing $NAME.tar.gz from this folder"
     cp "$NAME.tar.gz" "$NAME.tar.gz.sha256" "$tmp"/
+    [ -f "$NAME.tar.gz.minisig" ] && cp "$NAME.tar.gz.minisig" "$tmp"/
 else
     say "Downloading $NAME.tar.gz"
-    curl -fsSL "$REPO/releases/latest/download/$NAME.tar.gz" -o "$tmp/$NAME.tar.gz"
-    curl -fsSL "$REPO/releases/latest/download/$NAME.tar.gz.sha256" -o "$tmp/$NAME.tar.gz.sha256"
+    for f in "$NAME.tar.gz" "$NAME.tar.gz.sha256" "$NAME.tar.gz.minisig"; do
+        curl -fsSL "$REPO/releases/latest/download/$f" -o "$tmp/$f"
+    done
 fi
 (cd "$tmp" && sha256sum -c --quiet "$NAME.tar.gz.sha256") || fail "the download does not match its checksum."
+if command -v minisign >/dev/null; then
+    minisign -Vq -m "$tmp/$NAME.tar.gz" -x "$tmp/$NAME.tar.gz.minisig" -P "$KEY" || fail "the package is not signed by Whaybench."
+    say "Signature checked"
+else
+    say "minisign is not installed: only the checksum was checked (install minisign to check the signature too)."
+fi
 tar xzf "$tmp/$NAME.tar.gz" -C "$tmp"
 
 mkdir -p "$LIB" "$BIN"

@@ -19,6 +19,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Security: an HTML page in the view panel could read other local files (file URLs read from file URLs).
 - Security: the Firefox profile and the view's WebKit data (sign-ins, cookies) moved from `view/` to `browser/`, out of
   an agent's reach; they move once at start, or at a later start while a Firefox still runs on them.
+- Security: releases are signed (minisign; the key is in the README). Whaybench updates itself only with an
+  `install.sh` and a package signed for that version, and About → Update no longer runs a script piped from the network:
+  it fetches and checks the release like an automatic update, then installs it at the restart. `install.sh` checks the
+  signature when `minisign` is installed; the Windows setup installs minisign and checks `install.sh` before it runs.
 - Security: the Windows (WSL) account no longer has passwordless sudo, so an agent running as you cannot become root.
   Root work goes through `wsl -d Whaybench -u root`; running the installer again takes the old rule away.
 - Security: an agent add-on runs only as Whaybench brings it, or after you confirmed it in its tab: the program it runs,
