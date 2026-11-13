@@ -218,7 +218,8 @@ pub fn session_moved(d: &Data, old: &str, new: &str) {
 
 /// What a view shows, as text. Asks the panel and waits for its answer.
 pub fn read_panel(d: &Data, name: &str, all: bool) -> Result<Value, String> {
-    let reply = d.cache().join(format!("view-read-{}.json", std::process::id()));
+    // In view/: an agent's sandbox lets it write there (addons/agents/codex/config.toml), so it can remove the reply.
+    let reply = d.root.join("view").join(format!("read-{}.json", std::process::id()));
     let _ = std::fs::remove_file(&reply);
     ask(d, &for_view(name), &json!({"do": "read", "all": all, "reply": reply})).map_err(|e| e.to_string())?;
     for _ in 0..60 {

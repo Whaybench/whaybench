@@ -58,6 +58,7 @@ fn link_text(l: &Link) -> String {
 
 fn print_read(v: &Value) {
     if let Some(e) = v.get("error").and_then(Value::as_str) { println!("{}", wb_core::i18n::f("read-failed-2", &[("e", (e).to_string())])); return; }
+    if let Some(l) = v.get("link").and_then(Value::as_str) { println!("{l}"); }
     println!("{}", wb_core::i18n::f("address", &[("a1", (v["url"].as_str().unwrap_or("")).to_string())]));
     println!("{}", wb_core::i18n::f("title", &[("a1", (v["title"].as_str().unwrap_or("")).to_string())]));
     if let Some(p) = v.get("page").and_then(Value::as_str) { println!("{}", wb_core::i18n::f("page", &[("p", (p).to_string()), ("a1", (v["pages"].as_str().unwrap_or("?")).to_string())])); }

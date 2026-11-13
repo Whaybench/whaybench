@@ -11,6 +11,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Codex is now an agent add-on (`addons/agents/codex/`): its command, settings folder, hook and MCP templates and
   guidance are files, not code, so other agents with Claude Code-style hooks and MCP can be added as folders.
   See `addons/agents/README.md`.
+- `whaybench-view read` starts with whose page the view shows (the session it follows now, the session it stays on,
+  or a page pinned for all), and the view's link line names the agent and session. Every session reads what the
+  person sees, so an agent can tell another session's page from its own. The read's reply file moved into `view/`,
+  where a sandboxed agent may remove it.
 - Conversation tab titles and the input panel name the agent and the session's number (`Codex 01a1d60c`), so
   side-by-side conversations are told apart at a glance. Tab names are cut at 44 characters instead of 32.
 - The agent is chosen per conversation: the session menu has `New conversation · <agent>` for Claude Code and each

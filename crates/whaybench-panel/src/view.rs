@@ -155,8 +155,8 @@ fn display(v: &V) {
             v.place.set_text(&format!("{title} · {}/{}", v.hist.pos + 1, v.hist.items.len()));
         }
         None => {
-            let id = short(v.followed.as_deref());
-            let t = wb_core::i18n::f("session-no-view", &[("id", (id).to_string())]);
+            let id = v.followed.as_deref().map_or_else(|| short(None), |s| wb_core::agents::session_label(&v.d.root, s));
+            let t = wb_core::i18n::f("session-no-view", &[("id", id)]);
             v.web.load_html(&format!("<!doctype html><meta charset='utf-8'><style>{}</style>", page_style(&v.d)), None);
             v.place.set_text(&t);
         }
@@ -169,8 +169,11 @@ fn display(v: &V) {
 fn retitle(v: &V) {
     let name = view::panel_title(&v.name);
     let (tie, what) = match &v.link {
-        Link::Follow => (wb_core::i18n::t("linked-to-session-tab").to_string(), String::new()),
-        Link::Session(s) => { let n = session_label(&v.d, s, 18); (n.clone(), n) }
+        Link::Follow => (match &v.followed {
+            Some(s) => format!("{} · {}", wb_core::i18n::t("linked-to-session-tab"), wb_core::agents::session_label(&v.d.root, s)),
+            None => wb_core::i18n::t("linked-to-session-tab").to_string(),
+        }, String::new()),
+        Link::Session(s) => { let n = wb_core::agents::session_label(&v.d.root, s); (n.clone(), n) }
         Link::Target(_, t) => { let n: String = t.chars().take(20).collect(); (wb_core::i18n::f("pinned-view-2", &[("n", (n).to_string())]), n) }
     };
     v.tie.set_label(&wb_core::i18n::f("link", &[("tie", (tie).to_string())]));
@@ -269,14 +272,27 @@ fn link_menu(s: &Shared) {
 }
 
 /// `whaybench-view read`: the page's own text, without going through a screen picture.
+/// For the agent that reads: whose page this view shows, as two sessions read the same view.
+fn link_note(v: &V) -> String {
+    match &v.link {
+        Link::Follow => match &v.followed {
+            Some(s) => wb_core::i18n::ai_f("view-link-follow", &[("session", wb_core::agents::session_label(&v.d.root, s))]),
+            None => wb_core::i18n::ai("view-link-follow-none").to_string(),
+        },
+        Link::Session(s) => wb_core::i18n::ai_f("view-link-session", &[("session", wb_core::agents::session_label(&v.d.root, s))]),
+        Link::Target(..) => wb_core::i18n::ai("view-link-page").to_string(),
+    }
+}
+
 fn answer_read(v: &V, all: bool, reply: String) {
     let script = READ_SCRIPT.replace("ALL", if all { "true" } else { "false" });
     let url = v.hist.current().map(|c| c.0.clone()).unwrap_or_default();
+    let link = link_note(v);
     // The engine's PDF viewer keeps its text to itself, so a PDF is read from the file.
     if !view::is_web(&url) && url.to_lowercase().ends_with(".pdf") {
         let text = std::process::Command::new("pdftotext").args(["-layout", &url, "-"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
         let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-        let out = json!({"url": url, "title": title_for(&url), "selected": [], "text": lines});
+        let out = json!({"url": url, "title": title_for(&url), "selected": [], "text": lines, "link": link});
         let tmp = format!("{reply}.tmp");
         if std::fs::write(&tmp, out.to_string()).is_ok() { let _ = std::fs::rename(&tmp, &reply); }
         return;
@@ -287,6 +303,7 @@ fn answer_read(v: &V, all: bool, reply: String) {
             Err(e) => json!({"error": e.to_string()}),
         };
         out["url"] = json!(url);
+        out["link"] = json!(link);
         let tmp = format!("{reply}.tmp");
         if std::fs::write(&tmp, out.to_string()).is_ok() { let _ = std::fs::rename(&tmp, &reply); }
     });
@@ -339,6 +356,8 @@ fn tick(s: &Shared) {
     if !matches!(v.link, Link::Target(..)) && now != v.followed {
         record::detail("view", "session changed", &[("view", name.clone()), ("session", short(now.as_deref()))]);
         switch(&mut v);
+        // The link line names the session followed now.
+        retitle(&v);
     } else if incoming(&mut v) {
         display(&v);
         v.page = None;

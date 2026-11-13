@@ -55,3 +55,7 @@ carried-open = Open questions and ideas:{"\u000A"}{ $lines }
 carried-later = Put-off work:{"\u000A"}{ $lines }
 carried-decided = Decided (recent):{"\u000A"}{ $lines }
 rewind-note = The conversation was rewound (/rewind) since your last reply. The conversation map was not: nodes added, closed or decided after the point rewound to may no longer hold. Check the map (show: true); mark nodes whose result changed with state "changed", reopen questions that are unsettled again, and remove nodes for work that no longer exists.
+view-link-follow = View: follows the conversation the person chose, now { $session }. What you read is what the person sees, which may be another session's page.
+view-link-follow-none = View: follows the conversation the person chose; none is chosen.
+view-link-session = View: stays on { $session }, whatever conversation the person chose.
+view-link-page = View: pinned to this page by the person, whatever conversation is chosen; every session reads the same page.
