@@ -10,6 +10,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 - Windows: Korean input stopped after Whaybench restarted. The fcitx5 Whaybench starts now keeps running when its
   first display closes, so the restarted Whaybench attaches to a live one.
+- Starting Whaybench while it already runs on the same data folder started a second one beside it, whose tabs
+  then closed conversations resumed in the new one (one tab per conversation). The new start now takes the place of
+  the running one, as a restart does: it is asked to quit, keeping its panels and tabs, and stopped if it does not.
 
 ## [0.5.4] - 2026-11-13
 

@@ -122,6 +122,7 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     unsafe { std::env::set_var(paths::ENV_DATA_DIR, &data.root) };
     record::open(&data, "whaybench", &run_id, if std::env::var_os(ENV_AGAIN).is_some() { "again" } else { "first" });
     record::install_panic_hook();
+    replace_running(&data);
     wb_core::sessions::save_lost_maps(&data);
     wb_core::sessions::prune(&data);
     wb_core::map::empty_old_trash(&data.root);
@@ -136,13 +137,39 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     result.map(|_| ())
 }
 
-/// Becomes the program again, the newest build if it was replaced; on failure the program just ends.
-fn start_again(data: &paths::Data, args: Vec<String>) {
-    use std::os::unix::process::CommandExt;
-    // The panel's Firefox ends with the window; the new one must find its profile free.
+/// A second launch on the same data folder takes the place of the Whaybench running there, as a restart does: that
+/// one is asked to quit (saving its panels and tabs, which this one opens again), and stopped if it does not. Two
+/// would share the requests and the tabs, and one whose window was lost could not be reached.
+fn replace_running(data: &paths::Data) {
+    let Some(old) = std::fs::read_to_string(data.instance()).ok().and_then(|t| serde_json::from_str::<ctl::Instance>(&t).ok()) else { return };
+    // The pid may have been taken by another program since.
+    let alive = || std::fs::read_link(format!("/proc/{}/exe", old.pid)).is_ok_and(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("whaybench")));
+    if old.pid == std::process::id() || !alive() { return; }
+    record::decide("run", "replacing the running one", "it was started again on the same data folder", &[("pid", old.pid.to_string()), ("run", old.run.clone())]);
+    let _ = ctl::post(data, &ctl::Request::Quit);
+    for (signal, secs) in [(None, 10), (Some("-TERM"), 3), (Some("-KILL"), 2)] {
+        if let Some(signal) = signal {
+            record::warn("run", "running one stopped", "it did not quit when asked", &[("pid", old.pid.to_string()), ("signal", signal.into())]);
+            let _ = std::process::Command::new("kill").args([signal, &old.pid.to_string()]).status();
+        }
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        while alive() && std::time::Instant::now() < until { std::thread::sleep(std::time::Duration::from_millis(100)); }
+        if !alive() { break; }
+    }
+    free_firefox(data);
+}
+
+/// The panel's Firefox ends with the window; the next run must find its profile free.
+fn free_firefox(data: &paths::Data) {
     let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while wb_core::view::firefox_pid(data).is_some() && std::time::Instant::now() < until { std::thread::sleep(std::time::Duration::from_millis(100)); }
     if let Some(pid) = wb_core::view::firefox_pid(data) { let _ = std::process::Command::new("kill").arg(pid.to_string()).status(); }
+}
+
+/// Becomes the program again, the newest build if it was replaced; on failure the program just ends.
+fn start_again(data: &paths::Data, args: Vec<String>) {
+    use std::os::unix::process::CommandExt;
+    free_firefox(data);
     let exe = std::env::current_exe().map(|p| std::path::PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)"))).unwrap_or_else(|_| "whaybench".into());
     let e = std::process::Command::new(exe).args(args).env_remove(record::ENV_RUN).env(ENV_AGAIN, "1").exec();
     record::error("run", "restart failed", &[("error", e.to_string())]);
