@@ -245,10 +245,10 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
     }
     items.menu.append_section(None, &whole.menu);
     let keep = items.sub();
-    {
+    for (id, name) in wb_core::agents::list(&d.root) {
         let (d2, p2, t2) = (d.clone(), path.to_string(), title.to_string());
-        keep.add(wb_core::i18n::t("new-conversation-from-this-map"), true, move || {
-            crate::common::ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "new".into(), p2.clone()]);
+        keep.add(&wb_core::i18n::f("new-conversation-from-this-map-with", &[("name", name)]), true, move || {
+            crate::common::ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "new".into(), "--agent".into(), id.clone(), p2.clone()]);
             status::say(&d2, &wb_core::i18n::f("new-session-from-imported-map", &[("title", cut(&t2, 24))]), 8);
         });
     }

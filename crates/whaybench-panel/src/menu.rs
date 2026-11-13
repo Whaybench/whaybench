@@ -87,9 +87,9 @@ fn session_args(d: &Data, rest: &[&str]) -> Vec<String> {
     a
 }
 
-fn new_tab_with_map(d: &Data) {
+fn new_tab_with_map(d: &Data, agent: &str) {
     match sessions::target(d) {
-        Some(s) => ctl(d, session_args(d, &["new", &s])),
+        Some(s) => ctl(d, session_args(d, &["new", "--agent", agent, &s])),
         None => status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6),
     }
 }
@@ -125,7 +125,10 @@ fn map_menu(d: &Data, k: &Maker) -> gio::Menu {
     { let d2 = d.clone(); k.add(&sec, wb_core::i18n::t("save-map"), move || status::send(&d2, "map", json!({"do": "export"}))); }
     m.append_section(None, &sec);
     let sec = gio::Menu::new();
-    { let d2 = d.clone(); k.add(&sec, wb_core::i18n::t("new-claude-tab-keep-map"), move || new_tab_with_map(&d2)); }
+    for (id, name) in wb_core::agents::list(&d.root) {
+        let d2 = d.clone();
+        k.add(&sec, &wb_core::i18n::f("new-tab-keep-map-with", &[("name", name)]), move || new_tab_with_map(&d2, &id));
+    }
     m.append_section(None, &sec);
     let sec = gio::Menu::new();
     {

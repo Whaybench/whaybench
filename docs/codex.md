@@ -64,10 +64,18 @@ itself, dropping what the agent sent for them. A duplicate id, a missing parent 
 parent loop or a bad id is refused before saving, and the stored map stays. Removing the current node clears
 `current`.
 
+## Sandbox and usage
+
+Codex runs with `--sandbox workspace-write`. The data folder is one of its writable roots
+(`sandbox_workspace_write.writable_roots`), so `whaybench-view`, `whaybench-project` and `whaybench-files` can leave their
+requests there. Codex has no status line: when a turn ends, the hook reads the last `token_count` line of Codex's
+session file for the context and the 5-hour and weekly windows. The notifications panel shows Codex's windows for Codex
+sessions and Claude Code's for Claude Code sessions.
+
 ## Not yet
 
 Holding back a patch to a file the person changed or has open in vim (Claude Code's edits are), files read
-through shell commands, usage and limits, requests to a Codex session without a tab, the whole turn's answer,
+through shell commands, requests to a Codex session without a tab, the whole turn's answer,
 taking over another session's map, filling a map style's fields.
 
 ## Tests

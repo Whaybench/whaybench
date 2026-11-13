@@ -9,8 +9,9 @@
     "copy": ["auth.json"],
     "copy_keys": { "config.toml": ["model", "model_reasoning_effort"] }
   },
-  "merge": { "config.toml": "mcp.toml" },
+  "merge": { "config.toml": "config.toml" },
   "write": { "hooks.json": "hooks.json" },
   "context": "context.md",
-  "trust": "/hooks"
+  "trust": "/hooks",
+  "usage": "codex-rollout"
 }

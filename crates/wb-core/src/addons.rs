@@ -26,7 +26,7 @@ const BUNDLED: [(&str, &str, &str); 21] = [
     ("themes/wada-jasper", "theme.json", include_str!("../../../addons/themes/wada-jasper/theme.json")),
     ("project-docs/wbs", "WBS.md", include_str!("../../../addons/project-docs/wbs/WBS.md")),
     ("agents/codex", "agent.json", include_str!("../../../addons/agents/codex/agent.json")),
-    ("agents/codex", "mcp.toml", include_str!("../../../addons/agents/codex/mcp.toml")),
+    ("agents/codex", "config.toml", include_str!("../../../addons/agents/codex/config.toml")),
     ("agents/codex", "hooks.json", include_str!("../../../addons/agents/codex/hooks.json")),
     ("agents/codex", "context.md", include_str!("../../../addons/agents/codex/context.md")),
 ];

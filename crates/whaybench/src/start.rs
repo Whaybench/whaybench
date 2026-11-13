@@ -135,9 +135,8 @@ pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<String, S
 fn agent_env(open: &TermOpen, data: &paths::Data) -> Result<String, String> {
     let of_session = || [&open.attach, &open.resume, &open.map_from].into_iter().flatten()
         .find_map(|s| wb_core::sessions::record_of(data, s)?.get("agent")?.as_str().map(String::from));
-    let Some(id) = open.agent.clone().filter(|a| a != wb_core::agents::CLAUDE).or_else(of_session) else {
-        return Ok(format!("{}={}", wb_core::agents::ENV_AGENT, wb_core::agents::CLAUDE));
-    };
+    let id = open.agent.clone().or_else(of_session).unwrap_or_else(|| wb_core::agents::CLAUDE.into());
+    if id == wb_core::agents::CLAUDE { return Ok(format!("{}={id}", wb_core::agents::ENV_AGENT)); }
     let agent = wb_core::agents::load(&data.root, &id).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut env = format!("{}={id}", wb_core::agents::ENV_AGENT);

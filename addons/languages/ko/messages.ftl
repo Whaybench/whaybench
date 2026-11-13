@@ -151,7 +151,7 @@ range-decision-return = <style>{ $show }</style>{ $radios }<div class='bar'>회�
 restart-tabs-kept = 재시작
 restarting-tabs-come-back-shortly = 재시작 중 · 탭 복원 대기
 new-tab-keep-map-not-opened = 새 탭 (지도 유지) 미실행 · 선택된 세션 없음
-new-claude-tab-keep-map = 현재 지도로 새 대화
+new-tab-keep-map-with = 현재 지도로 새 대화 · { $name }
 end-this-tab-s-session = 현재 탭 세션 종료
 reset-layout = 배치 초기화
 new-view = 새 보기 패널
@@ -395,7 +395,7 @@ themeset-field-edge = 끌기 선 색
 themeset-joint-always = 항상
 themeset-joint-active = 끌기 중
 themeset-joint-never = 숨김
-new-conversation-from-this-map = 이 지도로 새 대화
+new-conversation-from-this-map-with = 이 지도로 새 대화 · { $name }
 web-back = 뒤로
 web-forward = 앞으로
 web-stop = 중지

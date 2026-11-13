@@ -1,3 +1,5 @@
+# Written into Codex's config.toml in its Whaybench folder each time a Codex tab opens.
+
 # The map tool as Codex's MCP server. Codex passes an MCP server only the variables it lists.
 [mcp_servers.whaybench]
 command = "{exe}"
@@ -7,3 +9,7 @@ env_vars = ["WHAYBENCH_TAB"]
 # The map is kept every turn, so its tool runs without asking each time.
 [mcp_servers.whaybench.tools.context_map]
 approval_mode = "approve"
+
+# Whaybench's commands (whaybench-view, whaybench-project, whaybench-files) write their requests in the data folder.
+[sandbox_workspace_write]
+writable_roots = ["{data}"]

@@ -31,7 +31,8 @@ An agent without these cannot keep the map or the session list.
 | `merge` | no | `{ "settings file": "template" }`: the template's keys are written into the settings file in `home`; the person's other keys stay. TOML only |
 | `write` | no | `{ "settings file": "template" }`: the template becomes the whole settings file in `home`, each start. JSON or TOML |
 | `context` | no | A text file given to the agent at session start and with each prompt. English: only the agent reads it |
-| `trust` | no | The command inside the agent where the person trusts the hooks; Whaybench says so when it starts |
+| `trust` | no | The command inside the agent where the person trusts the hooks; Whaybench says so when its tab opens |
+| `usage` | no | Where the agent's context and plan usage are read, for the notifications panel. `codex-rollout`: the last `token_count` line of Codex's session file, read when a turn ends. Without it the panel shows no usage for the agent's sessions |
 
 In templates, these are filled in text values: `{exe}` the Whaybench program, `{data}` the data folder, `{hook}` the hook command (`'<exe>' hook <id>`). In `context.md`: `{session}`.
 

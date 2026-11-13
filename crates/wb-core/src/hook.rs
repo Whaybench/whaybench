@@ -57,7 +57,12 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     let carried = if name == "SessionStart" { adopt_fork(data, sid, a, event).or_else(|| if starting { carry_in(data, sid) } else { None }) } else { None };
     let tool = event["tool_name"].as_str().unwrap_or("");
     match name {
-        "Stop" => stop(data, a, sid, event, &mut record)?,
+        "Stop" => {
+            stop(data, a, sid, event, &mut record)?;
+            if a.name != crate::agents::CLAUDE && crate::agents::load(data, a.name).is_ok_and(|g| g.usage.as_deref() == Some("codex-rollout")) {
+                crate::usage::from_codex_rollout(data, sid, a.name, event);
+            }
+        }
         "PreToolUse" if is_shell(tool) => write_json(&state_file(data, "bash", sid), &json!(now_ms()))?,
         "PreToolUse" => if let Some(reason) = held_back(data, sid, a, tool, &event["tool_input"]) {
             return Ok(json!({"hookSpecificOutput": {"hookEventName": name, "permissionDecision": "deny", "permissionDecisionReason": reason}}));

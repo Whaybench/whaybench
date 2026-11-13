@@ -14,6 +14,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - The agent is chosen per conversation: the session menu has `New conversation · <agent>` for Claude Code and each
   agent add-on, Claude Code and Codex tabs run side by side, a session opens again with its own agent, and the session
   list shows each session's agent. The `--agent` option is gone.
+- New conversations from a map (the current one or an imported one) also offer each agent.
+
+### Fixed
+
+- In a Codex tab, `whaybench-view`, `whaybench-project` and `whaybench-files` failed with "Read-only file system": the
+  data folder is now one of Codex's writable roots.
+- A Codex tab showed Claude Code's usage. Codex's context and plan windows now come from its session file, and each
+  agent's sessions show that agent's plan; a session not heard from yet shows no context instead of another's.
 - Claude Code in a conversation tab answers in the interface language (its `language` setting, given at start with
   `--settings`), so long tool work no longer drifts into English. A language set in `~/.claude/settings.json` is kept.
 

@@ -38,6 +38,7 @@ pub struct Agent {
     write: BTreeMap<String, String>,
     context: Option<String>,
     pub trust: Option<String>,
+    pub usage: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -277,8 +278,9 @@ mod tests {
         assert_eq!(mcp["command"].as_str(), exe.to_str(), "a path with a quote stays one value");
         assert_eq!((mcp["args"][0].as_str(), mcp["args"][2].as_str(), mcp["env_vars"][0].as_str()), (Some("mcp"), data.to_str(), Some("WHAYBENCH_TAB")), "the map tool is Codex's MCP server");
         assert_eq!(mcp["tools"]["context_map"]["approval_mode"].as_str(), Some("approve"), "kept every turn without asking");
+        assert_eq!(config["sandbox_workspace_write"]["writable_roots"][0].as_str(), data.to_str(), "Whaybench's commands can write their requests");
         assert_eq!(fs::metadata(home.join("config.toml"))?.permissions().mode() & 0o777, 0o600, "still private after the server is added");
-        assert_eq!(config.len(), 3, "model, effort and the MCP server; nothing else is copied");
+        assert_eq!(config.len(), 4, "model, effort, the MCP server and the sandbox; nothing else is copied");
         fs::write(home.join("auth.json"), "refreshed-login")?;
         codex.prepare(&data, &exe)?;
         assert_eq!(fs::read_to_string(home.join("auth.json"))?, "refreshed-login");

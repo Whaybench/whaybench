@@ -151,7 +151,7 @@ range-decision-return = <style>{ $show }</style>{ $radios }<div class='bar'>Rang
 restart-tabs-kept = Restart
 restarting-tabs-come-back-shortly = Restarting · Restoring tabs
 new-tab-keep-map-not-opened = New tab (keep map) not opened · No session selected
-new-claude-tab-keep-map = New conversation from this map
+new-tab-keep-map-with = New conversation from this map · { $name }
 end-this-tab-s-session = End this tab's session
 reset-layout = Reset layout
 new-view = New view panel
@@ -395,7 +395,7 @@ themeset-field-edge = Drag line colour
 themeset-joint-always = Always
 themeset-joint-active = While dragging
 themeset-joint-never = Never
-new-conversation-from-this-map = New conversation from this map
+new-conversation-from-this-map-with = New conversation from this map · { $name }
 web-back = Back
 web-forward = Forward
 web-stop = Stop
