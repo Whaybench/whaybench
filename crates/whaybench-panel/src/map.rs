@@ -279,11 +279,10 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
             items.add(wb_core::i18n::t("open-source-imported"), true, move || open_node_source(&d2, &src));
         }
         // The person's important mark, written to this map as theirs.
-        if let Some(sid) = data.get("sessionId").and_then(Value::as_str).map(String::from) {
+        if data.get("sessionId").and_then(Value::as_str).is_some() {
             let marked = n.get("mark").is_some();
             let (d2, id2) = (d.clone(), s(n, "nid").to_string());
             items.add(wb_core::i18n::t(if marked { "notify-unmark" } else { "notify-mark" }), true, move || {
-                let _ = &sid;
                 if let Err(e) = wb_core::map::person(&d2.root, json!([{"id": id2, "mark": if marked { Value::Null } else { json!("important") }}])) {
                     status::say(&d2, &wb_core::i18n::f("notify-not-written", &[("e", e.to_string())]), 8);
                 }
@@ -500,7 +499,7 @@ fn style_chosen(d: &Data, panel: &Rc<RefCell<Panel>>, scope: Option<&(String, St
         let d2 = d.clone();
         std::thread::spawn(move || crate::mapfill::run(&d2, &session, &style, root.as_deref()));
     } else {
-        let text = mapstyles::draw_request(&style, d, &session, scope.map(|x| (x.0.as_str(), x.1.as_str())));
+        let text = mapstyles::draw_request(&style, &session, scope.map(|x| (x.0.as_str(), x.1.as_str())));
         if sessions::queue_prompt(d, &session, &text) { status::say(d, &wb_core::i18n::f("map-style-display-request-sent-session", &[("a1", (style.name).to_string()), ("a2", (cut(&session, 8)).to_string())]), 6); }
         else { status::say(d, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", (cut(&session, 8)).to_string())]), 8); }
     }

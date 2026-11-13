@@ -93,7 +93,13 @@ pub fn list(data: &Path, sid: &str, limit: usize) -> Vec<String> {
         for n in db::nodes(&conn, &format!("1 ORDER BY {RECENT} LIMIT {cap}"), &[])? { push(&n, &mut out); }
         Ok(out)
     };
-    inner().unwrap_or_default()
+    inner().unwrap_or_else(|e| unread("list", e))
+}
+
+/// The memory could not be read: said in the log, so an empty list is not taken for "nothing there".
+fn unread(what: &str, e: Box<dyn std::error::Error>) -> Vec<String> {
+    crate::log::warn("memory", "memory not read", &e.to_string(), &[("for", what.to_string())]);
+    Vec::new()
 }
 
 fn seen_file(data: &Path, sid: &str) -> PathBuf { data.join("cache").join("memory-seen").join(sid) }
@@ -119,14 +125,16 @@ pub fn delta(data: &Path, sid: &str) -> Vec<String> {
         let ids: HashMap<&str, &str> = own.iter().filter_map(|n| Some((n["nid"].as_str()?, n["id"].as_str()?))).collect();
         let own_mem: HashSet<&str> = own.iter().filter_map(|n| n.get("memid")?.as_str()).collect();
         let mine = by_file(&conn, sid)?.0;
-        Ok(db::events(&conn, "source != ?", &[&format!("session/{sid}")])?.iter().filter(|e| after(e, since))
+        // Only what came after the session last looked is read (the store keeps times as RFC 3339 in UTC, which sort as text).
+        let from = chrono::DateTime::from_timestamp_millis(since).map(|t| t.to_rfc3339()).unwrap_or_default();
+        Ok(db::events(&conn, "source != ? AND time >= ?", &[&format!("session/{sid}"), &from])?.iter().filter(|e| after(e, since))
             .filter(|e| e["nid"].as_str().is_some_and(|n| ids.contains_key(n)) || e["memid"].as_str().is_some_and(|m| own_mem.contains(m)) || e["path"].as_str().is_some_and(|p| mine.contains(p)))
             // The node as this session knows it: its id on this map, else its memory id.
             .map(|e| { let node = e["nid"].as_str().and_then(|n| ids.get(n).copied()).or(e["memid"].as_str()).unwrap_or("");
                 format!("{} · {} · {node} · {}", e["type"].as_str().unwrap_or(""), e["source"].as_str().unwrap_or(""), e["data"]) })
             .collect())
     };
-    let out = inner().unwrap_or_default();
+    let out = inner().unwrap_or_else(|e| unread("changes", e));
     mark_seen(data, sid);
     out
 }

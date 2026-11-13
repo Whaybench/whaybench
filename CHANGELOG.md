@@ -6,6 +6,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A whole regrouping of a map by the agent took the person's mark off its nodes.
+- A choice made in the notifications panel on a node deleted for good a moment before made a new node named by a number.
+- Reading the memory took the store's write lock, so programs that only read made each other wait.
+- Each prompt read every event of the other sessions to find the new ones.
+- The memory failing to be read gave an empty list without a word in the log.
+
 ## [0.5.3] - 2026-11-13
 
 The memory keeps every map node once, in a database, as it was meant to: a node no longer disappears from the memory

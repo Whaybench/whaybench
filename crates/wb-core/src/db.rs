@@ -72,16 +72,22 @@ fn open_once(data: &Path) -> Result<Connection> {
     let mut conn = Connection::open(dir.join("memory.db"))?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
-    // Two programs may both find a new file: only the one that gets the write lock first makes the tables.
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let found: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let version = |c: &Connection| c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0));
+    let mut found = version(&conn)?;
+    // Only a new file takes the write lock: a program that only reads does not make the others wait.
     if found == 0 {
-        tx.execute_batch(SCHEMA)?;
-        tx.pragma_update(None, "user_version", VERSION)?;
-    } else if found > VERSION {
+        // Two programs may both find a new file: only the one that gets the lock first makes the tables.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if version(&tx)? == 0 {
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "user_version", VERSION)?;
+        }
+        tx.commit()?;
+        found = version(&conn)?;
+    }
+    if found > VERSION {
         return Err(format!("memory.db was written by a newer Whaybench (schema {found}, this program knows {VERSION})").into());
     }
-    tx.commit()?;
     Ok(conn)
 }
 

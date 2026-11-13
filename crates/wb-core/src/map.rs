@@ -424,16 +424,20 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
     let mut map = view_of(&tx, &session, sid.unwrap_or(""))?;
     validate(&map)?;
     let before = map["nodes"].as_array().cloned().unwrap_or_default();
+    // A change by node number is to nodes that exist: one that is gone (deleted for good meanwhile) is not made anew.
+    if let Scope::Nodes(nids) = &scope {
+        if let Some(gone) = nids.iter().find(|n| !before.iter().any(|b| &b["id"] == *n)) { return Err(format!("no such node: {gone}").into()); }
+    }
     let stamp = json!({"at":now_ms(),"turn":map.get("turn").and_then(Value::as_u64).unwrap_or(0)});
     let mut nodes = if let Some(replacement) = input.get("nodes") {
         validate(&json!({"nodes":replacement}))?;
         let mut nodes = Vec::new();
         upsert(&mut nodes, replacement, &stamp, false)?;
         // A regrouping names the same nodes again: each keeps what the program gave it (its number, its memory id
-        // unless the agent sent one, the session it came from).
+        // unless the agent sent one, the session it came from) and the person's mark, which only the person takes off.
         for n in &mut nodes {
             let Some(old) = before.iter().find(|o| o["id"] == n["id"]) else { continue };
-            for key in ["nid", "origin"] { if let Some(v) = old.get(key) { n[key] = v.clone(); } }
+            for key in ["nid", "origin", "mark"] { if let Some(v) = old.get(key) { n[key] = v.clone(); } }
             if replacement.as_array().into_iter().flatten().find(|r| r["id"] == n["id"]).is_some_and(|r| r.get("memid").is_none()) {
                 if let Some(m) = old.get("memid") { n["memid"] = m.clone(); }
             }
@@ -868,6 +872,10 @@ mod tests {
         let o = nid(dir.path(), "s", "o");
         person(dir.path(), json!([{"id": o, "mark":"important"}]))?;
         assert_eq!(get(dir.path(), "s", "o").unwrap()["mark"], json!("important"), "the person may mark");
+        assert!(person(dir.path(), json!([{"id": "no-such-node", "state": "done"}])).is_err(), "a node that is gone is not made anew");
+        assert_eq!(crate::db::nodes(&crate::db::open(dir.path())?, "label = 'no-such-node'", &[])?.len(), 0);
+        command(dir.path(), "s", Some(json!({"nodes": [{"id":"q","label":"question"},{"id":"o","label":"option","parent":"q"},{"id":"d","label":"decided","state":"done"}]})))?;
+        assert_eq!(get(dir.path(), "s", "o").unwrap()["mark"], json!("important"), "a regrouping leaves the person's mark");
         person(dir.path(), json!([{"id": o, "mark":null}]))?;
         assert!(get(dir.path(), "s", "o").unwrap().get("mark").is_none(), "and take it off");
         assert_eq!(get(dir.path(), "s", "o").unwrap()["parent"], "q", "the person's change leaves the rest as it was");

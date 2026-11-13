@@ -156,9 +156,20 @@ mod tests {
             fs::create_dir_all(d.root.join("answer-log")).unwrap();
             fs::write(d.root.join("answer-log").join(format!("{id}.jsonl")), "x\n").unwrap();
         }
+        // How nodes changed is kept as long as the conversations; the nodes themselves stay.
+        let conn = crate::db::open(&d.root).unwrap();
+        crate::db::node_put(&conn, &serde_json::json!({"nid": "n1", "memid": "m1", "label": "kept"})).unwrap();
+        let at = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).unwrap().to_rfc3339();
+        for (id, ms) in [("old", now - 40 * day), ("new", now - day)] {
+            crate::db::event_add(&conn, &serde_json::json!({"id": id, "source": "person", "type": "node.changed", "time": at(ms), "nid": "n1"})).unwrap();
+        }
+        let left = || crate::db::events(&conn, "1", &[]).unwrap().iter().map(|e| e["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert_eq!(prune(&d), 0, "no limit by default");
+        assert_eq!(left().len(), 2);
         fs::write(d.root.join("settings.json"), r#"{"keep_days":30}"#).unwrap();
         assert_eq!(prune(&d), 1);
+        assert_eq!(left(), ["new"], "the event older than the limit went");
+        assert!(crate::db::node_get(&conn, "n1").unwrap().is_some(), "the node stays");
         assert!(!d.root.join("a.json").exists() && !d.root.join("answer-log/b.jsonl").exists(), "every number of it, map and answers");
         assert!(d.root.join("c.json").exists() && record_of(&d, "c").is_some());
     }

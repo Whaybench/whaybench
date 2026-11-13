@@ -64,10 +64,9 @@ fn restore(d: &Data, action: &str) {
     }
 }
 
-/// Gone for good: the given trash items (session, node id).
-fn purge(d: &Data, items: &[(String, String)]) {
-    let nids: Vec<String> = items.iter().map(|(_, n)| n.clone()).collect();
-    if let Err(e) = wb_core::map::purge(&d.root, &nids) { say_error(d, e); }
+/// Gone for good: the given deleted nodes, by number.
+fn purge(d: &Data, nids: &[String]) {
+    if let Err(e) = wb_core::map::purge(&d.root, nids) { say_error(d, e); }
 }
 
 fn popup(list: &gtk::ListBox, menu: &gio::Menu, group: &gio::SimpleActionGroup, x: f64, y: f64) {
@@ -157,13 +156,13 @@ fn confirm_purge(win: &gtk::ApplicationWindow, d: &Data, nid: &str, then: impl F
         // A node not deleted yet is deleted first (alone: what is under it moves up), then it goes for good.
         let deleted = memory::show(&d2.root, &n2)["nodes"][0]["state"] == "removed";
         if !deleted { if let Err(e) = wb_core::map::trash(&d2.root, &n2, false) { say_error(&d2, e); } }
-        purge(&d2, &[(String::new(), n2.clone())]);
+        purge(&d2, std::slice::from_ref(&n2));
         then();
     });
 }
 
-/// The person's choice for one node, written to its session's map as theirs.
-fn choose(d: &Data, _sid: &str, node: &str, change: Value) {
+/// The person's choice for one node (by its number), recorded as theirs.
+fn choose(d: &Data, node: &str, change: Value) {
     let mut c = change;
     c["id"] = json!(node);
     if let Err(e) = wb_core::map::person(&d.root, json!([c])) { say_error(d, e); }
@@ -229,8 +228,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 g.set_state(gtk::EventSequenceState::Claimed);
                 let (d2, again, win2) = (d.clone(), again.clone(), win.clone());
                 item(&menu, &group, "empty", "notify-empty-trash", move || {
-                    let all: Vec<(String, String)> = memory::board(&d2.root, None)["trash"].as_array().into_iter().flatten()
-                        .map(|i| (i["session"].as_str().unwrap_or("").to_string(), i["node"]["id"].as_str().unwrap_or("").to_string())).collect();
+                    let all: Vec<String> = memory::board(&d2.root, None)["trash"].as_array().into_iter().flatten()
+                        .filter_map(|i| i["node"]["id"].as_str().map(String::from)).collect();
                     let (d3, again) = (d2.clone(), again.clone());
                     confirm(&win2, &wb_core::i18n::f("purge-all-confirm", &[("n", all.len().to_string())]), &[], move || { purge(&d3, &all); again(); });
                 });
@@ -253,8 +252,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             // From To approve: the agent's suggestion first, approved as the person's own choice or declined.
             if !suggested.is_empty() {
                 for (name, label, change) in [("approve", "notify-approve", json!({"state": suggested, "suggest": null})), ("decline", "notify-decline", json!({"suggest": null}))] {
-                    let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
-                    item(&menu, &group, name, label, move || { choose(&d2, &s2, &n2, change.clone()); again(); });
+                    let (d2, n2, again) = (d.clone(), node.clone(), again.clone());
+                    item(&menu, &group, name, label, move || { choose(&d2, &n2, change.clone()); again(); });
                 }
             }
             let items: [(&str, &str, Value); 5] = [
@@ -265,8 +264,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 ("mark", if marked == "true" { "notify-unmark" } else { "notify-mark" }, json!({"mark": if marked == "true" { Value::Null } else { json!("important") }})),
             ];
             for (name, label, change) in items {
-                let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
-                item(&menu, &group, name, label, move || { choose(&d2, &s2, &n2, change.clone()); again(); });
+                let (d2, n2, again) = (d.clone(), node.clone(), again.clone());
+                item(&menu, &group, name, label, move || { choose(&d2, &n2, change.clone()); again(); });
             }
             delete_menu(&menu, &group, &d, node, again.clone());
             let (d2, s2) = (d.clone(), sid.clone());
