@@ -1,5 +1,8 @@
-//! Updating from inside: the latest release is looked up on GitHub at start and every six hours, and Whaybench → About
-//! offers it when it is newer. Only for an install made by install.sh; a build from source updates itself with git.
+//! Updating from inside: the latest release is looked up on GitHub at start and every six hours. A newer one is
+//! downloaded and made ready by itself, and installed at the next start, before the window opens: installing it while
+//! Whaybench runs would give the running conversations' hooks the new program beside the old screen. Whaybench → About
+//! offers it too. `"auto_update": false` in settings.json leaves it to the person. Only for an install made by
+//! install.sh; a build from source updates itself with git.
 use std::{path::{Path, PathBuf}, process::{Command, Stdio}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use serde_json::{Value, json};
@@ -10,6 +13,8 @@ pub const REPO: &str = "https://github.com/Whaybench/whaybench";
 const EVERY: Duration = Duration::from_secs(6 * 3600);
 
 fn latest_file(d: &Data) -> PathBuf { d.cache().join("latest-release.json") }
+fn ready_dir(d: &Data) -> PathBuf { d.cache().join("update") }
+const PACKAGE: &str = "whaybench-x86_64-linux.tar.gz";
 
 fn now_ms() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_millis() as u64).unwrap_or(0) }
 
@@ -59,10 +64,72 @@ pub fn run(d: &Data) -> Result<(), String> {
     let _ = std::fs::create_dir_all(d.logs());
     let file = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     let err = file.try_clone().map_err(|e| e.to_string())?;
-    let status = Command::new("sh").arg("-c").arg(format!("curl -fsSL {REPO}/releases/latest/download/install.sh | sh"))
-        .stdin(Stdio::null()).stdout(file).stderr(err).status().map_err(|e| e.to_string())?;
+    let status = install_sh(&format!("curl -fsSL {REPO}/releases/latest/download/install.sh | sh"))
+        .stdout(file).stderr(err).status().map_err(|e| e.to_string())?;
     record::decide("update", "installed", "the person chose the update", &[("ok", status.success().to_string())]);
     if status.success() { Ok(()) } else { Err(format!("{}", log.display())) }
+}
+
+/// install.sh as the person would run it: with their umask, not Whaybench's private one.
+fn install_sh(script: &str) -> Command {
+    let mut c = Command::new("sh");
+    let umask = crate::paths::user_umask();
+    // SAFETY: umask is async-signal-safe.
+    unsafe { std::os::unix::process::CommandExt::pre_exec(&mut c, move || { libc::umask(umask); Ok(()) }); }
+    c.arg("-c").arg(script).stdin(Stdio::null());
+    c
+}
+
+/// Whether a newer release is fetched by itself: unless settings.json says `"auto_update": false`.
+pub fn automatic(d: &Data) -> bool {
+    std::fs::read_to_string(d.root.join("settings.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .is_none_or(|v| v["auto_update"] != false)
+}
+
+/// The release made ready for the next start, when it is newer than this program.
+pub fn ready(d: &Data) -> Option<String> {
+    if !installed_release() { return None; }
+    std::fs::read_to_string(ready_dir(d).join("version")).ok().map(|v| v.trim().to_string()).filter(|v| is_newer(v, env!("CARGO_PKG_VERSION")))
+}
+
+/// Downloads release `v` (its install.sh and package) and checks the package against its checksum, for the next start.
+/// Blocks for the download: run it off the screen's thread.
+pub fn fetch(d: &Data, v: &str) -> Result<(), String> {
+    if ready(d).as_deref() == Some(v) { return Ok(()); }
+    let part = d.cache().join("update.part");
+    let _ = std::fs::remove_dir_all(&part);
+    std::fs::create_dir_all(&part).map_err(|e| e.to_string())?;
+    for file in ["install.sh", PACKAGE, &format!("{PACKAGE}.sha256")] {
+        let ok = Command::new("curl").args(["-fsSL", "--max-time", "600", "-o", file, &format!("{REPO}/releases/download/v{v}/{file}")])
+            .current_dir(&part).stdin(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+        if !ok { return Err(format!("{file} of {v} did not download")); }
+    }
+    let checked = Command::new("sha256sum").args(["-c", "--quiet", &format!("{PACKAGE}.sha256")]).current_dir(&part)
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+    if !checked { let _ = std::fs::remove_dir_all(&part); return Err(format!("the package of {v} does not match its checksum")); }
+    std::fs::write(part.join("version"), v).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(ready_dir(d));
+    std::fs::rename(&part, ready_dir(d)).map_err(|e| e.to_string())?;
+    record::decide("update", "ready", "a newer release was found; it is installed at the next start", &[("version", v.to_string())]);
+    Ok(())
+}
+
+/// At start, before the window: installs the release made ready, with its own install.sh (output in update.log).
+/// True when it was installed and the program should start again as the new one. A ready release no longer newer
+/// (installed meanwhile from Whaybench → About) is removed.
+pub fn install_ready(d: &Data) -> bool {
+    let dir = ready_dir(d);
+    if !dir.exists() { return false; }
+    let Some(v) = ready(d) else { let _ = std::fs::remove_dir_all(&dir); return false };
+    let _ = std::fs::create_dir_all(d.logs());
+    let Ok(log) = std::fs::File::create(d.logs().join("update.log")) else { return false };
+    let Ok(err) = log.try_clone() else { return false };
+    let ok = install_sh("sh ./install.sh").current_dir(&dir).stdout(log).stderr(err).status().is_ok_and(|s| s.success());
+    // Once only: a failed one would hold up every start; the next check fetches it again.
+    let _ = std::fs::remove_dir_all(&dir);
+    if ok { record::decide("update", "installed", "a release was ready at start", &[("version", v)]); }
+    else { record::warn("update", "not installed", "install.sh failed at start; see update.log", &[("version", v)]); }
+    ok
 }
 
 #[cfg(test)]

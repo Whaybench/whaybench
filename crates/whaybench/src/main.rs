@@ -125,6 +125,7 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     record::open(&data, "whaybench", &run_id, if std::env::var_os(ENV_AGAIN).is_some() { "again" } else { "first" });
     record::install_panic_hook();
     replace_running(&data);
+    if wb_core::update::install_ready(&data) { start_again(&data, std::env::args().skip(1).collect()); }
     wb_core::sessions::save_lost_maps(&data);
     wb_core::sessions::prune(&data);
     wb_core::map::empty_old_trash(&data.root);

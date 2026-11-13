@@ -60,7 +60,10 @@ fn whaybench_menu(d: &Data, k: &Maker) -> gio::Menu {
     // The version, shown only: an item without an action cannot be chosen.
     let about = gio::Menu::new();
     about.append(Some(&format!("Whaybench {}", env!("CARGO_PKG_VERSION"))), None);
-    if let Some(v) = wb_core::update::newer(d) {
+    if let Some(v) = wb_core::update::ready(d) {
+        let d4 = d.clone();
+        k.add(&about, &wb_core::i18n::f("restart-to-update", &[("v", v)]), move || { let _ = status::post(&d4, &json!({"cmd": "restart"})); });
+    } else if let Some(v) = wb_core::update::newer(d) {
         let d4 = d.clone();
         k.add(&about, &wb_core::i18n::f("update-to", &[("v", v.clone())]), move || {
             status::say(&d4, &wb_core::i18n::f("updating", &[("v", v.clone())]), 120);
@@ -219,7 +222,7 @@ fn make(d: &Data) -> (gio::Menu, gio::SimpleActionGroup) {
 }
 
 /// What the menus depend on; they are made again only when it changes.
-fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {} {:?} {:?} {} {:?}", wb_core::update::newer(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), crate::mapstyles::current(d, "map"), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
+fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {} {:?} {:?} {} {:?}", wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), crate::mapstyles::current(d, "map"), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
 
 /// Whether one of the bar's menus is showing.
 fn menu_open(w: &gtk::Widget) -> bool {
@@ -248,8 +251,14 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     if wb_core::update::installed_release() {
         let d2 = d.clone();
         std::thread::spawn(move || {
-            wb_core::update::check(&d2, true);
-            loop { std::thread::sleep(std::time::Duration::from_secs(3600)); wb_core::update::check(&d2, false); }
+            let look = |at_start: bool| {
+                wb_core::update::check(&d2, at_start);
+                if let Some(v) = wb_core::update::newer(&d2).filter(|_| wb_core::update::automatic(&d2)) {
+                    if let Err(e) = wb_core::update::fetch(&d2, &v) { wb_core::log::warn("update", "not fetched", &e, &[]); }
+                }
+            };
+            look(true);
+            loop { std::thread::sleep(std::time::Duration::from_secs(3600)); look(false); }
         });
     }
     let (w, last) = (win.clone(), RefCell::new(signature(&d)));

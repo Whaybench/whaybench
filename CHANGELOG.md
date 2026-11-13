@@ -6,6 +6,18 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Updates come by themselves: a newer release found at start or in the six-hourly look is downloaded, checked against
+  its checksum and installed at the next start, before the window opens. The status line says when one is ready, and
+  Whaybench → About offers to restart for it. `"auto_update": false` in settings.json leaves updating to the person.
+- The input panel's hint also says Shift+Space switches the input language.
+
+### Fixed
+
+- On a desktop whose clipboard cannot be watched (WSLg), the ended `wl-paste` stayed as a zombie process; it is
+  waited for now, and the log says desktop copies do not come in.
+
 ## [0.5.5] - 2026-11-14
 
 Whaybench's files are for this account only, and fixes for Windows and for several sessions at once.
