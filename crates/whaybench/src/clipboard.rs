@@ -44,6 +44,11 @@ impl Bridge {
 
     /// A new desktop text, if one came since the last look; one this side sent out is not taken back.
     pub fn from_desktop(&mut self) -> Option<()> {
+        // A watcher that ended (a desktop without data-control, as WSLg) is waited for, or it stays a zombie.
+        if let Some(status) = self.watcher.as_mut().and_then(|c| c.try_wait().ok().flatten()) {
+            record::warn("clipboard", "desktop watch ended", "wl-paste --watch stopped; texts copied on the desktop do not come in", &[("status", status.to_string())]);
+            self.watcher = None;
+        }
         let text = fs::read_to_string(&self.inbox).ok()?;
         let _ = fs::remove_file(&self.inbox);
         let mut last = self.last.lock().unwrap();
