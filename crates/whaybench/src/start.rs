@@ -77,7 +77,7 @@ pub fn builtin_input_method(data: &paths::Data) -> bool {
 }
 
 /// Asks the running fcitx5 to attach to this display too; with none running (a WSL session has none), starts one on
-/// it. Off the main thread: fcitx5 connects back, which needs the event loop running.
+/// it that keeps running after it. Off the main thread: fcitx5 connects back, which needs the event loop running.
 pub fn attach_input_method(socket: &OsStr) {
     let path = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_default().join(socket);
     std::thread::spawn(move || {
@@ -85,7 +85,9 @@ pub fn attach_input_method(socket: &OsStr) {
         let asked = Command::new("dbus-send").args(["--session", "--print-reply", "--dest=org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1.OpenWaylandConnection", &format!("string:{}", path.display())])
             .stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
         if asked { return record::decide("input", "fcitx5 attached", "the running fcitx5 opened this display", &[]); }
-        let started = Command::new("fcitx5").arg("-d").env("WAYLAND_DISPLAY", &path).stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
+        // -k: it outlives this display, so the next Whaybench (a restart starts it before this one ends) finds it.
+        // Without it fcitx5 exits with its first display and the new one is left attached to nothing.
+        let started = Command::new("fcitx5").args(["-d", "-k"]).env("WAYLAND_DISPLAY", &path).stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
         if started { record::decide("input", "fcitx5 started", "none was running", &[]); } else { record::warn("input", "no input method", "fcitx5 did not start; Korean and other composed input will not work", &[]); }
     });
 }

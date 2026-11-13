@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: Korean input stopped after Whaybench restarted. The fcitx5 Whaybench starts now keeps running when its
+  first display closes, so the restarted Whaybench attaches to a live one.
+
 ## [0.5.4] - 2026-11-13
 
 Apps inside draw on the GPU, and Korean shows in the title bars under Windows.
