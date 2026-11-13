@@ -154,9 +154,46 @@ fn agent_env(open: &TermOpen, data: &paths::Data) -> Result<String, String> {
 /// The apps this run started, waited for when they end so none is left as a zombie.
 static APPS: std::sync::Mutex<Vec<std::process::Child>> = std::sync::Mutex::new(Vec::new());
 
-/// Called often: the apps that have ended are waited for.
+/// Whaybench's own panels, started again when they crash: (process, how to start it again, when it was started).
+struct Panel { child: std::process::Child, command: String, socket: std::ffi::OsString, data: paths::Data, run: String, starts: Vec<std::time::Instant> }
+static PANELS: std::sync::Mutex<Vec<Panel>> = std::sync::Mutex::new(Vec::new());
+/// A panel that crashes this often in a minute is left closed: starting it again would only crash again.
+const PANEL_STARTS_PER_MINUTE: usize = 3;
+
+/// One of Whaybench's own panels: like an app, but started again if it ends by a crash. Closed on purpose, it exits
+/// with success and stays closed.
+pub fn spawn_panel(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
+    if let Some(child) = start_app(command, socket, data, run) {
+        PANELS.lock().unwrap().push(Panel { child, command: command.into(), socket: socket.into(), data: data.clone(), run: run.into(), starts: vec![std::time::Instant::now()] });
+    }
+}
+
+/// Called often: the apps that have ended are waited for; a crashed panel is started again.
 pub fn reap_apps() {
     APPS.lock().unwrap().retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+    let mut panels = PANELS.lock().unwrap();
+    let mut again = Vec::new();
+    panels.retain_mut(|p| match p.child.try_wait() {
+        Ok(Some(status)) if !status.success() => {
+            p.starts.retain(|s| s.elapsed() < std::time::Duration::from_secs(60));
+            let fields = [("command", p.command.clone()), ("status", status.to_string())];
+            if p.starts.len() < PANEL_STARTS_PER_MINUTE {
+                record::warn("screen", "panel started again", "it ended by a crash", &fields);
+                if let Some(child) = start_app(&p.command, &p.socket, &p.data, &p.run) {
+                    p.starts.push(std::time::Instant::now());
+                    again.push(Panel { child, command: p.command.clone(), socket: p.socket.clone(), data: p.data.clone(), run: p.run.clone(), starts: std::mem::take(&mut p.starts) });
+                }
+            } else {
+                record::error("screen", "panel left closed", &fields);
+                wb_core::status::say(&p.data, &wb_core::i18n::t("panel-left-closed"), 10);
+            }
+            false
+        }
+        Ok(Some(_)) => false,
+        _ => true,
+    });
+    panels.extend(again);
+    drop(panels);
     // SAFETY: waitpid on one known child with WNOHANG only reaps it if it has ended.
     LEFT.lock().unwrap().retain(|pid| unsafe { libc::waitpid(*pid, std::ptr::null_mut(), libc::WNOHANG) } == 0);
 }
@@ -197,6 +234,10 @@ fn open_shim(data: &paths::Data, bins: &str) -> String {
 pub static GPU_APPS: AtomicBool = AtomicBool::new(false);
 
 pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
+    if let Some(c) = start_app(command, socket, data, run) { APPS.lock().unwrap().push(c); }
+}
+
+fn start_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) -> Option<std::process::Child> {
     // The program's own commands (whaybench-project and the like) are found by the apps and by Claude Code.
     let bins = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())).map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
     let shims = open_shim(data, &bins);
@@ -221,9 +262,29 @@ pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
     match started {
         Ok(c) => {
             record::decide("screen", "app started", "a requested app", &[("command", command.to_string()), ("process", c.id().to_string())]);
-            APPS.lock().unwrap().push(c);
+            Some(c)
         }
-        Err(e) => record::error("screen", "app not started", &[("command", command.to_string()), ("error", e.to_string())]),
+        Err(e) => { record::error("screen", "app not started", &[("command", command.to_string()), ("error", e.to_string())]); None }
+    }
+}
+
+#[cfg(test)]
+mod panel_tests {
+    use super::*;
+    #[test]
+    fn a_crashed_panel_starts_again_a_few_times_a_closed_one_stays_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = paths::Data::new(dir.path().to_path_buf());
+        let count = dir.path().join("starts");
+        spawn_panel(&format!("echo x >> '{}'; exit 3", count.display()), OsStr::new("none"), &data, "test");
+        spawn_panel("exit 0", OsStr::new("none"), &data, "test");
+        for _ in 0..100 {
+            reap_apps();
+            if PANELS.lock().unwrap().is_empty() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(PANELS.lock().unwrap().is_empty(), "both end: one closed, one left closed after its starts");
+        assert_eq!(std::fs::read_to_string(&count).unwrap().lines().count(), PANEL_STARTS_PER_MINUTE);
     }
 }
 

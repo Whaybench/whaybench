@@ -276,6 +276,7 @@ ended = Ended
 new-session = New session
 new-tab-keep-map-not-opened-2 = New tab (keep map) not opened · The selected session has no map
 tab-not-opened = Conversation tab not opened · { $e }
+panel-left-closed = Panel crashed repeatedly · logged
 not-run-no-conversation-tab-open = { $head } not run · No conversation tab · Open it from the session list
 session-ended-hidden-in-the-session = Session ended · Hidden in the session list
 running-in-another-terminal-type-bg = Running in another terminal · Type /bg there to connect here · Showing map and answers only

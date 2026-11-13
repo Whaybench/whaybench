@@ -279,7 +279,7 @@ impl Relay {
             if self.running {
                 if let Some(s) = &self.session {
                     let _ = fs::create_dir_all(sessions::alive_dir(&self.data));
-                    let _ = fs::write(sessions::alive_dir(&self.data).join(s), self.child.to_string());
+                    let _ = paths::write_atomic(&sessions::alive_dir(&self.data).join(s), self.child.to_string());
                 }
             }
         } else {

@@ -17,7 +17,7 @@ pub fn record(data: &Path, input: &Value) -> String {
 /// One session's numbers. Only into a data folder Whaybench made; a status line run elsewhere just prints.
 fn keep(data: &Path, sid: &str, kept: &Value) {
     if crate::map::safe_id(sid).is_ok() && data.is_dir() {
-        if fs::create_dir_all(dir(data)).is_ok() { let _ = fs::write(dir(data).join(format!("{sid}.json")), kept.to_string()); }
+        if fs::create_dir_all(dir(data)).is_ok() { let _ = crate::paths::write_atomic(&dir(data).join(format!("{sid}.json")), kept.to_string()); }
         // Older than the weekly window, a session's numbers say nothing any more.
         let week = std::time::Duration::from_secs(7 * 86_400);
         for f in fs::read_dir(dir(data)).into_iter().flatten().flatten() {

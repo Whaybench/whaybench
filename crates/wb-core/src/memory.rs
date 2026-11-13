@@ -108,7 +108,7 @@ fn seen_file(data: &Path, sid: &str) -> PathBuf { data.join("cache").join("memor
 pub fn mark_seen(data: &Path, sid: &str) {
     let f = seen_file(data, sid);
     let _ = fs::create_dir_all(f.parent().unwrap_or(data));
-    let _ = fs::write(f, chrono::Local::now().timestamp_millis().to_string());
+    let _ = crate::paths::write_atomic(&f, chrono::Local::now().timestamp_millis().to_string());
 }
 
 fn seen_at(data: &Path, sid: &str) -> i64 { fs::read_to_string(seen_file(data, sid)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0) }

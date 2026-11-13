@@ -95,7 +95,8 @@ fn transcript_of(d: &Data, id: &str) -> Option<PathBuf> {
 /// row; only that row counts (the same words can be in the conversation), and only from the last 90 seconds.
 /// The session opened, and the empty one carried on, if any.
 pub fn resumed_elsewhere(d: &Data, me: &str) -> Option<(String, Option<String>)> {
-    let text = fs::read_to_string(transcript_of(d, me)?).ok()?;
+    // The last 90 seconds are at the end of the file; 2 MB leaves room for large tool results in them.
+    let text = crate::paths::read_tail(&transcript_of(d, me)?, 2 * 1024 * 1024).ok()?;
     let short = opened_short(&text, chrono::Utc::now())?;
     let target = fs::read_dir(sessions_dir(d)).ok()?.flatten().filter_map(|f| f.file_name().to_string_lossy().strip_suffix(".json").map(String::from))
         .find(|n| n.starts_with(&short))?;
@@ -126,13 +127,7 @@ fn opened_short(text: &str, now: chrono::DateTime<chrono::Utc>) -> Option<String
 /// after /resume: the new session has no transcript yet, so the mod takes it for a spare process and does not
 /// take the conversation over.
 pub fn continued_in(d: &Data, id: &str) -> Option<String> {
-    use std::io::{Read, Seek, SeekFrom};
-    let mut f = fs::File::open(transcript_of(d, id)?).ok()?;
-    let len = f.metadata().ok()?.len();
-    f.seek(SeekFrom::Start(len.saturating_sub(256 * 1024))).ok()?;
-    let mut bytes = Vec::new();
-    f.read_to_end(&mut bytes).ok()?;
-    continued_in_text(&String::from_utf8_lossy(&bytes)).filter(|n| n != id)
+    continued_in_text(&crate::paths::read_tail(&transcript_of(d, id)?, 256 * 1024).ok()?).filter(|n| n != id)
 }
 
 /// Whether Claude Code keeps a conversation under this number (its transcript). An add-on agent keeps its own, elsewhere.
@@ -238,7 +233,19 @@ pub fn claude_program() -> PathBuf {
 static AGENTS: Mutex<Option<(Instant, Vec<Value>)>> = Mutex::new(None);
 
 /// The next `agents()` asks Claude Code again instead of using the list kept from up to 3 seconds ago.
-pub fn refresh_agents() { *AGENTS.lock().unwrap() = None; }
+pub fn refresh_agents() {
+    *AGENTS.lock().unwrap() = None;
+    if let Some(f) = shared_agents() { let _ = fs::remove_file(f); }
+}
+
+/// The list kept for every process of this person (the panels, the program, the hooks), so Claude Code is asked once
+/// per 3 seconds in all, not once per process. In the runtime folder, which only they can read; without one, each
+/// process keeps its own.
+fn shared_agents() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("whaybench-agents.json"))
+}
+
+fn fresh(at: SystemTime) -> bool { SystemTime::now().duration_since(at).is_ok_and(|age| age < Duration::from_secs(3)) }
 
 /// Running sessions as Claude Code reports them, kept for 3 seconds. `kind` "interactive" is held by a
 /// terminal; anything else runs in the background.
@@ -248,9 +255,17 @@ pub fn agents() -> Vec<Value> {
     if let Some((at, list)) = g.as_ref() {
         if at.elapsed() < Duration::from_secs(3) { return list.clone(); }
     }
+    let shared = shared_agents();
+    let kept = shared.as_ref().filter(|f| fs::metadata(f).and_then(|m| m.modified()).is_ok_and(fresh))
+        .and_then(|f| serde_json::from_str::<Vec<Value>>(&fs::read_to_string(f).ok()?).ok());
+    if let Some(list) = kept {
+        *g = Some((Instant::now(), list.clone()));
+        return list;
+    }
     let out = Command::new(claude_program()).args(["agents", "--json"]).stdin(Stdio::null()).stderr(Stdio::null()).output();
-    let list = out.ok().and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).and_then(|v| v.as_array().cloned())
-        .or_else(|| g.as_ref().map(|x| x.1.clone())).unwrap_or_default();
+    let asked = out.ok().and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).and_then(|v| v.as_array().cloned());
+    if let (Some(list), Some(f)) = (&asked, &shared) { let _ = write_atomic(f, Value::from(list.clone()).to_string()); }
+    let list = asked.or_else(|| g.as_ref().map(|x| x.1.clone())).unwrap_or_default();
     *g = Some((Instant::now(), list.clone()));
     list
 }
@@ -268,7 +283,7 @@ pub fn has_conversation(d: &Data, id: &str) -> bool {
     let Some(home) = std::env::var_os("HOME") else { return true };
     let name = format!("{id}.jsonl");
     fs::read_dir(Path::new(&home).join(".claude/projects")).into_iter().flatten().flatten().any(|e| {
-        fs::read_to_string(e.path().join(&name)).is_ok_and(|t| t.contains("\"type\":\"user\""))
+        holds_conversation(&e.path().join(&name))
     })
 }
 

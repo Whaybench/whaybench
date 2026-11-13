@@ -128,7 +128,7 @@ pub fn convert(data: &wb_core::paths::Data, original: &Path) -> Result<usize, St
         text
     };
     let _ = fs::remove_dir_all(&work);
-    fs::write(dir.join(format!("{stem}.md")), &text).map_err(|e| e.to_string())?;
+    wb_core::paths::write_atomic(&dir.join(format!("{stem}.md")), &text).map_err(|e| e.to_string())?;
     Ok(uneven_tables(&text))
 }
 

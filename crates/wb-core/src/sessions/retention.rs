@@ -110,7 +110,7 @@ pub fn save_lost_maps(d: &Data) -> usize {
         let path = crate::map::free_path(&d.maps(), &crate::map::file_name(span(d, id, &nodes), None, "auto-"));
         let body = serde_json::json!({"format": "whaybench-map", "version": map.get("version"), "title": session_name(d, id),
             "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": id, "auto": true, "nodes": crate::map::saved_nodes(&nodes)});
-        if fs::create_dir_all(d.maps()).and_then(|_| fs::write(&path, body.to_string())).is_ok() {
+        if crate::paths::write_atomic(&path, body.to_string()).is_ok() {
             record::decide("session", "map saved", "its conversation is no longer kept", &[("session", id.to_string()), ("file", path.display().to_string())]);
             done.push(id.to_string());
             saved += 1;

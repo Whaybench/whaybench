@@ -97,7 +97,7 @@ fn titles_kept(d: &Data) -> std::collections::HashMap<String, String> {
 /// (without the " (n)" it adds per /background), remembered after the session stops; else the first prompt.
 pub fn session_name(d: &Data, id: &str) -> String {
     let file = d.root.join("names.json");
-    let mut names = read_json(&file).unwrap_or_else(|| serde_json::json!({}));
+    let mut names: Value = crate::paths::read_kept::<Option<Value>>(&file).filter(Value::is_object).unwrap_or_else(|| serde_json::json!({}));
     let running = strip_count(agent(id).as_ref().and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or(""));
     if !running.is_empty() && names.get(id).and_then(Value::as_str) != Some(&running) {
         names[id] = Value::String(running.clone());

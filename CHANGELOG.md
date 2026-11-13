@@ -6,6 +6,23 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The remaining state files (view lists and history, extra map panels, hidden files, usage, heartbeats, saved and
+  exported maps, add-on lists, language choice, terminal settings) are written whole or not at all, so a reader never
+  sees half a file.
+- A state file that cannot be read is moved aside to `<name>.<time>.unreadable` and logged, instead of being written over
+  with an empty list (conversation names, earlier answers, hidden files, extra map panels, view lists and history,
+  node files).
+- A message from one panel to another sent while the last one was being taken is no longer removed unread.
+- An answer is added to its session's answer log before it becomes the latest answer, in one write, so a failed or
+  simultaneous write does not leave it out of the earlier answers.
+- A panel of Whaybench's own that crashes is started again, up to three times a minute; after that it is left closed
+  and the status line says so.
+- The list of running Claude Code sessions is asked for once per 3 seconds for all of Whaybench's processes, kept in
+  the runtime folder, instead of once per process.
+- The end of a turn reads the last 2 MB of a Claude Code transcript, not the whole file; checks for a session opened
+  elsewhere reads its last 2 MB, a check for a conversation its first 256 KB.
+
 ## [0.6.1] - 2026-11-14
 
 Security: signed updates installed whole with a way back, agent add-ons and cross-conversation text confirmed and

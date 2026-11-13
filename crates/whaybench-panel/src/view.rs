@@ -106,7 +106,7 @@ fn own_picture(d: &Data, session: &str) -> std::path::PathBuf { d.root.join("sho
 
 /// What this session's history has already taken of its own picture.
 fn read_taken(v: &V) -> HashMap<String, u128> {
-    std::fs::read_to_string(v.hist.dir.join("taken.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    wb_core::paths::read_kept(&v.hist.dir.join("taken.json"))
 }
 
 fn write_taken(v: &V) {
@@ -114,7 +114,7 @@ fn write_taken(v: &V) {
     let own = own_picture(&v.d, s).to_string_lossy().to_string();
     let kept: HashMap<&String, &u128> = v.seen.iter().filter(|(k, _)| **k == own).collect();
     let _ = std::fs::create_dir_all(&v.hist.dir);
-    let _ = std::fs::write(v.hist.dir.join("taken.json"), json!(kept).to_string());
+    let _ = wb_core::paths::write_atomic(&v.hist.dir.join("taken.json"), json!(kept).to_string());
 }
 
 /// Keeps a copy of a picture in the history, so the next one does not overwrite it; relative links still lead to where

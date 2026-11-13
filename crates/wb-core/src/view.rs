@@ -67,8 +67,7 @@ fn views_file(d: &Data) -> PathBuf { d.root.join("view/views.json") }
 
 /// The open views and what each is tied to; kept over a restart. The first view is always among them.
 pub fn views(d: &Data) -> Vec<(String, Link)> {
-    let text = std::fs::read_to_string(views_file(d)).unwrap_or_default();
-    let list: Vec<Value> = serde_json::from_str(&text).unwrap_or_default();
+    let list: Vec<Value> = crate::paths::read_kept(&views_file(d));
     let mut out: Vec<(String, Link)> = list.iter().filter_map(|v| Some((v.get("name")?.as_str()?.to_string(), Link::from_json(v)))).collect();
     if !out.iter().any(|(n, _)| n == FIRST_VIEW) { out.insert(0, (FIRST_VIEW.to_string(), Link::Follow)); }
     out
@@ -78,7 +77,7 @@ fn write_views(d: &Data, list: &[(String, Link)]) {
     let v: Vec<Value> = list.iter().map(|(n, l)| { let mut j = l.to_json(); j["name"] = json!(n); j }).collect();
     let f = views_file(d);
     if let Some(dir) = f.parent() { let _ = std::fs::create_dir_all(dir); }
-    let _ = std::fs::write(f, Value::Array(v).to_string());
+    let _ = crate::paths::write_atomic(&f, Value::Array(v).to_string());
 }
 
 pub fn set_view(d: &Data, name: &str, link: &Link) {
@@ -128,8 +127,7 @@ pub struct History { pub dir: PathBuf, pub items: Vec<(String, String)>, pub pos
 impl History {
     /// Reads the list; what no longer exists falls out. It stands at the newest.
     pub fn load(dir: PathBuf) -> Self {
-        let text = std::fs::read_to_string(dir.join("index.json")).unwrap_or_default();
-        let list: Vec<(String, String)> = serde_json::from_str(&text).unwrap_or_default();
+        let list: Vec<(String, String)> = crate::paths::read_kept(&dir.join("index.json"));
         let items: Vec<_> = list.into_iter().filter(|(p, _)| is_web(p) || Path::new(p).exists()).collect();
         let pos = items.len().saturating_sub(1);
         History { dir, items, pos }
@@ -140,7 +138,7 @@ impl History {
     fn save(&self) {
         if self.dir.as_os_str().is_empty() { return; }
         let _ = std::fs::create_dir_all(&self.dir);
-        let _ = std::fs::write(self.dir.join("index.json"), json!(self.items).to_string());
+        let _ = crate::paths::write_atomic(&self.dir.join("index.json"), json!(self.items).to_string());
     }
     /// Shows this now. The thing on screen again is not a new entry.
     pub fn push(&mut self, path: &str, title: &str) {
@@ -211,17 +209,17 @@ pub fn session_moved(d: &Data, old: &str, new: &str) {
                 // The list names its copies by full path, and they have just moved.
                 let list = to.join("index.json");
                 let (old_dir, new_dir) = (format!("{}/", from.display()), format!("{}/", to.display()));
-                let items: Vec<(String, String)> = serde_json::from_str(&std::fs::read_to_string(&list).unwrap_or_default()).unwrap_or_default();
+                let items: Vec<(String, String)> = crate::paths::read_kept(&list);
                 let moved: Vec<(String, String)> = items.into_iter().map(|(p, t)| (p.strip_prefix(&old_dir).map_or_else(|| p.clone(), |rest| format!("{new_dir}{rest}")), t)).collect();
-                let _ = std::fs::write(&list, json!(moved).to_string());
+                let _ = crate::paths::write_atomic(&list, json!(moved).to_string());
             }
             continue;
         }
-        let read = |dir: &Path| -> Vec<(String, String)> { serde_json::from_str(&std::fs::read_to_string(dir.join("index.json")).unwrap_or_default()).unwrap_or_default() };
+        let read = |dir: &Path| -> Vec<(String, String)> { crate::paths::read_kept(&dir.join("index.json")) };
         let mut joined = read(&from);
         for item in read(&to) { if !joined.contains(&item) { joined.push(item); } }
         if joined.len() > HISTORY_KEEP { joined.drain(..joined.len() - HISTORY_KEEP); }
-        if std::fs::write(to.join("index.json"), json!(joined).to_string()).is_ok() { let _ = std::fs::remove_file(from.join("index.json")); }
+        if crate::paths::write_atomic(&to.join("index.json"), json!(joined).to_string()).is_ok() { let _ = std::fs::remove_file(from.join("index.json")); }
     }
     let (from, to) = (requests_dir(d, &for_session(old)), requests_dir(d, &for_session(new)));
     if from.is_dir() {

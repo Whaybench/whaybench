@@ -48,9 +48,12 @@ pub fn send(d: &Data, to: &str, v: serde_json::Value) { let _ = write(&d.cache()
 
 pub fn take(d: &Data, me: &str) -> Option<serde_json::Value> {
     let p = d.cache().join("panels").join(format!("{me}.json"));
-    let v = serde_json::from_str(&fs::read_to_string(&p).ok()?).ok();
-    let _ = fs::remove_file(&p);
-    v
+    // Taken by moving it first: read-then-remove would remove a message sent in between, unread.
+    let mine = p.with_extension(format!("{}.taken", std::process::id()));
+    fs::rename(&p, &mine).ok()?;
+    let text = fs::read_to_string(&mine);
+    let _ = fs::remove_file(&mine);
+    serde_json::from_str(&text.ok()?).ok()
 }
 
 #[cfg(test)]

@@ -58,7 +58,7 @@ pub fn state(data: &Path, sid: &str, state: &str, note: Option<&str>) -> Result<
 pub fn alive(data: &Path, sid: &str, on: bool) -> Result<()> {
     let path = data.join("cache/alive").join(safe_id(sid)?);
     fs::create_dir_all(path.parent().unwrap())?;
-    fs::write(path, if on { now_ms().to_string() } else { "0".into() })?;
+    crate::paths::write_atomic(&path, if on { now_ms().to_string() } else { "0".into() })?;
     Ok(())
 }
 
@@ -76,10 +76,12 @@ pub fn answer(data: &Path, sid: &str, input: &Value) -> Result<bool> {
     let at = now_ms();
     let mut a = json!({"sessionId": sid, "prompt": prompt, "text": text, "at": at});
     if let Some(t) = turn { a["turnId"] = json!(t); }
-    write_json(&path, &a)?;
+    // The kept line first: the latest answer is what a resent turn is checked against, so written first it would
+    // stop the resend from adding a line that failed. One write, so two hooks appending at once do not mix lines.
     let log = data.join("answer-log").join(format!("{sid}.jsonl"));
     fs::create_dir_all(log.parent().unwrap())?;
-    writeln!(OpenOptions::new().create(true).append(true).open(log)?, "{}", json!({"at": at, "prompt": prompt, "text": text}))?;
+    OpenOptions::new().create(true).append(true).open(log)?.write_all(format!("{}\n", json!({"at": at, "prompt": prompt, "text": text})).as_bytes())?;
+    write_json(&path, &a)?;
     Ok(true)
 }
 

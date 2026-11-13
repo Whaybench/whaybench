@@ -1,5 +1,5 @@
 //! Attaches files to a map node, so the node lists them even if Claude has not touched them yet.
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{collections::BTreeSet, path::Path};
 
 use serde_json::{Map, Value, json};
 use wb_core::{paths::{self, Data}, sessions};
@@ -30,7 +30,7 @@ fn run(mut args: Vec<String>, data: &Data) -> Result<(), String> {
     }
     let session = session.or_else(|| sessions::target(data)).ok_or(wb_core::i18n::t("no-session"))?;
     let path = data.root.join("node-files").join(format!("{session}.json"));
-    let mut table: Map<String, Value> = read(&path).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+    let mut table: Map<String, Value> = paths::read_kept(&path);
     let listed = |v: Option<&Value>| -> Vec<String> { v.and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() };
     match args.first().map(String::as_str) {
         Some("attach") if args.len() >= 3 => {
@@ -56,8 +56,6 @@ fn run(mut args: Vec<String>, data: &Data) -> Result<(), String> {
     }
     paths::write_atomic(&path, serde_json::to_string_pretty(&Value::Object(table)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
-
-fn read(path: &Path) -> Option<Value> { serde_json::from_str(&fs::read_to_string(path).ok()?).ok() }
 
 fn main() {
     paths::private_files();

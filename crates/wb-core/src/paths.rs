@@ -87,6 +87,37 @@ pub fn write_atomic(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<(
     std::fs::rename(tmp, path)
 }
 
+/// The last `max` bytes of a file, from its first whole line: a long log's end without reading all of it.
+pub fn read_tail(path: &Path, max: u64) -> std::io::Result<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    let from = f.metadata()?.len().saturating_sub(max);
+    f.seek(SeekFrom::Start(from))?;
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes)?;
+    // Cut in the middle of a line, the part before the first newline is not a line.
+    let start = if from > 0 { bytes.iter().position(|b| *b == b'\n').map_or(bytes.len(), |i| i + 1) } else { 0 };
+    Ok(String::from_utf8_lossy(&bytes[start..]).into_owned())
+}
+
+/// Reads a JSON file that is read, changed and written back. A file that is there but cannot be read as `T` is
+/// moved aside to `<name>.unreadable` and logged, so the write that follows does not replace what it held.
+/// Missing or empty is the default.
+pub fn read_kept<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
+    let Ok(text) = std::fs::read_to_string(path) else { return T::default() };
+    if text.trim().is_empty() { return T::default(); }
+    serde_json::from_str(&text).unwrap_or_else(|e| {
+        // Replaced whole by a writer since it was read: that is the one to take, not to set aside.
+        if let Some(v) = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()) { return v; }
+        // Each one its own name: a second bad file does not replace the first one set aside.
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let aside = path.with_extension(format!("{}{ms}.unreadable", path.extension().map(|x| format!("{}.", x.to_string_lossy())).unwrap_or_default()));
+        let moved = std::fs::rename(path, &aside).is_ok();
+        crate::log::warn("data", "unreadable file set aside", &e.to_string(), &[("file", path.display().to_string()), ("moved", moved.to_string())]);
+        T::default()
+    })
+}
+
 /// Holds the umask the person's programs had, so a program started for them inside keeps theirs.
 const ENV_UMASK: &str = "WHAYBENCH_UMASK";
 
@@ -176,6 +207,32 @@ mod tests {
         write_atomic(&file, "two").unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "two");
         assert_eq!(std::fs::read_dir(dir.join("deep")).unwrap().count(), 1, "no temporary file is left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn a_tail_starts_at_a_whole_line() {
+        let dir = std::env::temp_dir().join(format!("wb-tail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("t.jsonl");
+        std::fs::write(&file, "first line\nsecond\nthird\n").unwrap();
+        assert_eq!(read_tail(&file, 100).unwrap(), "first line\nsecond\nthird\n", "small: all of it");
+        assert_eq!(read_tail(&file, 10).unwrap(), "third\n", "cut: from the first whole line");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn an_unreadable_file_is_set_aside_not_lost() {
+        let dir = std::env::temp_dir().join(format!("wb-kept-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.json");
+        assert_eq!(read_kept::<Vec<String>>(&file), Vec::<String>::new(), "missing is empty");
+        std::fs::write(&file, "[\"x\"]").unwrap();
+        assert_eq!(read_kept::<Vec<String>>(&file), vec!["x".to_string()]);
+        std::fs::write(&file, "[\"x\", cut").unwrap();
+        assert_eq!(read_kept::<Vec<String>>(&file), Vec::<String>::new());
+        let aside = std::fs::read_dir(&dir).unwrap().flatten().find(|e| e.file_name().to_string_lossy().ends_with(".unreadable")).unwrap();
+        assert!(aside.file_name().to_string_lossy().starts_with("a.json."));
+        assert_eq!(std::fs::read_to_string(aside.path()).unwrap(), "[\"x\", cut", "kept beside");
+        assert!(!file.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

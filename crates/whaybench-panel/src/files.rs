@@ -51,7 +51,7 @@ fn mtime_ms(path: &str) -> Option<i64> {
 fn hidden_file(d: &Data) -> std::path::PathBuf { d.root.join("files-hidden.json") }
 
 fn hidden(d: &Data) -> HashSet<String> {
-    std::fs::read_to_string(hidden_file(d)).ok().and_then(|t| serde_json::from_str::<HashSet<String>>(&t).ok()).unwrap_or_default()
+    wb_core::paths::read_kept(&hidden_file(d))
 }
 
 fn escape_html(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;") }
@@ -132,7 +132,7 @@ fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dy
             let mut h: Vec<String> = hidden(&d2).into_iter().collect();
             h.push(p.clone());
             h.sort();
-            let _ = std::fs::write(hidden_file(&d2), json!(h).to_string());
+            let _ = wb_core::paths::write_atomic(&hidden_file(&d2), json!(h).to_string());
             status::say(&d2, &wb_core::i18n::f("removed-from-list", &[("a1", (Path::new(&p).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()).to_string())]), 5);
             redraw();
         }));

@@ -90,7 +90,7 @@ pub fn keep(d: &Data, nodes: &[Value], title: &str, from: &str) -> std::io::Resu
     fs::create_dir_all(imported_dir(d))?;
     let path = wb_core::map::free_path(&imported_dir(d), &wb_core::map::file_name(sessions::span(d, from, nodes), None, ""));
     let imported = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-    fs::write(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": wb_core::map::saved_nodes(nodes)}).to_string())?;
+    wb_core::paths::write_atomic(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": wb_core::map::saved_nodes(nodes)}).to_string())?;
     Ok(path)
 }
 
@@ -133,16 +133,16 @@ fn panels_file(d: &Data) -> PathBuf { d.root.join("map-panels.json") }
 pub fn remember(d: &Data, args: &[String]) {
     let mut all = panels(d);
     if !all.iter().any(|a| a == args) { all.push(args.to_vec()); }
-    let _ = fs::write(panels_file(d), json!(all).to_string());
+    let _ = wb_core::paths::write_atomic(&panels_file(d), json!(all).to_string());
 }
 
 pub fn forget(d: &Data, args: &[String]) {
     let all: Vec<Vec<String>> = panels(d).into_iter().filter(|a| a != args).collect();
-    let _ = fs::write(panels_file(d), json!(all).to_string());
+    let _ = wb_core::paths::write_atomic(&panels_file(d), json!(all).to_string());
 }
 
 pub fn panels(d: &Data) -> Vec<Vec<String>> {
-    fs::read_to_string(panels_file(d)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    wb_core::paths::read_kept(&panels_file(d))
 }
 
 /// The request that takes one node of an imported map into this conversation as a reference.

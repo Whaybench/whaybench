@@ -134,7 +134,7 @@ fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str)
     let span = sessions::span(d, data.get("sessionId").and_then(Value::as_str).unwrap_or(""), &nodes);
     let path = wb_core::map::free_path(&maps_dir(d), &wb_core::map::file_name(span, root, prefix));
     let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": data.get("sessionId"), "nodes": wb_core::map::saved_nodes(&nodes)});
-    std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default())?;
+    wb_core::paths::write_atomic(&path, serde_json::to_string_pretty(&body).unwrap_or_default())?;
     Ok(path)
 }
 

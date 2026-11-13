@@ -125,13 +125,16 @@ fn stop(data: &Path, a: &Agent, sid: &str, event: &Value, record: &mut Value) ->
 
 /// The text of the turn since the person's last message, from a Claude Code transcript.
 pub fn whole_turn(transcript: &Path, last: &str) -> String {
-    let rows: Vec<Value> = fs::read_to_string(transcript).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
     let asked = |d: &Value| {
         let c = &d["message"]["content"];
         if d["type"] != "user" || d["isMeta"] == true { return false; }
         if let Some(s) = c.as_str() { return !s.starts_with('<'); }
         c.as_array().is_some_and(|x| x.iter().any(|b| b["type"] == "text") && !x.iter().any(|b| b["type"] == "tool_result"))
     };
+    // A long conversation's file runs to tens of MB: its end holds the turn, unless the turn alone is longer.
+    let parse = |text: String| -> Vec<Value> { text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect() };
+    let mut rows = parse(crate::paths::read_tail(transcript, 2 * 1024 * 1024).unwrap_or_default());
+    if !rows.iter().any(asked) { rows = parse(fs::read_to_string(transcript).unwrap_or_default()); }
     let start = rows.iter().rposition(asked).unwrap_or(0);
     let parts: Vec<String> = rows[(start + 1).min(rows.len())..].iter().filter(|d| d["type"] == "assistant")
         .filter_map(|d| d["message"]["content"].as_array().map(|c| c.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<String>().trim().to_string()))

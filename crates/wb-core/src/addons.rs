@@ -73,11 +73,11 @@ pub fn install_bundled(data: &Data) {
         let list = dir.join(".bundled.json");
         let before: Vec<String> = fs::read_to_string(&list).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         for old in before.iter().filter(|f| !now.contains(&f.as_str()) && valid_file(f)) { let _ = fs::remove_file(dir.join(old)); }
-        if before.iter().map(String::as_str).ne(now.iter().copied()) { let _ = fs::write(&list, Value::from(now).to_string()); }
+        if before.iter().map(String::as_str).ne(now.iter().copied()) { let _ = crate::paths::write_atomic(&list, Value::from(now).to_string()); }
     }
     // What a person making a language starts from; it is not a language.
     let _ = fs::write(root.join("languages/en.ftl"), include_str!("../../../config/lang/en.ftl"));
-    let _ = fs::write(marker, Value::from(done).to_string());
+    let _ = crate::paths::write_atomic(&marker, Value::from(done).to_string());
 }
 
 #[cfg(test)]

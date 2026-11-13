@@ -278,7 +278,7 @@ pub fn write_terminal_config(data: &Data) -> std::io::Result<PathBuf> {
     let path = data.cache().join("alacritty.toml");
     if fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
         fs::create_dir_all(data.cache())?;
-        fs::write(&path, text)?;
+        crate::paths::write_atomic(&path, text)?;
     }
     Ok(path)
 }

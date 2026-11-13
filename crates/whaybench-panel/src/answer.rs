@@ -132,7 +132,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     area.append(&web);
     win.set_child(Some(&area));
 
-    let history: Vec<Value> = std::fs::read_to_string(history_file(&d)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+    let history: Vec<Value> = wb_core::paths::read_kept(&history_file(&d));
     let pos = history.len().saturating_sub(1);
     // A first start takes the last answers already logged; after that, what came while the panel was closed.
     let seen = history.iter().filter_map(|r| r["at"].as_i64()).max().unwrap_or(0);

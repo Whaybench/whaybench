@@ -62,7 +62,7 @@ pub fn active(d: &Data, system: Option<&str>) -> String {
     if !sys.is_empty() && there(&sys) { sys } else { DEFAULT.to_string() }
 }
 
-pub fn choose(d: &Data, id: &str) { let _ = fs::write(choice(d), json!({"active": id}).to_string()); }
+pub fn choose(d: &Data, id: &str) { let _ = crate::paths::write_atomic(&choice(d), json!({"active": id}).to_string()); }
 
 struct Texts { lang: String, main: Bundle, english: Bundle, interned: Mutex<HashMap<String, &'static str>> }
 

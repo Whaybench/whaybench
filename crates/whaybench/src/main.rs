@@ -195,17 +195,17 @@ fn serve(data: &paths::Data, run_id: &str, apps: Vec<String>, no_session: bool) 
     if !no_session {
         for panel in ["menu", "status", "map", "sessions", "files", "answer", "input", "project", "notify"] {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench-panel");
-            start::spawn_app(&format!("exec '{}' {panel}", exe.display()), &state.socket_name, data, run_id);
+            start::spawn_panel(&format!("exec '{}' {panel}", exe.display()), &state.socket_name, data, run_id);
         }
         let exe = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench-panel");
         // Branch and imported map panels of last time.
         let kept: Vec<Vec<String>> = std::fs::read_to_string(data.root.join("map-panels.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         for args in kept {
             let quoted: Vec<String> = args.iter().map(|a| format!("'{}'", a.replace('\'', "'\\''"))).collect();
-            start::spawn_app(&format!("exec '{}' map {}", exe.display(), quoted.join(" ")), &state.socket_name, data, run_id);
+            start::spawn_panel(&format!("exec '{}' map {}", exe.display(), quoted.join(" ")), &state.socket_name, data, run_id);
         }
         for (name, _) in wb_core::view::views(data) {
-            start::spawn_app(&format!("exec '{}' view '{name}'", exe.display()), &state.socket_name, data, run_id);
+            start::spawn_panel(&format!("exec '{}' view '{name}'", exe.display()), &state.socket_name, data, run_id);
         }
     }
 
