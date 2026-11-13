@@ -1,7 +1,7 @@
 //! What happens before the window: the header of the record, the check of what the program needs,
 //! and the way to the person's desktop. A missing part is told, never fatal, except
 //! having no desktop to open a window on.
-use std::{ffi::OsStr, path::{Path, PathBuf}, process::Command, time::Duration};
+use std::{ffi::OsStr, path::{Path, PathBuf}, process::Command, sync::atomic::{AtomicBool, Ordering}, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use wb_core::{log as record, paths, versions};
@@ -171,6 +171,9 @@ fn open_shim(data: &paths::Data, bins: &str) -> String {
     format!("{}:", dir.display())
 }
 
+/// Set once the window's GPU is offered to the apps through linux-dmabuf.
+pub static GPU_APPS: AtomicBool = AtomicBool::new(false);
+
 pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
     // The program's own commands (whaybench-project and the like) are found by the apps and by Claude Code.
     let bins = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())).map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
@@ -182,9 +185,9 @@ pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
         // Inside, Korean and other input methods come through this compositor's text input; a GTK or Qt module of
         // the desktop's input method would talk past it and the apps would get no composed text.
         .env_remove("GTK_IM_MODULE").env_remove("QT_IM_MODULE")
-        // This compositor does not hand its apps a GPU device (no linux-dmabuf yet), so Mesa would look for one, warn
-        // and fall back to drawing on the CPU anyway. shortcut: software drawing inside; drop this once dmabuf is offered.
-        .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        // Without linux-dmabuf (no render node, as under WSLg) Mesa would look for a GPU device, warn and fall back
+        // to drawing on the CPU anyway, so it is told to from the start.
+        .envs((!GPU_APPS.load(Ordering::Relaxed)).then_some(("LIBGL_ALWAYS_SOFTWARE", "1")))
         .env(paths::ENV_DATA_DIR, Path::new(&data.root))
         .env(record::ENV_RUN, run)
         .spawn();

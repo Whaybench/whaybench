@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Apps inside draw on the GPU: the compositor offers its GPU through linux-dmabuf and takes their buffers without a
+  copy. Where it has no GPU device to offer (WSLg), apps keep drawing on the CPU as before.
+
 ### Fixed
 
 - A whole regrouping of a map by the agent took the person's mark off its nodes.
@@ -13,6 +18,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Reading the memory took the store's write lock, so programs that only read made each other wait.
 - Each prompt read every event of the other sessions to find the new ones.
 - The memory failing to be read gave an empty list without a word in the log.
+- Korean and other characters the title bar font lacks show in a fallback font that has them, instead of boxes
+  (Windows: Ubuntu's "sans" there is Latin only).
 
 ## [0.5.3] - 2026-11-13
 

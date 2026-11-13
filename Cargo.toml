@@ -22,4 +22,4 @@ ab_glyph = "0.2"
 [workspace.dependencies.smithay]
 path = "third_party/smithay"
 default-features = false
-features = ["backend_winit", "wayland_frontend", "desktop"]
+features = ["backend_drm", "backend_winit", "wayland_frontend", "desktop"]

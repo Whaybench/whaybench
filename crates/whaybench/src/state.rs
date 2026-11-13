@@ -120,6 +120,9 @@ pub struct App {
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
+    /// linux-dmabuf, offered only when the window's GPU has a render node apps can use (not under WSLg).
+    pub dmabuf: Option<smithay::wayland::dmabuf::DmabufState>,
+    pub gpu: Option<std::rc::Rc<std::cell::RefCell<smithay::backend::winit::WinitGraphicsBackend<smithay::backend::renderer::gles::GlesRenderer>>>>,
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<App>,
     pub data_device_state: DataDeviceState,
@@ -188,7 +191,7 @@ impl App {
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
             shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
-            compositor_state, xdg_shell_state, shm_state, output_manager_state, seat_state, data_device_state, clip,
+            compositor_state, xdg_shell_state, shm_state, dmabuf: None, gpu: None, output_manager_state, seat_state, data_device_state, clip,
             popups: PopupManager::default(), seat, builtin_ime,
         }
     }

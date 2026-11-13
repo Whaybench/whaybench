@@ -14,6 +14,11 @@ use smithay::{
     },
 };
 
+use smithay::{
+    backend::{allocator::dmabuf::Dmabuf, renderer::ImportDma},
+    wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
+};
+
 use super::xdg_shell;
 
 impl CompositorHandler for App {
@@ -52,5 +57,20 @@ impl BufferHandler for App {
 impl ShmHandler for App {
     fn shm_state(&self) -> &ShmState {
         &self.shm_state
+    }
+}
+
+impl DmabufHandler for App {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        self.dmabuf.as_mut().expect("the dmabuf global exists only with its state")
+    }
+
+    fn dmabuf_imported(&mut self, _global: &DmabufGlobal, dmabuf: Dmabuf, notifier: ImportNotifier) {
+        // A test import, as anvil does, so a buffer the GPU cannot take is refused now and not when drawn.
+        let ok = match self.gpu.as_ref().and_then(|b| b.try_borrow_mut().ok()) {
+            Some(mut backend) => backend.renderer().import_dmabuf(&dmabuf, None).is_ok(),
+            None => true,
+        };
+        if ok { let _ = notifier.successful::<App>(); } else { notifier.failed(); }
     }
 }

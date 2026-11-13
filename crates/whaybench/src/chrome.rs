@@ -1,8 +1,8 @@
 //! Text for what the compositor draws itself: title bars, tabs, drop previews. These must keep working
 //! when a panel's app has stopped, so they do not go through any app.
-use std::{collections::HashMap, process::{Command, Stdio}};
+use std::{collections::{HashMap, HashSet}, process::{Command, Stdio}};
 
-use ab_glyph::{Font, FontVec, PxScale, ScaleFont, point};
+use ab_glyph::{Font, FontVec, PxScale, ScaleFont, VariableFont, point};
 use smithay::{
     backend::{allocator::Fourcc, renderer::element::memory::MemoryRenderBuffer},
     utils::Transform,
@@ -19,28 +19,37 @@ pub fn cut_name(name: &str) -> String {
 pub struct Text { pub buffer: MemoryRenderBuffer, pub w: i32, pub h: i32 }
 
 pub struct Chrome {
-    font: Option<FontVec>,
+    /// The title font first, then fonts fontconfig gave for characters it lacks (Hangul when "sans" is Latin only).
+    fonts: Vec<FontVec>,
+    /// Characters a fallback font was already looked for.
+    looked: HashSet<char>,
     /// Text size in pixels (the theme's title_size).
     size: f32,
     texts: HashMap<(String, [u8; 3]), Text>,
     widths: HashMap<String, f64>,
 }
 
+fn load(pattern: &str, why: &str) -> Option<FontVec> {
+    let out = Command::new("fc-match").args(["-f", "%{file}", pattern]).stderr(Stdio::null()).output().ok()?;
+    let path = String::from_utf8_lossy(&out.stdout).to_string();
+    let font = std::fs::read(&path).ok().and_then(|b| FontVec::try_from_vec(b).ok())?;
+    record::decide("screen", "font", why, &[("file", path)]);
+    Some(font)
+}
+
 fn find_font() -> Option<FontVec> {
-    for pattern in ["sans:bold", "sans"] {
-        let Ok(out) = Command::new("fc-match").args(["-f", "%{file}", pattern]).stderr(Stdio::null()).output() else { continue };
-        let path = String::from_utf8_lossy(&out.stdout).to_string();
-        if let Some(font) = std::fs::read(&path).ok().and_then(|b| FontVec::try_from_vec(b).ok()) {
-            record::decide("screen", "font", "the title bar font", &[("file", path)]);
-            return Some(font);
-        }
-    }
-    record::warn("screen", "no font", "the title bar shows no text; install a font", &[]);
-    None
+    let font = load("sans:bold", "the title bar font").or_else(|| load("sans", "the title bar font"));
+    if font.is_none() { record::warn("screen", "no font", "the title bar shows no text; install a font", &[]); }
+    font
+}
+
+/// The first font that has the character; the title font (its box) when none has.
+fn pick(fonts: &[FontVec], c: char) -> usize {
+    fonts.iter().position(|f| f.glyph_id(c).0 != 0).unwrap_or(0)
 }
 
 impl Chrome {
-    pub fn new(size: f64) -> Self { Chrome { font: find_font(), size: size as f32, texts: HashMap::new(), widths: HashMap::new() } }
+    pub fn new(size: f64) -> Self { Chrome { fonts: find_font().into_iter().collect(), looked: HashSet::new(), size: size as f32, texts: HashMap::new(), widths: HashMap::new() } }
 
     /// A new text size: what was made at the old one goes.
     pub fn set_size(&mut self, size: f64) {
@@ -50,10 +59,24 @@ impl Chrome {
         self.widths.clear();
     }
 
+    /// Loads a font for each character the loaded ones lack, asking fontconfig as GTK's fallback does.
+    fn cover(&mut self, text: &str) {
+        if self.fonts.is_empty() { return; }
+        for c in text.chars() {
+            if c.is_control() || self.fonts.iter().any(|f| f.glyph_id(c).0 != 0) || !self.looked.insert(c) { continue; }
+            if let Some(mut font) = load(&format!("sans:bold:charset={:x}", c as u32), "a fallback title font").filter(|f| f.glyph_id(c).0 != 0) {
+                // A variable font (Noto Sans CJK VF) opens at its lightest; bold, as asked, to match the title font.
+                font.set_variation(b"wght", 700.0);
+                self.fonts.push(font);
+            }
+        }
+    }
+
     pub fn width(&mut self, text: &str) -> f64 {
         if let Some(w) = self.widths.get(text) { return *w; }
-        let Some(font) = &self.font else { return 0.0 };
-        let w = measure(font, self.size, text);
+        if self.fonts.is_empty() { return 0.0; }
+        self.cover(text);
+        let w = measure(&self.fonts, self.size, text);
         if self.widths.len() > 512 { self.widths.clear(); }
         self.widths.insert(text.to_string(), w);
         w
@@ -61,45 +84,50 @@ impl Chrome {
 
     /// The text as a buffer the renderer can draw, made once per text and colour.
     pub fn text(&mut self, text: &str, colour: [u8; 3]) -> Option<&Text> {
-        let font = self.font.as_ref()?;
+        if self.fonts.is_empty() { return None; }
         let key = (text.to_string(), colour);
         if !self.texts.contains_key(&key) {
             if self.texts.len() > 256 { self.texts.clear(); }
-            let made = raster(font, self.size, text, colour)?;
+            self.cover(text);
+            let made = raster(&self.fonts, self.size, text, colour)?;
             self.texts.insert(key.clone(), made);
         }
         self.texts.get(&key)
     }
 }
 
-fn measure(font: &FontVec, size: f32, text: &str) -> f64 {
-    let f = font.as_scaled(PxScale::from(size));
+fn measure(fonts: &[FontVec], size: f32, text: &str) -> f64 {
     let mut x = 0.0;
     let mut last = None;
     for c in text.chars() {
+        let i = pick(fonts, c);
+        let f = fonts[i].as_scaled(PxScale::from(size));
         let g = f.glyph_id(c);
-        if let Some(l) = last { x += f.kern(l, g); }
+        // Kerning is only between glyphs of one font.
+        if let Some((li, l)) = last && li == i { x += f.kern(l, g); }
         x += f.h_advance(g);
-        last = Some(g);
+        last = Some((i, g));
     }
     x as f64
 }
 
-fn raster(font: &FontVec, size: f32, text: &str, colour: [u8; 3]) -> Option<Text> {
-    let w = measure(font, size, text).ceil() as i32 + 2;
+fn raster(fonts: &[FontVec], size: f32, text: &str, colour: [u8; 3]) -> Option<Text> {
+    let w = measure(fonts, size, text).ceil() as i32 + 2;
     if w <= 2 { return None; }
     let h = (size * 1.4).ceil() as i32;
     let mut bytes = vec![0u8; (w * h * 4) as usize];
-    let f = font.as_scaled(PxScale::from(size));
-    let base = ((h as f32 + f.ascent() + f.descent()) / 2.0).round();
+    let first = fonts[0].as_scaled(PxScale::from(size));
+    let base = ((h as f32 + first.ascent() + first.descent()) / 2.0).round();
     let (mut x, mut last) = (1.0, None);
     for c in text.chars() {
+        let i = pick(fonts, c);
+        let f = fonts[i].as_scaled(PxScale::from(size));
         let id = f.glyph_id(c);
-        if let Some(l) = last { x += f.kern(l, id); }
+        if let Some((li, l)) = last && li == i { x += f.kern(l, id); }
         let glyph = id.with_scale_and_position(PxScale::from(size), point(x, base));
         x += f.h_advance(id);
-        last = Some(id);
-        let Some(outline) = font.outline_glyph(glyph) else { continue };
+        last = Some((i, id));
+        let Some(outline) = fonts[i].outline_glyph(glyph) else { continue };
         let b = outline.px_bounds();
         outline.draw(|gx, gy, cover| {
             let (px, py) = (gx as i32 + b.min.x as i32, gy as i32 + b.min.y as i32);
@@ -121,6 +149,18 @@ fn raster(font: &FontVec, size: f32, text: &str, colour: [u8; 3]) -> Option<Text
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_character_the_title_font_lacks_comes_from_a_fallback_font() {
+        // A Latin-only title font, as "sans" is on Ubuntu under WSL; skipped where this machine has none.
+        let Some(latin) = ["DejaVu Sans:bold", "Adwaita Sans:bold", "Cantarell:bold"].iter()
+            .find_map(|p| load(p, "test").filter(|f| f.glyph_id('a').0 != 0 && f.glyph_id('\u{AC00}').0 == 0)) else { return };
+        let mut chrome = Chrome { fonts: vec![latin], looked: HashSet::new(), size: 14.0, texts: HashMap::new(), widths: HashMap::new() };
+        chrome.cover("a\u{AC00}");
+        if chrome.fonts.len() == 1 { return; } // no font with Hangul installed
+        assert_eq!(pick(&chrome.fonts, 'a'), 0);
+        assert_eq!(pick(&chrome.fonts, '\u{AC00}'), 1);
+    }
+
     #[test]
     fn names_are_cut_at_32_characters() {
         assert_eq!(cut_name("short"), "short");

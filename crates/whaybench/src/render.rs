@@ -5,8 +5,9 @@ use std::{cell::{Cell, RefCell}, rc::Rc, time::{Duration, Instant}};
 use smithay::{
     backend::{
         allocator::Fourcc,
+        egl::EGLDevice,
         renderer::{
-            Bind, ExportMem, Offscreen,
+            Bind, ExportMem, ImportDma, Offscreen,
             damage::OutputDamageTracker,
             element::{
                 utils::{Relocate, RelocateRenderElement},
@@ -20,6 +21,7 @@ use smithay::{
     },
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::{calloop::{EventLoop, timer::{TimeoutAction, Timer}}, winit::{cursor::CursorIcon, dpi::LogicalSize, window::WindowAttributes}},
+    wayland::dmabuf::{DmabufFeedbackBuilder, DmabufState},
     utils::{Buffer, Logical, Physical, Rectangle, Scale, Size, Transform},
 };
 use wb_core::{log as record, theme::premultiplied};
@@ -449,6 +451,28 @@ fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: Size<i32, P
     }
 }
 
+/// Offers the window's GPU to the apps (linux-dmabuf with default feedback, as anvil's winit backend does), so they
+/// draw on it and hand over their buffers without a copy. Without a render node they keep shared memory.
+fn offer_gpu(state: &mut App, backend: &Rc<RefCell<winit::WinitGraphicsBackend<GlesRenderer>>>) {
+    let mut b = backend.borrow_mut();
+    let node = EGLDevice::device_for_display(b.renderer().egl_context().display()).map_err(|e| e.to_string())
+        .and_then(|d| d.try_get_render_node().map_err(|e| e.to_string()))
+        .and_then(|n| n.ok_or_else(|| "no render node".to_string()));
+    let formats = b.renderer().dmabuf_formats();
+    let feedback = node.and_then(|n| DmabufFeedbackBuilder::new(n.dev_id(), formats).build().map(|f| (n, f)).map_err(|e| e.to_string()));
+    match feedback {
+        Ok((node, feedback)) => {
+            let mut dmabuf = DmabufState::new();
+            dmabuf.create_global_with_default_feedback::<App>(&state.display_handle, &feedback);
+            state.dmabuf = Some(dmabuf);
+            state.gpu = Some(backend.clone());
+            crate::start::GPU_APPS.store(true, std::sync::atomic::Ordering::Relaxed);
+            record::decide("screen", "apps on the GPU", "the window's GPU has a render node", &[("node", format!("{node}"))]);
+        }
+        Err(e) => record::decide("screen", "apps on the CPU", "no GPU device to offer the apps", &[("why", e)]),
+    }
+}
+
 pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = state.saved_window().map(|(w, h)| (w as f64, h as f64)).unwrap_or(FIRST_WINDOW);
     let attributes = WindowAttributes::default().with_title("Whaybench").with_surface_size(LogicalSize::new(w, h)).with_visible(true);
@@ -482,6 +506,7 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
     // every frame makes the desktop redraw it and its title bar 60 times a second, which shows as a flicker there.
     // Without a sent frame nothing paces the next one, so a timer asks for it instead.
     let backend = Rc::new(RefCell::new(backend));
+    offer_gpu(state, &backend);
     let idle = Rc::new(Cell::new(false));
     {
         let (backend, idle) = (backend.clone(), idle.clone());
