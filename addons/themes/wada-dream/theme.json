@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "name": "Wada Dream",
+  "version": "1.0",
+  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 176, as digitised in https://github.com/mattdesl/dictionary-of-colour-combinations (MIT); the other shades are mixed from those colours",
+  "palette": {
+    "pink": "#f9c1ce",
+    "shell": "#fdd4bd",
+    "calamine": "#78cdd0",
+    "violet": "#40456a",
+    "panel": "#feeee5",
+    "bar": "#fad0da",
+    "front": "#a7dee0",
+    "deep": "#598298"
+  },
+  "base": {
+    "background": "panel",
+    "surface": "shell",
+    "text": "violet",
+    "accent": "deep"
+  },
+  "frame": {
+    "outer": 18,
+    "gap": 12,
+    "pad": 5,
+    "radius": 16,
+    "border_width": 1.5,
+    "shadow_size": 22,
+    "joint_width": 2,
+    "joint_show": "always",
+    "surface_top": "pink",
+    "surface_bottom": "calamine",
+    "panel": "panel",
+    "bar_top": "bar",
+    "bar_bottom": "pink",
+    "front_top": "front",
+    "front_bottom": "calamine",
+    "border": "pink",
+    "front_border": "violet",
+    "tab_front": "panel",
+    "shadow": "#40456a40",
+    "shared": "violet",
+    "wall": "#ffffff",
+    "edge": "#cc1236"
+  }
+}

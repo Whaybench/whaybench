@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "Gruvbox Dark",
+  "version": "1.0",
+  "source": "Colours of Gruvbox dark, https://github.com/morhetz/gruvbox (MIT)",
+  "palette": {
+    "bg0_h": "#1d2021", "bg0": "#282828", "bg1": "#3c3836", "bg2": "#504945", "bg3": "#665c54",
+    "fg": "#ebdbb2", "yellow": "#fabd2f", "orange": "#fe8019", "aqua": "#8ec07c", "red": "#fb4934"
+  },
+  "base": { "background": "bg0", "surface": "bg1", "text": "fg", "accent": "yellow" },
+  "frame": {
+    "outer": 12, "gap": 8, "pad": 4, "radius": 8, "border_width": 1.5, "shadow_size": 14,
+    "joint_width": 2, "joint_show": "always",
+    "surface_top": "bg0_h", "surface_bottom": "bg0_h",
+    "panel": "bg0",
+    "bar_top": "bg1", "bar_bottom": "bg1",
+    "front_top": "bg2", "front_bottom": "bg2",
+    "border": "bg1", "front_border": "yellow",
+    "tab_front": "bg3",
+    "shadow": "#00000080",
+    "shared": "orange", "wall": "aqua", "edge": "red"
+  }
+}

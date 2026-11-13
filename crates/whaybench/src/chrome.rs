@@ -32,7 +32,10 @@ pub struct Chrome {
 fn load(pattern: &str, why: &str) -> Option<FontVec> {
     let out = Command::new("fc-match").args(["-f", "%{file}", pattern]).stderr(Stdio::null()).output().ok()?;
     let path = String::from_utf8_lossy(&out.stdout).to_string();
-    let font = std::fs::read(&path).ok().and_then(|b| FontVec::try_from_vec(b).ok())?;
+    let mut font = std::fs::read(&path).ok().and_then(|b| FontVec::try_from_vec(b).ok())?;
+    // A variable font (Noto Sans CJK VF, the "sans" of Korean desktops) opens at its lightest, which reads grey at
+    // title size: bold, as the pattern asks. A font without that axis is left as it is.
+    if pattern.contains(":bold") { font.set_variation(b"wght", 700.0); }
     record::decide("screen", "font", why, &[("file", path)]);
     Some(font)
 }
@@ -64,9 +67,7 @@ impl Chrome {
         if self.fonts.is_empty() { return; }
         for c in text.chars() {
             if c.is_control() || self.fonts.iter().any(|f| f.glyph_id(c).0 != 0) || !self.looked.insert(c) { continue; }
-            if let Some(mut font) = load(&format!("sans:bold:charset={:x}", c as u32), "a fallback title font").filter(|f| f.glyph_id(c).0 != 0) {
-                // A variable font (Noto Sans CJK VF) opens at its lightest; bold, as asked, to match the title font.
-                font.set_variation(b"wght", 700.0);
+            if let Some(font) = load(&format!("sans:bold:charset={:x}", c as u32), "a fallback title font").filter(|f| f.glyph_id(c).0 != 0) {
                 self.fonts.push(font);
             }
         }

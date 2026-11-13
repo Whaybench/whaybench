@@ -14,6 +14,25 @@ const DEFAULT_TEXT: &str = include_str!("../../../config/themes/default.json");
 
 pub type Colour = [f32; 4];
 
+/// WCAG 2 contrast ratio of two colours, 1 to 21.
+fn contrast(a: Colour, b: Colour) -> f32 {
+    let lum = |c: Colour| {
+        let f = |v: f32| if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+        0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// The title of a panel behind: the text faded toward the background, but no further than it still reads on the title
+/// bar, 4.5:1 (WCAG 2 AA for text). A theme whose own text is below that gets its text.
+fn soft_ink(text: Colour, background: Colour, bar: Colour) -> Colour {
+    (10..=20).map(|i| i as f32 / 20.0)
+        .map(|t| [text[0] * t + background[0] * (1.0 - t), text[1] * t + background[1] * (1.0 - t), text[2] * t + background[2] * (1.0 - t), 1.0])
+        .find(|c| contrast(*c, bar) >= 4.5)
+        .unwrap_or(text)
+}
+
 /// When the lines that show which panels hold together are drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JointShow {
@@ -133,8 +152,7 @@ impl Theme {
         let surface_top = colour("frame", "surface_top", &bg);
         let bar_top = colour("frame", "bar_top", &sf);
         let front_top = colour("frame", "front_top", &hex(bar_top));
-        let soft = [text_colour[0], text_colour[1], text_colour[2]];
-        let soft_mix = [(soft[0] + background[0]) / 2.0, (soft[1] + background[1]) / 2.0, (soft[2] + background[2]) / 2.0, 1.0];
+        let soft_mix = soft_ink(text_colour, background, bar_top);
         Some(Theme {
             name: name.to_string(),
             surface_top,
@@ -310,6 +328,15 @@ pub fn save_active(data: &Data, name: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_title_behind_reads_on_its_bar() {
+        let hex = |h: &str| { let v = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).unwrap() as f32 / 255.0; [v(1), v(3), v(5), 1.0] };
+        // The default theme: half way to the background was 2.4:1.
+        let soft = soft_ink(hex("#4c4f69"), hex("#eff1f5"), hex("#f4f6fa"));
+        assert!(contrast(soft, hex("#f4f6fa")) >= 4.5);
+        assert!(contrast(soft, hex("#f4f6fa")) < contrast(hex("#4c4f69"), hex("#f4f6fa")), "still fainter than the front title");
+        assert_eq!(soft_ink(hex("#777777"), hex("#ffffff"), hex("#888888")), hex("#777777"), "text below 4.5:1 is kept");
+    }
     fn scratch(tag: &str) -> Data {
         let dir = std::env::temp_dir().join(format!("wb-theme-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -326,7 +353,7 @@ mod tests {
         assert_ne!(black.surface_top, Theme::load(&d, DEFAULT).unwrap().surface_top);
         assert_eq!(black.border_width, 2.0);
         let ids: Vec<String> = list(&d).into_iter().map(|x| x.0).collect();
-        assert_eq!(ids, vec![DEFAULT, "black", "flat", "fluent"]);
+        assert_eq!(ids, vec![DEFAULT, "black", "catppuccin-mocha", "flat", "fluent", "gruvbox-dark", "solarized-light", "wada-carmine", "wada-dream", "wada-jasper"]);
         assert_eq!(list(&d)[1].1, "Black", "the name in the theme file");
     }
     #[test]

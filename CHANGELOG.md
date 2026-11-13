@@ -13,10 +13,19 @@ and versions follow [Semantic Versioning](https://semver.org/).
   Whaybench → About offers to restart for it. `"auto_update": false` in settings.json leaves updating to the person.
 - The input panel's hint also says Shift+Space switches the input language.
 
+### Added
+
+- Three more themes come with Whaybench: Catppuccin Mocha and Gruvbox Dark (dark), Solarized Light (light). The
+  default theme already has Catppuccin Latte's colours.
+- Three themes from Sanzo Wada's *A Dictionary of Color Combinations* (1933-34), bold around calm panels: Wada Dream
+  (pastel pink and blue), Wada Jasper (red and green on deep indigo), Wada Carmine (yellow, carmine and green).
+
 ### Fixed
 
 - On a desktop whose clipboard cannot be watched (WSLg), the ended `wl-paste` stayed as a zombie process; it is
   waited for now, and the log says desktop copies do not come in.
+- Panel titles read better: the title font opens bold (a variable font such as Noto Sans CJK opened at its lightest
+  and looked grey), and the title of a panel behind fades only as far as it keeps 4.5:1 contrast on its bar (WCAG AA).
 
 ## [0.5.5] - 2026-11-14
 

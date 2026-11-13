@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "name": "Wada Carmine",
+  "version": "1.0",
+  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 313, as digitised in https://github.com/mattdesl/dictionary-of-colour-combinations (MIT); the other shades are mixed from those colours",
+  "palette": {
+    "carmine": "#cc1236",
+    "yellow": "#fff200",
+    "green": "#1a7444",
+    "black": "#111314",
+    "panel": "#fffdf2",
+    "bar": "#fff98c",
+    "line": "#8cbaa2"
+  },
+  "base": {
+    "background": "panel",
+    "surface": "#fffcd5",
+    "text": "black",
+    "accent": "carmine"
+  },
+  "frame": {
+    "outer": 12,
+    "gap": 8,
+    "pad": 4,
+    "radius": 0,
+    "border_width": 2,
+    "shadow_size": 10,
+    "joint_width": 2,
+    "joint_show": "always",
+    "surface_top": "green",
+    "surface_bottom": "#16442c",
+    "panel": "panel",
+    "bar_top": "bar",
+    "bar_bottom": "bar",
+    "front_top": "yellow",
+    "front_bottom": "yellow",
+    "border": "line",
+    "front_border": "carmine",
+    "tab_front": "yellow",
+    "shadow": "#00000066",
+    "shared": "carmine",
+    "wall": "yellow",
+    "edge": "carmine"
+  }
+}

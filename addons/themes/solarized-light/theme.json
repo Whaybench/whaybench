@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "Solarized Light",
+  "version": "1.0",
+  "source": "Colours of Solarized, https://github.com/altercation/solarized (MIT)",
+  "palette": {
+    "base3": "#fdf6e3", "base2": "#eee8d5", "base1": "#93a1a1", "base01": "#586e75", "base02": "#073642",
+    "blue": "#268bd2", "orange": "#cb4b16", "cyan": "#2aa198", "red": "#dc322f", "line": "#e0d9c4"
+  },
+  "base": { "background": "base3", "surface": "base2", "text": "base01", "accent": "blue" },
+  "frame": {
+    "outer": 12, "gap": 8, "pad": 4, "radius": 8, "border_width": 1, "shadow_size": 12,
+    "joint_width": 2, "joint_show": "always",
+    "surface_top": "line", "surface_bottom": "line",
+    "panel": "base3",
+    "bar_top": "base2", "bar_bottom": "base2",
+    "front_top": "base3", "front_bottom": "base3",
+    "border": "line", "front_border": "blue",
+    "tab_front": "base3",
+    "shadow": "#586e7533",
+    "shared": "orange", "wall": "cyan", "edge": "red"
+  }
+}

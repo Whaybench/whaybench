@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::{log as record, paths::Data};
 
 /// The add-ons the program brings: where, file, content.
-const BUNDLED: [(&str, &str, &str); 11] = [
+const BUNDLED: [(&str, &str, &str); 17] = [
     ("languages/ko", "messages.ftl", include_str!("../../../addons/languages/ko/messages.ftl")),
     ("languages/ko", "language.json", include_str!("../../../addons/languages/ko/language.json")),
     ("map-styles/ibis", "style.json", include_str!("../../../addons/map-styles/ibis/style.json")),
@@ -18,6 +18,12 @@ const BUNDLED: [(&str, &str, &str); 11] = [
     ("themes/black", "theme.json", include_str!("../../../addons/themes/black/theme.json")),
     ("themes/flat", "theme.json", include_str!("../../../addons/themes/flat/theme.json")),
     ("themes/fluent", "theme.json", include_str!("../../../addons/themes/fluent/theme.json")),
+    ("themes/catppuccin-mocha", "theme.json", include_str!("../../../addons/themes/catppuccin-mocha/theme.json")),
+    ("themes/gruvbox-dark", "theme.json", include_str!("../../../addons/themes/gruvbox-dark/theme.json")),
+    ("themes/solarized-light", "theme.json", include_str!("../../../addons/themes/solarized-light/theme.json")),
+    ("themes/wada-carmine", "theme.json", include_str!("../../../addons/themes/wada-carmine/theme.json")),
+    ("themes/wada-dream", "theme.json", include_str!("../../../addons/themes/wada-dream/theme.json")),
+    ("themes/wada-jasper", "theme.json", include_str!("../../../addons/themes/wada-jasper/theme.json")),
     ("project-docs/wbs", "WBS.md", include_str!("../../../addons/project-docs/wbs/WBS.md")),
 ];
 /// What the people who make add-ons read; written every time, it is not an add-on.

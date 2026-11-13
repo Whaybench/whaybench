@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "name": "Wada Jasper",
+  "version": "1.0",
+  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 155, as digitised in https://github.com/mattdesl/dictionary-of-colour-combinations (MIT); the other shades are mixed from those colours",
+  "palette": {
+    "jasper": "#eb5324",
+    "benzol": "#00978d",
+    "indigo": "#051230",
+    "panel": "#14203c",
+    "bar": "#034e5a",
+    "front": "#9a3c28",
+    "ink": "#fcebb3"
+  },
+  "base": {
+    "background": "panel",
+    "surface": "indigo",
+    "text": "ink",
+    "accent": "jasper"
+  },
+  "frame": {
+    "outer": 14,
+    "gap": 10,
+    "pad": 4,
+    "radius": 6,
+    "border_width": 2,
+    "shadow_size": 18,
+    "joint_width": 2,
+    "joint_show": "always",
+    "surface_top": "indigo",
+    "surface_bottom": "#043347",
+    "panel": "panel",
+    "bar_top": "bar",
+    "bar_bottom": "bar",
+    "front_top": "front",
+    "front_bottom": "front",
+    "border": "bar",
+    "front_border": "jasper",
+    "tab_front": "front",
+    "shadow": "#00000099",
+    "shared": "jasper",
+    "wall": "benzol",
+    "edge": "#fff200"
+  }
+}

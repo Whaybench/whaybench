@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "name": "Catppuccin Mocha",
+  "version": "1.0",
+  "source": "Colours of Catppuccin Mocha, https://github.com/catppuccin/catppuccin (MIT)",
+  "palette": {
+    "base": "#1e1e2e", "mantle": "#181825", "crust": "#11111b",
+    "surface0": "#313244", "surface1": "#45475a", "surface2": "#585b70",
+    "text": "#cdd6f4", "blue": "#89b4fa", "lavender": "#b4befe",
+    "peach": "#fab387", "sky": "#89dceb", "red": "#f38ba8"
+  },
+  "base": { "background": "base", "surface": "mantle", "text": "text", "accent": "blue" },
+  "frame": {
+    "outer": 14, "gap": 10, "pad": 5, "radius": 12, "border_width": 1.5, "shadow_size": 16,
+    "joint_width": 2, "joint_show": "always",
+    "surface_top": "crust", "surface_bottom": "mantle",
+    "panel": "base",
+    "bar_top": "surface0", "bar_bottom": "mantle",
+    "front_top": "surface1", "front_bottom": "surface0",
+    "border": "surface0", "front_border": "lavender",
+    "tab_front": "surface2",
+    "shadow": "#00000080",
+    "shared": "peach", "wall": "sky", "edge": "red"
+  }
+}
