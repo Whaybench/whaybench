@@ -45,15 +45,10 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     };
     if !state.is_empty() { session_record::state(data, sid, state, note)?; }
     session_record::alive(data, sid, name != "SessionEnd")?;
-    let map_path = data.join(format!("{sid}.json"));
-    if !map_path.exists() {
-        write_json(&map_path, &json!({"sessionId":sid,"nodes":[],"current":null,"version":2,"turn":0,"updatedAt":now_ms()}))?;
-    }
+    let session_map = map::ensure(data, sid)?;
     if name == "SessionStart" || name == "UserPromptSubmit" {
         // The panel follows latest.json until the person selects a session; a resumed conversation shows its map.
-        let m = read_json(&map_path, Value::Null)?;
-        map::validate(&m)?;
-        write_json(&data.join("latest.json"), &m)?;
+        write_json(&data.join("latest.json"), &session_map)?;
     }
     // The agent's process is this session from now on: the MCP server, its child too, finds the session by it.
     if name == "SessionStart" || name == "UserPromptSubmit" { note_agent_process(data, sid); }
@@ -476,7 +471,7 @@ fn carry_in(data: &Path, sid: &str) -> Option<String> {
     let from = std::env::var("WHAYBENCH_MAP_FROM").ok().filter(|f| !f.is_empty())?;
     if !map_is_empty(data, sid) { return None; }
     let label = if from.starts_with('/') {
-        let body = read_json(Path::new(&from), Value::Null).ok()?;
+        let body = map::view_file(data, Path::new(&from)).ok()?;
         if body["nodes"].as_array().is_none_or(Vec::is_empty) { return None; }
         map::start_from(data, sid, &body).ok()?;
         format!("imported map '{}'", body["title"].as_str().unwrap_or(&from))

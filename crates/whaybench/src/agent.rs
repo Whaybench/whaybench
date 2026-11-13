@@ -7,12 +7,13 @@ use wb_core::{codex, i18n, map, paths::{self, Data}, session_record as rec};
 pub fn map(data: &Data, words: &[String]) -> Result<(), String> {
     let input = || serde_json::from_reader::<_, serde_json::Value>(io::stdin().lock()).map_err(|e| e.to_string());
     let map = match words {
+        [f, path] if f == "--file" => map::view_file(&data.root, std::path::Path::new(path)),
         [id] => map::command(&data.root, id, None),
         [id, w] if w == "--write" => map::command(&data.root, id, Some(input()?)),
         [id, w] if w == "--take-over" => map::take_over(&data.root, id, &input()?),
         [id, w] if w == "--start-from" => map::start_from(&data.root, id, &input()?),
         [id, w] if w == "--end-turn" => map::end_turn(&data.root, id),
-        _ => return Err("map SESSION [--write | --take-over | --start-from | --end-turn]".into()),
+        _ => return Err("map SESSION [--write | --take-over | --start-from | --end-turn] | map --file MAP.json".into()),
     };
     println!("{}", map.map_err(|e| e.to_string())?);
     Ok(())

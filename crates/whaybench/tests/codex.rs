@@ -58,26 +58,29 @@ fn first_question_two_turns_and_resume_keep_the_map_visible() {
 
     let first = json!({"upsert":[{"id":"map", "label":"map connection", "isOpen":true, "state":"doing"}], "current":"map"});
     let first = run(data, &["map", "codex-map-test", "--write"], Some(&first));
-    assert_eq!(read(data.join("latest.json")), first);
-    assert_eq!(first["version"], 2);
+    // latest.json is the session's map file: the nodes it shows by number, none of their content.
+    let file = || read(data.join("codex-map-test.json"));
+    assert_eq!(read(data.join("latest.json")), file());
+    assert_eq!(file()["nodes"], json!([{"id": "map", "nid": first["nodes"][0]["nid"]}]));
+    assert_eq!(first["version"], 3);
     assert_eq!(first["nodes"][0]["opened"]["turn"], 0);
     let mut stop = event("Stop");
     stop["turn_id"] = json!("turn1");
     stop["last_assistant_message"] = json!("first turn checked");
     run(data, &["hook", "codex"], Some(&stop));
-    let first = read(data.join("codex-map-test.json"));
+    let first = run(data, &["map", "codex-map-test"], None);
     assert_eq!(first["turn"], 1);
     prompt["prompt"] = json!("check the update in the next turn too");
     run(data, &["hook", "codex"], Some(&prompt));
     assert_eq!(run(data, &["map", "codex-map-test"], None), first);
-    assert_eq!(read(data.join("latest.json")), first);
+    assert_eq!(read(data.join("latest.json")), file());
 
     let second = json!({"upsert":[
         {"id":"turn", "parent":"map", "label":"update per turn → checked (map kept)", "isOpen":false, "state":"done"}
     ], "current":"turn"});
     let second = run(data, &["map", "codex-map-test", "--write"], Some(&second));
     assert_eq!(second["sessionId"], "codex-map-test");
-    assert_eq!(read(data.join("latest.json")), second);
+    assert_eq!(read(data.join("latest.json")), file());
     assert_eq!(second["nodes"][0], first["nodes"][0]);
     assert_eq!(second["nodes"][1]["opened"]["turn"], 1);
     assert_eq!(second["nodes"][1]["closed"]["turn"], 1);
@@ -99,7 +102,7 @@ fn first_question_two_turns_and_resume_keep_the_map_visible() {
     let mut resume = event("SessionStart");
     resume["source"] = json!("resume");
     run(data, &["hook", "codex"], Some(&resume));
-    assert_eq!(read(data.join("latest.json")), finished);
+    assert_eq!(read(data.join("latest.json")), file());
     assert_eq!(sessions::target(&d).as_deref(), Some("codex-map-test"));
 }
 

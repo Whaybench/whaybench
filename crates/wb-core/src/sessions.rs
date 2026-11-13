@@ -304,7 +304,9 @@ pub fn all(d: &Data) -> Vec<Value> {
     out
 }
 
-pub fn map_of(d: &Data, id: &str) -> Option<Value> { read_json(&d.root.join(format!("{id}.json"))) }
+/// A session's map with its nodes' content (`map::view`); None for a session without a map file.
+/// shortcut: opens the store on every call; share one connection if a panel's refresh shows up in a profile.
+pub fn map_of(d: &Data, id: &str) -> Option<Value> { crate::map::view(&d.root, id).ok().filter(|m| m.get("nodes").is_some()) }
 
 pub fn unend(d: &Data, id: &str) {
     let p = sessions_dir(d).join(format!("{id}.json"));

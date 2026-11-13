@@ -202,8 +202,10 @@ pub fn fill_item(template: &str, label: &str, path: &str, id: &str) -> String {
 pub fn draw_request(style: &Style, d: &Data, session: &str, scope: Option<(&str, &str)>) -> String {
     let title = wb_core::i18n::f("map-style", &[("a1", (scope.map(|(_, l)| format!(" · {}", l.chars().take(12).collect::<String>())).unwrap_or_default()).to_string())]);
     let target = scope.map_or_else(|| wb_core::i18n::ai("the-conversation-map-of-this-session").to_string(), |(i, l)| wb_core::i18n::ai_f("branch-node-and-below", &[("l", (l).to_string()), ("i", (i).to_string())]));
-    let map = d.root.join(format!("{session}.json"));
-    wb_core::i18n::ai_f("map-style-show-in-the-style", &[("a1", (style.name).to_string()), ("target", (target).to_string()), ("a2", (map.display()).to_string()), ("a3", (style.instruction().trim()).to_string()), ("title", (title).to_string())])
+    // The map file only names the nodes: the agent reads the map through the command.
+    let _ = d;
+    let map = format!("whaybench map {session}");
+    wb_core::i18n::ai_f("map-style-show-in-the-style", &[("a1", (style.name).to_string()), ("target", (target).to_string()), ("a2", map), ("a3", (style.instruction().trim()).to_string()), ("title", (title).to_string())])
 }
 
 // A style's free text goes into the AI as written, so it is used only after the person read and confirmed it;

@@ -40,6 +40,8 @@ pub fn touch(data: &Path, sid: &str, t: Touch) -> Result<Value> {
     for k in ["agent", "movedTo", "lastCompletedTurn"] {
         if r.get(k).is_none() { if let Some(v) = keep(k) { r[k] = v; } }
     }
+    // A record that says it moved to itself is hidden from its own tab and every list: an active session has not moved.
+    if r["movedTo"] == sid { r.as_object_mut().unwrap().shift_remove("movedTo"); }
     write_json(&path, &r)?;
     Ok(r)
 }
@@ -114,6 +116,18 @@ pub fn carry_from(data: &Path, sid: &str, from: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_active_session_does_not_stay_moved_to_itself() -> Result<()> {
+        let d = std::env::temp_dir().join(format!("wb-selfmove-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("sessions"))?;
+        write_json(&d.join("sessions/s1.json"), &json!({"id":"s1","movedTo":"s1","tab":"t1"}))?;
+        write_json(&d.join("sessions/s2.json"), &json!({"id":"s2","movedTo":"s3"}))?;
+        assert!(touch(&d, "s1", Touch { prompt: Some("q"), tab: None, cwd: None, agent: None })?.get("movedTo").is_none());
+        assert_eq!(touch(&d, "s2", Touch { prompt: Some("q"), tab: None, cwd: None, agent: None })?["movedTo"], "s3", "a real move stays");
+        Ok(())
+    }
 
     #[test]
     fn only_a_new_record_takes_now_as_its_start() -> Result<()> {

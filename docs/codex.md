@@ -33,7 +33,8 @@ Without `--agent` the agent is Claude Code, and nothing on that path changes.
 
 Codex sessions use the same files in the same data directory as Claude Code: `sessions/<id>.json` (`agent: codex`,
 `tab`, `lastCompletedTurn`), `cache/state/<id>.json`, `cache/alive/<id>`, `answers/<id>.json`,
-`answer-log/<id>.jsonl`, `<id>.json` and `latest.json` (the map), `cache/term/<tab>.in/*.json` (the tab's queue).
+`answer-log/<id>.jsonl`, `<id>.json` and `latest.json` (the map: the nodes the session shows, by number),
+`memory/memory.db` (the nodes themselves and how they changed), `cache/term/<tab>.in/*.json` (the tab's queue).
 
 `<data>/codex` holds the login (`auth.json`, mode 0600) and model choice copied once from `~/.codex`, and
 `hooks.json`, written at every start. The hooks are not written to `~/.codex`, so Codex used outside Whaybench is
@@ -41,13 +42,16 @@ not changed.
 
 ## Writing the map
 
-Only `whaybench map` writes map files, whatever the agent:
+Only `whaybench map` writes map files, whatever the agent. A node is stored once, in the memory; a map file lists
+the nodes its session shows:
 
 - `--write`: the plugin's map tool, a side worker's fill, imported branches. The MCP tool and the person's choices
   (notifications panel, map menu) write through the same code in-process.
-- `--take-over`: taking over another session's map (`/background`, `/resume`, a tab that keeps the map). Node
-  times are kept and `latest.json` is left as it is.
-- `--start-from`: a new session from an imported map. Node times start over and `latest.json` is left as it is.
+- `--take-over`: taking over another session's map (`/background`, `/resume`, a tab that keeps the map). The new
+  session shows the same nodes, not copies, and `latest.json` is left as it is.
+- `--start-from`: a new session from a saved map. Nodes the memory has are shown as they are now; a node only the
+  file holds is made new. `latest.json` is left as it is.
+- `--file MAP.json`: reads a saved map with its nodes' content, which the file itself does not hold.
 - `--end-turn`: the end of a turn.
 
 The plugin calls `~/.local/bin/whaybench`, which Whaybench links at start.

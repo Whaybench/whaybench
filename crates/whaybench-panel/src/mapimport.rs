@@ -65,7 +65,7 @@ fn below(nodes: &[Value], root: &str) -> Vec<Value> {
 pub fn read(d: &Data, source: &Source) -> Option<(Vec<Value>, String, String)> {
     match source {
         Source::File(p) => {
-            let v: Value = serde_json::from_str(&fs::read_to_string(p).ok()?).ok()?;
+            let v = wb_core::map::view_file(&d.root, p).ok()?;
             let title = if s(&v, "title").is_empty() { p.file_stem()?.to_string_lossy().to_string() } else { s(&v, "title").to_string() };
             // A session's own map names its session, a saved one where it came from.
             let from = if s(&v, "from").is_empty() { s(&v, "sessionId") } else { s(&v, "from") };
@@ -90,7 +90,7 @@ pub fn keep(d: &Data, nodes: &[Value], title: &str, from: &str) -> std::io::Resu
     fs::create_dir_all(imported_dir(d))?;
     let path = wb_core::map::free_path(&imported_dir(d), &wb_core::map::file_name(sessions::span(d, from, nodes), None, ""));
     let imported = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-    fs::write(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": nodes}).to_string())?;
+    fs::write(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": wb_core::map::saved_nodes(nodes)}).to_string())?;
     Ok(path)
 }
 
@@ -184,7 +184,9 @@ mod tests {
         let d = scratch("a");
         fs::create_dir_all(d.root.join("sessions")).unwrap();
         fs::write(d.root.join("sessions/s1.json"), r#"{"id":"s1","firstPrompt":"q"}"#).unwrap();
-        fs::write(d.root.join("s1.json"), r#"{"nodes":[{"id":"a","label":"top"},{"id":"b","parent":"a","label":"bottom"},{"id":"z","label":"other"}]}"#).unwrap();
+        wb_core::map::command(&d.root, "s1", Some(json!({"nodes":[{"id":"a","label":"top"},{"id":"b","parent":"a","label":"bottom"},{"id":"z","label":"other"}]}))).unwrap();
+        // Another session is on show: this one is one of the others.
+        fs::remove_file(d.root.join("latest.json")).unwrap();
         let (nodes, title, from) = read(&d, &Source::Session("s1".into(), Some("a".into()))).unwrap();
         assert_eq!((nodes.len(), title.as_str(), from.as_str()), (2, "top", "s1"));
         assert!(nodes[0].get("parent").is_none());

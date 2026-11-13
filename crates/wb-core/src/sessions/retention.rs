@@ -42,6 +42,14 @@ fn size_of(p: &Path) -> u64 {
 pub fn prune(d: &Data) -> usize {
     let (days, mb) = retention(d);
     if days == 0 && mb == 0 { return 0; }
+    // How the nodes changed is kept as long as the conversations: older events go, the nodes stay as they are.
+    // shortcut: `keep_mb` counts conversation records only; count the store's events in it if they grow large.
+    if days > 0 && d.root.join("memory").join("memory.db").exists() {
+        let before = (chrono::Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
+        if let Ok(n) = crate::db::open(&d.root).and_then(|c| crate::db::events_drop_before(&c, &before)) {
+            if n > 0 { record::decide("memory", "old events dropped", "over the keeping limit", &[("events", n.to_string())]); }
+        }
+    }
     let all = all(d);
     // Each conversation is its last number with the numbers that moved on into it; most recently active first.
     let mut convs: Vec<(i64, Vec<String>)> = all.iter().filter(|r| r.get("movedTo").and_then(Value::as_str).is_none_or(str::is_empty))
@@ -101,7 +109,7 @@ pub fn save_lost_maps(d: &Data) -> usize {
         if nodes.is_empty() { continue; }
         let path = crate::map::free_path(&d.maps(), &crate::map::file_name(span(d, id, &nodes), None, "auto-"));
         let body = serde_json::json!({"format": "whaybench-map", "version": map.get("version"), "title": session_name(d, id),
-            "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": id, "auto": true, "nodes": nodes});
+            "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": id, "auto": true, "nodes": crate::map::saved_nodes(&nodes)});
         if fs::create_dir_all(d.maps()).and_then(|_| fs::write(&path, body.to_string())).is_ok() {
             record::decide("session", "map saved", "its conversation is no longer kept", &[("session", id.to_string()), ("file", path.display().to_string())]);
             done.push(id.to_string());
@@ -123,16 +131,16 @@ mod tests {
         rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b","firstPrompt":"q"}));
         rec(&d, "b", serde_json::json!({"id":"b","firstPrompt":"q"}));
         rec(&d, "tab", serde_json::json!({"id":"tab"}));
-        let map = |label: &str| serde_json::json!({"nodes":[{"id":"n","label":label,"opened":{"at":1_790_000_000_000_i64}}]}).to_string();
-        fs::write(d.root.join("a.json"), map("early")).unwrap();
-        fs::write(d.root.join("b.json"), map("whole")).unwrap();
-        fs::write(d.root.join("tab.json"), map("carried copy")).unwrap();
+        for (sid, label) in [("a", "early"), ("b", "whole"), ("tab", "carried copy")] {
+            crate::map::command(&d.root, sid, Some(serde_json::json!({"upsert":[{"id":"n","label":label}]}))).unwrap();
+        }
         assert_eq!(save_lost_maps(&d), 1, "only the last number, and not a tab where nothing was asked");
         let files: Vec<_> = fs::read_dir(d.maps()).unwrap().flatten().map(|f| f.path()).collect();
         assert_eq!(files.len(), 1);
         assert!(files[0].file_name().unwrap().to_string_lossy().starts_with("auto-map-"));
         let v = read_json(&files[0]).unwrap();
-        assert_eq!((v["from"].as_str(), v["auto"].as_bool(), v["nodes"][0]["label"].as_str()), (Some("b"), Some(true), Some("whole")));
+        assert_eq!((v["from"].as_str(), v["auto"].as_bool(), v["nodes"][0].get("label")), (Some("b"), Some(true), None), "the saved map names the node");
+        assert_eq!(crate::map::view_file(&d.root, &files[0]).unwrap()["nodes"][0]["label"], "whole");
         assert_eq!(save_lost_maps(&d), 0, "once");
     }
     #[test]

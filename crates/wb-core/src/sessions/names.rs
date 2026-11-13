@@ -137,9 +137,9 @@ mod tests {
         rec(&d, "s1", serde_json::json!({"id":"s1","lastActive":1000}));
         rec(&d, "s2", serde_json::json!({"id":"s2","lastActive":2000}));
         rec(&d, "s3", serde_json::json!({"id":"s3","firstPrompt":"first question"}));
-        let map = |cur: &str| serde_json::json!({"current":cur,"nodes":[{"id":"a","label":"same topic"},{"id":"x","parent":"a","label":"one"},{"id":"y","parent":"a","label":"two"}]});
-        fs::write(d.root.join("s1.json"), map("x").to_string()).unwrap();
-        fs::write(d.root.join("s2.json"), map("y").to_string()).unwrap();
+        let map = |cur: &str| Some(serde_json::json!({"current":cur,"nodes":[{"id":"a","label":"same topic"},{"id":"x","parent":"a","label":"one"},{"id":"y","parent":"a","label":"two"}]}));
+        crate::map::command(&d.root, "s1", map("x")).unwrap();
+        crate::map::command(&d.root, "s2", map("y")).unwrap();
         let t = map_titles(&d);
         assert_eq!(t["s1"], "same topic · one");
         assert_eq!(t["s2"], "same topic · two");

@@ -6,6 +6,34 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+The memory keeps every map node once, in a database, as it was meant to: a node no longer disappears from the memory
+when it leaves a map. Data from before is not converted.
+
+### Changed
+
+- Map nodes are stored once, in `memory/memory.db` (SQLite) in the data folder. A session's map file lists the nodes
+  it shows and no longer holds them. A map taken over, and a new conversation started from a saved map, show the same
+  nodes instead of copies, so a change made in one conversation shows in the others.
+- Deleting a node is the same on the map and in the notifications panel: the node is marked deleted, leaves every
+  map, and waits in the panel's Deleted section. Restore puts it back.
+- Deleting for good asks once, naming the node and listing its history, and takes that history with it.
+- The agent's `remove` only takes a node off its conversation's map. The node stays in the memory.
+- Saved and imported maps list their nodes by number. `whaybench map --file MAP.json` reads one with its content.
+- With `"keep_days"` set, the record of how nodes changed is dropped after that many days. The nodes stay.
+
+### Added
+
+- History tab: a right-click on a line restores its node to the chosen conversation's map, deletes it, or deletes it
+  for good.
+- Search in the memory finds a word inside a longer one, in names and details.
+
+### Fixed
+
+- The memory list, search and the notifications panel were built from every session's map file, so a node taken off
+  a map was gone from the memory too.
+- A conversation resumed after leaving it could show an empty map: its record said it had moved to itself, and its
+  tab was paired with the empty session left behind.
+
 ## [0.5.2] - 2026-11-13
 
 Whaybench Setup for Windows installs Whaybench inside again; 0.5.1's made only the shortcuts on a new machine.

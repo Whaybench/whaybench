@@ -1,101 +1,62 @@
-//! The memory: every change to every conversation map, in time order, appended and never rewritten.
-//! A session's map file is what this log says about that session's nodes; the notifications panel is another view of it.
-//! Events follow CloudEvents 1.0: `specversion`, `id`, `source`, `type`, `time`, `subject`, `data`.
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    os::unix::io::AsRawFd,
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-};
+//! The memory: every node of every conversation, stored once (`db`), and how each came to be what it is.
+//! This is what a session and the person are shown of it: the memory list, what changed, a node with its events,
+//! search, and the notifications panel's sections.
+use std::{collections::{HashMap, HashSet}, fs, path::{Path, PathBuf}};
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
-use crate::map::Result;
+use crate::{db, map::{self, Result, is_open}};
 
-/// Fields a node carries that the memory does not follow: the program's stamps and where the conversation stayed.
-const NOT_FOLLOWED: [&str; 5] = ["id", "opened", "changed", "closed", "links"];
-
-static SEQ: AtomicU64 = AtomicU64::new(0);
-
-/// The log file of the month `ms` falls in: `memory/events/<YYYY-MM>.jsonl`.
-pub fn file_for(data: &Path, ms: i64) -> PathBuf {
-    let month = chrono::DateTime::from_timestamp_millis(ms).map(|t| t.format("%Y-%m").to_string()).unwrap_or_else(|| "0000-00".into());
-    data.join("memory").join("events").join(format!("{month}.jsonl"))
-}
-
-/// One event. `source` is `session/<id>`, `person`, `worker` or `program`; `subject` is `<session>/<node>`.
-pub fn event(source: &str, kind: &str, subject: &str, at: i64, data: Value) -> Value {
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let time = chrono::DateTime::from_timestamp_millis(at).map(|t| t.to_rfc3339()).unwrap_or_default();
-    json!({"specversion": "1.0", "id": format!("{at:x}-{:x}-{n:x}", std::process::id()), "source": source, "type": kind,
-        "time": time, "subject": subject, "data": data})
-}
-
-/// Appends the events, one line each, under an exclusive lock so lines of two programs never mix.
-pub fn record(data: &Path, at: i64, events: &[Value]) -> Result<()> {
-    if events.is_empty() { return Ok(()); }
-    let path = file_for(data, at);
-    fs::create_dir_all(path.parent().ok_or("missing parent directory")?)?;
-    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-    let text: String = events.iter().map(|e| format!("{e}\n")).collect();
-    // SAFETY: flock on a file this function owns; released when the file closes.
-    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-    file.write_all(text.as_bytes())?;
-    Ok(())
-}
+/// Open nodes, as a condition over the node columns.
+const OPEN: &str = "coalesce(state, '') NOT IN ('done', 'dropped', 'removed')";
+/// Most recently changed first.
+const RECENT: &str = "coalesce(json_extract(changed, '$.at'), json_extract(opened, '$.at')) DESC";
 
 /// A file the session read, changed or attached to a node: `file.touched`, so every session's nodes that dealt with a
-/// file can be found by its path.
+/// file can be found by its path. `node` is the session's id for the node.
 pub fn file_touched(data: &Path, sid: &str, op: &str, path: &str, node: Option<&str>) -> Result<()> {
     if !["read", "edit", "attach"].contains(&op) { return Err(format!("file touch must be read, edit or attach: {op}").into()); }
-    let at = chrono::Local::now().timestamp_millis();
-    let subject = format!("{sid}/{}", node.unwrap_or(""));
-    record(data, at, &[event(&format!("session/{sid}"), "file.touched", &subject, at, json!({"path": path, "op": op}))])
-}
-
-/// Every session's map as stored: (session id, its nodes, when it was last written).
-pub(crate) fn maps(data: &Path) -> Vec<(String, Vec<Value>, i64)> {
-    let mut out = Vec::new();
-    for f in fs::read_dir(data).into_iter().flatten().flatten() {
-        let name = f.file_name().to_string_lossy().to_string();
-        let Some(sid) = name.strip_suffix(".json").filter(|s| s.len() == 36 && s.matches('-').count() == 4) else { continue };
-        let Some(map) = fs::read_to_string(f.path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
-        let mut nodes = map["nodes"].as_array().cloned().unwrap_or_default();
-        for n in &mut nodes { crate::map::settle_old(n); }
-        out.push((sid.to_string(), nodes, map["updatedAt"].as_i64().unwrap_or(0)));
-    }
-    out.sort_by_key(|m| std::cmp::Reverse(m.2));
-    out
+    let entries = map::session_entries(data, sid);
+    let nid = node.and_then(|id| entries.iter().find(|e| e.0 == id)).map(|e| e.1.as_str());
+    let mut e = map::event(&format!("session/{sid}"), "file.touched", nid, Some(sid), chrono::Local::now().timestamp_millis(), json!({"path": path, "op": op}));
+    e["path"] = json!(path);
+    db::event_add(&db::open(data)?, &e)
 }
 
 fn when(n: &Value) -> i64 { ["changed", "opened"].iter().find_map(|k| n.get(*k)?.get("at")?.as_i64()).unwrap_or(0) }
-use crate::map::is_open;
 
-/// One node in one line: `memory id · label · state or kind · session · last change`.
-pub fn line(sid: &str, n: &Value) -> String {
-    let key = n.get("memid").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("{}/{}", &sid[..8.min(sid.len())], n["id"].as_str().unwrap_or("")));
+/// One node in one line: `memory id · label · state or kind · the session it came from · last change`.
+pub fn line(n: &Value) -> String {
+    let from = n["origin"].as_str().unwrap_or("");
+    let key = n.get("memid").or_else(|| n.get("nid")).and_then(Value::as_str).unwrap_or("");
     let what = n.get("state").or_else(|| n.get("kind")).and_then(Value::as_str).unwrap_or(if is_open(n) { "open" } else { "closed" });
     let day = chrono::DateTime::from_timestamp_millis(when(n)).map(|t| t.with_timezone(&chrono::Local).format("%m-%d").to_string()).unwrap_or_default();
     let due = n.get("due").or_else(|| n.get("at")).and_then(Value::as_str).map(|d| format!(" · due {d}")).unwrap_or_default();
     // A decision's reason travels with it: a new session misses the why more than the what.
     let why = n.get("detail").and_then(Value::as_str).filter(|_| n["kind"] == "conclusion")
         .map(|d| format!(" · why: {}", d.split(['.', '。', '\n']).next().unwrap_or("").trim().chars().take(60).collect::<String>())).unwrap_or_default();
-    format!("{key} · {} · {what} · {} · {day}{due}{why}", n["label"].as_str().unwrap_or(""), &sid[..4.min(sid.len())])
+    format!("{key} · {} · {what} · {} · {day}{due}{why}", n["label"].as_str().unwrap_or(""), &from[..4.min(from.len())])
 }
 
-/// Every event in the log, oldest first. shortcut: reads all month files each time; keep an index when the log grows large.
+/// Every event in the store, oldest first. shortcut: reads all of them each time; page it when the History tab grows slow.
 pub fn events(data: &Path) -> Vec<Value> {
-    let mut files: Vec<PathBuf> = fs::read_dir(data.join("memory").join("events")).into_iter().flatten().flatten().map(|f| f.path()).collect();
-    files.sort();
-    files.iter().flat_map(|f| fs::read_to_string(f).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect::<Vec<Value>>()).collect()
+    db::open(data).and_then(|c| db::events(&c, "1", &[])).unwrap_or_default()
 }
 
-/// One session's node changes in the order they happened: (turn, time in ms, node id, whether it closed).
+/// Changes whenever the events did: a panel reads them again only then.
+pub fn events_mark(data: &Path) -> String { db::open(data).and_then(|c| db::events_mark(&c)).unwrap_or_default() }
+
+/// One node's name as it is now; None for a node that is gone.
+pub fn label_of(data: &Path, nid: &str) -> Option<String> {
+    db::node_get(&db::open(data).ok()?, nid).ok()??.get("label")?.as_str().map(String::from)
+}
+
+/// One session's node changes in the order they happened: (turn, time in ms, the session's id for the node, whether it closed).
 pub fn steps(data: &Path, sid: &str) -> Vec<(i64, i64, String, bool)> {
-    let prefix = format!("{sid}/");
-    events(data).into_iter().filter(|e| e["type"] == "node.added" || e["type"] == "node.changed").filter_map(|e| {
-        let id = e["subject"].as_str()?.strip_prefix(&prefix)?.to_string();
+    let entries = map::session_entries(data, sid);
+    let evs = db::open(data).and_then(|c| db::events(&c, "session = ? AND type IN ('node.added', 'node.changed')", &[sid])).unwrap_or_default();
+    evs.into_iter().filter_map(|e| {
+        let id = entries.iter().find(|x| Some(x.1.as_str()) == e["nid"].as_str())?.0.clone();
         let at = chrono::DateTime::parse_from_rfc3339(e["time"].as_str()?).ok()?.timestamp_millis();
         // A change holds [before, after]; a node made closed holds the value itself.
         let state = if e["type"] == "node.added" { &e["data"]["state"] } else { &e["data"]["state"][1] };
@@ -104,95 +65,94 @@ pub fn steps(data: &Path, sid: &str) -> Vec<(i64, i64, String, bool)> {
     }).collect()
 }
 
-/// The paths a session's events touched.
-fn paths_of(evs: &[Value], sid: &str) -> std::collections::HashSet<String> {
-    evs.iter().filter(|e| e["type"] == "file.touched" && e["source"] == format!("session/{sid}")).filter_map(|e| e["data"]["path"].as_str().map(String::from)).collect()
+/// The paths a session touched, and the nodes other sessions had in hand when they touched the same ones.
+/// shortcut: reads every file event; index by path in SQL when there are many.
+fn by_file(conn: &rusqlite::Connection, sid: &str) -> Result<(HashSet<String>, HashSet<String>)> {
+    let mine: HashSet<String> = db::events(conn, "type = 'file.touched' AND session = ?", &[sid])?.iter().filter_map(|e| e["path"].as_str().map(String::from)).collect();
+    let nids = db::events(conn, "type = 'file.touched' AND session != ? AND nid IS NOT NULL", &[sid])?.iter()
+        .filter(|e| e["path"].as_str().is_some_and(|p| mine.contains(p))).filter_map(|e| e["nid"].as_str().map(String::from)).collect();
+    Ok((mine, nids))
 }
 
-/// The memory list a session sees (3.19): A its own open nodes, C related nodes of other sessions (same memory id,
-/// same files, due soon), B other sessions' recent nodes; one line each, at most `limit` lines.
+/// The memory list a session sees (3.19): A its own open nodes, C related nodes not on its map (same memory id,
+/// same files, due soon), B recent nodes not on its map; one line each, at most `limit` lines.
 pub fn list(data: &Path, sid: &str, limit: usize) -> Vec<String> {
-    let all = maps(data);
-    let evs = events(data);
-    let own: Vec<Value> = all.iter().find(|m| m.0 == sid).map(|m| m.1.clone()).unwrap_or_default();
-    let own_mem: std::collections::HashSet<&str> = own.iter().filter_map(|n| n.get("memid")?.as_str()).collect();
-    let mine = paths_of(&evs, sid);
-    // Nodes of other sessions that touched the same files.
-    let by_file: std::collections::HashSet<String> = evs.iter().filter(|e| e["type"] == "file.touched" && e["source"] != format!("session/{sid}"))
-        .filter(|e| e["data"]["path"].as_str().is_some_and(|p| mine.contains(p))).filter_map(|e| e["subject"].as_str().map(String::from)).collect();
-    let soon = chrono::Local::now().date_naive() + chrono::Duration::days(7);
-    let due_soon = |n: &Value| n.get("due").or_else(|| n.get("at")).and_then(Value::as_str).and_then(|d| chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d").ok()).is_some_and(|d| d <= soon);
-    let (mut out, mut seen) = (Vec::new(), std::collections::HashSet::new());
-    let mut push = |s: &str, n: &Value, out: &mut Vec<String>| {
-        // A carried map repeats nodes under another session: one line for the same node (memory id and label). Another
-        // node about the same problem, such as a decision made elsewhere, is shown.
-        let key = n.get("memid").and_then(Value::as_str).map(|m| format!("{m}\u{0}{}", n["label"].as_str().unwrap_or(""))).unwrap_or_else(|| format!("{s}/{}", n["id"]));
-        if out.len() < limit && seen.insert(key) { out.push(line(s, n)); }
+    let inner = || -> Result<Vec<String>> {
+        let conn = db::open(data)?;
+        let own = map::view(data, sid)?.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+        let mut seen: HashSet<String> = own.iter().filter(|n| !is_open(n)).filter_map(|n| n["nid"].as_str().map(String::from)).collect();
+        let mut out = Vec::new();
+        let cap = limit + own.len();
+        let mut push = |n: &Value, out: &mut Vec<String>| if out.len() < limit && n["state"] != "removed" && seen.insert(n["nid"].as_str().unwrap_or("").to_string()) { out.push(line(n)); };
+        for n in own.iter().filter(|n| is_open(n)) { push(n, &mut out); }
+        let own_mem: HashSet<&str> = own.iter().filter_map(|n| n.get("memid")?.as_str()).collect();
+        for m in &own_mem { for n in db::nodes(&conn, "memid = ?", &[m])? { push(&n, &mut out); } }
+        for nid in by_file(&conn, sid)?.1 { if let Some(n) = db::node_get(&conn, &nid)? { push(&n, &mut out); } }
+        let soon = (chrono::Local::now().date_naive() + chrono::Duration::days(7)).format("%Y-%m-%d 99").to_string();
+        for n in db::nodes(&conn, &format!("{OPEN} AND coalesce(due, at) <= ?"), &[&soon])? { push(&n, &mut out); }
+        for n in db::nodes(&conn, &format!("1 ORDER BY {RECENT} LIMIT {cap}"), &[])? { push(&n, &mut out); }
+        Ok(out)
     };
-    for n in own.iter().filter(|n| is_open(n)) { push(sid, n, &mut out); }
-    for (s, nodes, _) in all.iter().filter(|m| m.0 != sid) {
-        for n in nodes.iter().filter(|n| n["state"] != "removed") {
-            let related = n.get("memid").and_then(Value::as_str).is_some_and(|m| own_mem.contains(m))
-                || by_file.contains(&format!("{s}/{}", n["id"].as_str().unwrap_or(""))) || (is_open(n) && due_soon(n));
-            if related { push(s, n, &mut out); }
-        }
-    }
-    let mut recent: Vec<(&String, &Value)> = all.iter().filter(|m| m.0 != sid).flat_map(|m| m.1.iter().filter(|n| n["state"] != "removed").map(move |n| (&m.0, n))).collect();
-    recent.sort_by_key(|(_, n)| std::cmp::Reverse(when(n)));
-    for (s, n) in recent { push(s, n, &mut out); }
-    out
+    inner().unwrap_or_default()
 }
 
 fn seen_file(data: &Path, sid: &str) -> PathBuf { data.join("cache").join("memory-seen").join(sid) }
 
-/// Marks the log as seen by the session up to now.
+/// Marks the memory as seen by the session up to now.
 pub fn mark_seen(data: &Path, sid: &str) {
     let f = seen_file(data, sid);
     let _ = fs::create_dir_all(f.parent().unwrap_or(data));
     let _ = fs::write(f, chrono::Local::now().timestamp_millis().to_string());
 }
 
+fn seen_at(data: &Path, sid: &str) -> i64 { fs::read_to_string(seen_file(data, sid)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0) }
+
+fn after(e: &Value, since: i64) -> bool { chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since) }
+
 /// What changed for this session since it last saw the memory: other sessions' and the person's events on its
 /// nodes, on its memory ids, or on the files it touched. Marks them seen.
 pub fn delta(data: &Path, sid: &str) -> Vec<String> {
-    let since: i64 = fs::read_to_string(seen_file(data, sid)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
-    let evs = events(data);
-    let own: Vec<Value> = maps(data).into_iter().find(|m| m.0 == sid).map(|m| m.1).unwrap_or_default();
-    let own_mem: std::collections::HashSet<&str> = own.iter().filter_map(|n| n.get("memid")?.as_str()).collect();
-    let mine = paths_of(&evs, sid);
-    let out = evs.iter().filter(|e| e["source"] != format!("session/{sid}"))
-        .filter(|e| chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since))
-        .filter(|e| e["subject"].as_str().is_some_and(|s| s.starts_with(&format!("{sid}/")))
-            || e["memid"].as_str().is_some_and(|m| own_mem.contains(m))
-            || e["data"]["path"].as_str().is_some_and(|p| mine.contains(p)))
-        .map(|e| format!("{} · {} · {} · {}", e["type"].as_str().unwrap_or(""), e["source"].as_str().unwrap_or(""), e["subject"].as_str().unwrap_or(""), e["data"]))
-        .collect();
+    let since = seen_at(data, sid);
+    let inner = || -> Result<Vec<String>> {
+        let conn = db::open(data)?;
+        let own = map::view(data, sid)?.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+        let ids: HashMap<&str, &str> = own.iter().filter_map(|n| Some((n["nid"].as_str()?, n["id"].as_str()?))).collect();
+        let own_mem: HashSet<&str> = own.iter().filter_map(|n| n.get("memid")?.as_str()).collect();
+        let mine = by_file(&conn, sid)?.0;
+        Ok(db::events(&conn, "source != ?", &[&format!("session/{sid}")])?.iter().filter(|e| after(e, since))
+            .filter(|e| e["nid"].as_str().is_some_and(|n| ids.contains_key(n)) || e["memid"].as_str().is_some_and(|m| own_mem.contains(m)) || e["path"].as_str().is_some_and(|p| mine.contains(p)))
+            // The node as this session knows it: its id on this map, else its memory id.
+            .map(|e| { let node = e["nid"].as_str().and_then(|n| ids.get(n).copied()).or(e["memid"].as_str()).unwrap_or("");
+                format!("{} · {} · {node} · {}", e["type"].as_str().unwrap_or(""), e["source"].as_str().unwrap_or(""), e["data"]) })
+            .collect())
+    };
+    let out = inner().unwrap_or_default();
     mark_seen(data, sid);
     out
 }
 
-/// A node by memory id or `<session>/<node id>`: the node as stored in every session that has it, and its events.
+/// A node by memory id, node number or `<session>/<the session's id for it>`: every node it names, and their events.
 pub fn show(data: &Path, key: &str) -> Value {
-    let mut found = Vec::new();
-    for (s, nodes, _) in maps(data) {
-        for n in nodes.into_iter().filter(|n| n["memid"] == key || format!("{s}/{}", n["id"].as_str().unwrap_or("")) == key) { found.push(json!({"session": s, "node": n})); }
-    }
-    let subjects: Vec<String> = found.iter().map(|f| format!("{}/{}", f["session"].as_str().unwrap_or(""), f["node"]["id"].as_str().unwrap_or(""))).collect();
-    let evs: Vec<Value> = events(data).into_iter().filter(|e| e["subject"].as_str().is_some_and(|s| subjects.iter().any(|x| x == s))).collect();
-    json!({"nodes": found, "events": evs})
+    let inner = || -> Result<Value> {
+        let conn = db::open(data)?;
+        let on_map = key.split_once('/').and_then(|(s, id)| map::session_entries(data, s).into_iter().find(|e| e.0 == id)).map(|e| e.1);
+        let key = on_map.as_deref().unwrap_or(key);
+        let (mut nodes, mut evs) = (Vec::new(), Vec::new());
+        for n in db::nodes(&conn, "memid = ?1 OR nid = ?1", &[key])? {
+            let nid = n["nid"].as_str().unwrap_or("");
+            evs.extend(db::events(&conn, "nid = ?", &[nid])?);
+            nodes.extend(db::node_get(&conn, nid)?);
+        }
+        Ok(json!({"nodes": nodes, "events": evs}))
+    };
+    inner().unwrap_or_else(|e| json!({"error": e.to_string()}))
 }
 
-/// Nodes of every session whose label or detail holds any of the words (any case), most recent first.
+/// Nodes whose label or detail holds any of the words (any case), most recent first.
 pub fn search(data: &Path, words: &[String], limit: usize) -> Vec<String> {
-    let words: Vec<String> = words.iter().map(|w| w.to_lowercase()).filter(|w| !w.is_empty()).collect();
-    let mut hits: Vec<(String, Value)> = maps(data).into_iter().flat_map(|(s, nodes, _)| nodes.into_iter().map(move |n| (s.clone(), n)))
-        .filter(|(_, n)| { let l = format!("{} {}", n["label"].as_str().unwrap_or(""), n["detail"].as_str().unwrap_or("")).to_lowercase(); words.iter().any(|w| l.contains(w)) }).collect();
-    hits.sort_by_key(|(_, n)| std::cmp::Reverse(when(n)));
-    hits.iter().take(limit).map(|(s, n)| line(s, n)).collect()
+    db::open(data).and_then(|c| db::search(&c, words, limit)).unwrap_or_default().iter().map(line).collect()
 }
 
-/// The notifications panel's sections (3.19): nodes with a time or due date, the person's marked ones, what changed since the
-/// person last looked, held ones and the trash. Each item is `{session, node, line}`; a carried node shows once.
 /// One node as the person reads it: `label · state · due · session name` (no ids).
 fn person_line(name: &str, n: &Value) -> String {
     let mark = if n.get("mark").is_some() { "! " } else { "" };
@@ -203,219 +163,165 @@ fn person_line(name: &str, n: &Value) -> String {
     parts.join(" · ")
 }
 
+/// The notifications panel's sections (3.19): nodes with a time or due date, the person's marked ones, what changed since the
+/// person last looked, held ones and the deleted ones. Each item is `{session, node, line}`: `session` is where the
+/// node came from, and the node's `id` is its node number, the one `map::person`, `trash` and `purge` take.
 /// `current` is the conversation on show: its open nodes get a section of their own, so any of them can be marked.
+/// shortcut: reads every node each time; ask the store per section when there are many.
 pub fn board(data: &Path, current: Option<&str>) -> Value {
-    let all = maps(data);
+    let Ok(conn) = db::open(data) else { return json!({}) };
+    let mut all = db::nodes(&conn, &format!("1 ORDER BY {RECENT}"), &[]).unwrap_or_default();
+    for n in &mut all { n["id"] = n["nid"].clone(); }
     let d = crate::paths::Data::new(data.to_path_buf());
-    let names: std::collections::HashMap<&str, String> = all.iter().map(|m| (m.0.as_str(), crate::sessions::session_name(&d, &m.0))).collect();
-    let (mut due, mut marked, mut check, mut held, mut trash, mut seen) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), std::collections::HashSet::new());
-    for (s, nodes, _) in &all {
-        for n in nodes {
-            // Same rule as the memory list: a carried copy (memory id and label) once; another node on the problem stays.
-            let key = n.get("memid").and_then(Value::as_str).map(|m| format!("{m}\u{0}{}", n["label"].as_str().unwrap_or(""))).unwrap_or_else(|| format!("{s}/{}", n["id"]));
-            if !seen.insert(key) { continue; }
-            let item = json!({"session": s, "node": n, "line": person_line(&names[s.as_str()], n)});
-            if n["state"] == "removed" { trash.push(item); continue; }
-            if n["state"] == "postponed" { held.push(item.clone()); }
-            // The person's mark holds whatever the state: what they marked they want to see again.
-            if n.get("mark").is_some() { marked.push(item.clone()); }
-            if !is_open(n) { continue; }
-            // The agent's suggestion to close it: the person approves or declines.
-            if let Some(sg) = n.get("suggest").filter(|v| v.is_object()) {
-                let to = crate::i18n::t(if sg["state"] == "dropped" { "notify-dropped" } else { "notify-done" });
-                let line = format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::f("notify-suggested", &[("state", to.to_string()), ("why", sg["why"].as_str().unwrap_or("").to_string())]), names[s.as_str()]);
-                check.push(json!({"session": s, "node": n, "line": line}));
-            }
-            if n.get("due").or_else(|| n.get("at")).is_some() { due.push(item); }
+    let mut names: HashMap<String, String> = HashMap::new();
+    let mut name = |n: &Value| { let s = n["origin"].as_str().unwrap_or(""); names.entry(s.to_string()).or_insert_with(|| crate::sessions::session_name(&d, s)).clone() };
+    let mut item = |n: &Value, line: Option<String>| { let who = name(n); json!({"session": n["origin"], "node": n, "line": line.map(|l| format!("{l} · {who}")).unwrap_or_else(|| person_line(&who, n))}) };
+    let (mut due, mut marked, mut check, mut held, mut trash) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for n in &all {
+        if n["state"] == "removed" { trash.push(item(n, None)); continue; }
+        if n["state"] == "postponed" { held.push(item(n, None)); }
+        // The person's mark holds whatever the state: what they marked they want to see again.
+        if n.get("mark").is_some() { marked.push(item(n, None)); }
+        if !is_open(n) { continue; }
+        // The agent's suggestion to close it: the person approves or declines.
+        if let Some(sg) = n.get("suggest").filter(|v| v.is_object()) {
+            let to = crate::i18n::t(if sg["state"] == "dropped" { "notify-dropped" } else { "notify-done" });
+            check.push(item(n, Some(format!("{} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::f("notify-suggested", &[("state", to.to_string()), ("why", sg["why"].as_str().unwrap_or("").to_string())])))));
         }
+        if n.get("due").or_else(|| n.get("at")).is_some() { due.push(item(n, None)); }
     }
     let date = |i: &Value| i["node"].get("due").or_else(|| i["node"].get("at")).and_then(Value::as_str).unwrap_or("").to_string();
     due.sort_by_key(date);
-    let since: i64 = fs::read_to_string(seen_file(data, "person")).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
-    let node_of = |s: &str, id: &str| all.iter().find(|m| m.0 == s).and_then(|m| m.1.iter().find(|n| n["id"] == id)).cloned();
+    let since = seen_at(data, "person");
+    let node_of = |nid: &str| all.iter().find(|n| n["nid"] == nid);
     let mut changed: Vec<Value> = Vec::new();
     // Settled by a decision since the person last looked: the problem, and the decision that settled it.
-    let evs = events(data);
-    for e in evs.iter().rev().filter(|e| e["type"] == "link.added" && e["data"]["rel"] == "resolves") {
-        if !chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since) { continue; }
-        let subject = e["subject"].as_str().unwrap_or("");
-        let (s, by) = subject.split_once('/').unwrap_or((subject, ""));
-        let (Some(target), Some(decision)) = (node_of(s, e["data"]["to"].as_str().unwrap_or("")), node_of(s, by)) else { continue };
-        let line = format!("{} · {} · {}", target["label"].as_str().unwrap_or(""), crate::i18n::f("notify-resolved", &[("by", decision["label"].as_str().unwrap_or("").to_string())]), names[s]);
-        changed.push(json!({"session": s, "node": target, "line": line}));
+    for e in db::events(&conn, "type = 'link.added'", &[]).unwrap_or_default().iter().rev().filter(|e| e["data"]["rel"] == "resolves" && after(e, since)) {
+        let (Some(target), Some(decision)) = (node_of(e["data"]["to"].as_str().unwrap_or("")), node_of(e["nid"].as_str().unwrap_or(""))) else { continue };
+        changed.push(item(target, Some(format!("{} · {}", target["label"].as_str().unwrap_or(""), crate::i18n::f("notify-resolved", &[("by", decision["label"].as_str().unwrap_or("").to_string())])))));
     }
     // What can be done now: an open node whose condition holds since one of its nodes closed after the person last looked.
-    for (s, nodes, _) in &all {
-        for n in nodes.iter().filter(|n| is_open(n)) {
-            let Some(expr) = n.get("requires").and_then(Value::as_str) else { continue };
-            let closed_at = |id: &str| nodes.iter().find(|m| m["id"] == id).filter(|m| !is_open(m)).and_then(|m| m.get("closed")?.get("at")?.as_i64());
-            let late = crate::map::condition_ids(expr).unwrap_or_default().iter().any(|id| closed_at(id).is_some_and(|at| at > since));
-            if late && crate::map::condition_holds(expr, &|id| closed_at(id).is_some()) {
-                changed.push(json!({"session": s, "node": n, "line": format!("{} · {} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::t("notify-unblocked"), names[s.as_str()])}));
-            }
+    for n in all.iter().filter(|n| is_open(n)) {
+        let Some(expr) = n.get("requires").and_then(Value::as_str) else { continue };
+        let closed_at = |nid: &str| node_of(nid).filter(|m| !is_open(m)).and_then(|m| m.get("closed")?.get("at")?.as_i64());
+        let late = map::condition_ids(expr).unwrap_or_default().iter().any(|id| closed_at(id).is_some_and(|at| at > since));
+        if late && map::condition_holds(expr, &|id| closed_at(id).is_some()) {
+            changed.push(item(n, Some(format!("{} · {}", n["label"].as_str().unwrap_or(""), crate::i18n::t("notify-unblocked")))));
         }
     }
-    // The action that put each node in the trash: the last event that set it to removed.
+    // The action that deleted each node: the last event that set it to removed.
     if !trash.is_empty() {
-        let mut by: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
-        for e in evs.iter().filter(|e| e["data"]["state"][1] == "removed") {
-            if let (Some(sub), Some(a)) = (e["subject"].as_str(), e.get("action")) { by.insert(sub.to_string(), a.clone()); }
+        let mut by: HashMap<String, Value> = HashMap::new();
+        for e in db::events(&conn, "action IS NOT NULL AND type = 'node.changed'", &[]).unwrap_or_default().iter().filter(|e| e["data"]["state"][1] == "removed") {
+            if let Some(nid) = e["nid"].as_str() { by.insert(nid.to_string(), e["action"].clone()); }
         }
-        for t in &mut trash { let sub = format!("{}/{}", t["session"].as_str().unwrap_or(""), t["node"]["id"].as_str().unwrap_or("")); t["action"] = by.get(&sub).cloned().unwrap_or(Value::Null); }
+        for t in &mut trash { t["action"] = by.get(t["node"]["nid"].as_str().unwrap_or("")).cloned().unwrap_or(Value::Null); }
     }
-    let open: Vec<Value> = all.iter().filter(|m| Some(m.0.as_str()) == current).flat_map(|(s, nodes, _)| nodes.iter().filter(|n| is_open(n)).map(move |n| (s, n)))
-        .map(|(s, n)| json!({"session": s, "node": n, "line": person_line(&names[s.as_str()], n)})).collect();
+    // The conversation on show, in its map's order.
+    let open: Vec<Value> = current.map(|s| map::session_entries(data, s)).unwrap_or_default().iter()
+        .filter_map(|(_, nid)| node_of(nid)).filter(|n| is_open(n)).map(|n| item(n, None)).collect();
     json!({"due": due, "marked": marked, "changed": changed, "check": check, "open": open, "held": held, "trash": trash})
-}
-
-fn links(node: &Value) -> Vec<(String, String)> {
-    node.get("links").and_then(Value::as_array).into_iter().flatten()
-        .filter_map(|l| Some((l.get("to")?.as_str()?.to_string(), l.get("rel")?.as_str()?.to_string()))).collect()
-}
-
-fn followed(node: &Value) -> Map<String, Value> {
-    node.as_object().into_iter().flatten().filter(|(k, _)| !NOT_FOLLOWED.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect()
-}
-
-/// What changed between two versions of one session's nodes, as events.
-pub fn diff(source: &str, sid: &str, at: i64, before: &[Value], after: &[Value]) -> Vec<Value> {
-    let find = |nodes: &[Value], id: &str| nodes.iter().find(|n| n["id"] == id).cloned();
-    let subject = |id: &str| format!("{sid}/{id}");
-    let mut out = Vec::new();
-    for node in after {
-        let Some(id) = node["id"].as_str() else { continue };
-        let now = followed(node);
-        match find(before, id) {
-            None => out.push(event(source, "node.added", &subject(id), at, Value::Object(now))),
-            Some(old) => {
-                let was = followed(&old);
-                let keys: std::collections::BTreeSet<&String> = was.keys().chain(now.keys()).collect();
-                let changed: Map<String, Value> = keys.into_iter().filter(|k| was.get(*k) != now.get(*k))
-                    .map(|k| (k.clone(), json!([was.get(k).cloned().unwrap_or(Value::Null), now.get(k).cloned().unwrap_or(Value::Null)]))).collect();
-                if !changed.is_empty() { out.push(event(source, "node.changed", &subject(id), at, Value::Object(changed))); }
-            }
-        }
-        let old_links = find(before, id).map(|o| links(&o)).unwrap_or_default();
-        let new_links = links(node);
-        for (to, rel) in new_links.iter().filter(|l| !old_links.contains(l)) { out.push(event(source, "link.added", &subject(id), at, json!({"to": to, "rel": rel}))); }
-        for (to, rel) in old_links.iter().filter(|l| !new_links.contains(l)) { out.push(event(source, "link.removed", &subject(id), at, json!({"to": to, "rel": rel}))); }
-    }
-    for node in before {
-        if let Some(id) = node["id"].as_str().filter(|id| find(after, id).is_none()) {
-            out.push(event(source, "node.purged", &subject(id), at, json!({})));
-        }
-    }
-    // The memory id rides on every event as a CloudEvents extension attribute, so a change can be found by it.
-    for e in &mut out {
-        let id = e["subject"].as_str().and_then(|s| s.rsplit('/').next()).unwrap_or("").to_string();
-        if let Some(m) = find(after, &id).or_else(|| find(before, &id)).and_then(|n| n.get("memid").cloned()) { e["memid"] = m; }
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_change_is_told_as_the_events_it_makes() {
-        let before = vec![json!({"id":"a","label":"A","opened":{"at":1}}), json!({"id":"b","label":"B"})];
-        let after = vec![json!({"id":"a","label":"A2","state":"done","opened":{"at":1},"closed":{"at":2},"links":[{"to":"c","rel":"replaces"}]}), json!({"id":"c","label":"C"})];
-        let ev = diff("session/s", "s", 5, &before, &after);
-        let kinds: Vec<&str> = ev.iter().map(|e| e["type"].as_str().unwrap()).collect();
-        assert_eq!(kinds, ["node.changed", "link.added", "node.added", "node.purged"]);
-        assert_eq!(ev[0]["data"]["label"], json!(["A", "A2"]));
-        assert_eq!(ev[0]["data"]["state"], json!([null, "done"]), "closing is a change of state");
-        assert!(ev[0]["data"].get("closed").is_none(), "the program's stamps are not followed");
-        assert_eq!((ev[0]["subject"].as_str(), ev[0]["specversion"].as_str()), (Some("s/a"), Some("1.0")));
-        assert_ne!(ev[0]["id"], ev[1]["id"]);
-    }
+    fn put(dir: &Path, sid: &str, nodes: Value) -> Value { map::command(dir, sid, Some(json!({"upsert": nodes}))).unwrap() }
+    fn nid(map: &Value, id: &str) -> String { map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).unwrap()["nid"].as_str().unwrap().to_string() }
 
     #[test]
     fn a_file_touch_is_an_event_by_path() {
         let dir = tempfile::tempdir().unwrap();
+        let m = put(dir.path(), "s", json!([{"id": "n1", "label": "N"}]));
         file_touched(dir.path(), "s", "edit", "/w/a.rs", Some("n1")).unwrap();
         assert!(file_touched(dir.path(), "s", "delete", "/w/a.rs", None).is_err());
-        let line = fs::read_dir(dir.path().join("memory/events")).unwrap().flatten().map(|f| fs::read_to_string(f.path()).unwrap()).collect::<String>();
-        let e: Value = serde_json::from_str(line.trim()).unwrap();
-        assert_eq!((e["type"].as_str(), e["subject"].as_str(), e["data"]["path"].as_str()), (Some("file.touched"), Some("s/n1"), Some("/w/a.rs")));
+        let evs = events(dir.path());
+        let e = evs.iter().find(|e| e["type"] == "file.touched").unwrap();
+        assert_eq!((e["nid"].as_str(), e["session"].as_str(), e["path"].as_str(), e["data"]["op"].as_str()), (Some(nid(&m, "n1").as_str()), Some("s"), Some("/w/a.rs"), Some("edit")));
     }
 
     #[test]
     fn a_session_sees_its_open_nodes_related_ones_and_what_changed() {
         let dir = tempfile::tempdir().unwrap();
-        let (me, other) = ("aaaaaaaa-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000002");
-        let now = chrono::Local::now().timestamp_millis();
-        let map = |nodes: Value| json!({"nodes": nodes, "updatedAt": now}).to_string();
-        fs::write(dir.path().join(format!("{me}.json")), map(json!([{"id":"q","label":"Pick a store","isOpen":true,"memid":"m1"},{"id":"x","label":"old","isOpen":false}]))).unwrap();
-        fs::write(dir.path().join(format!("{other}.json")), map(json!([{"id":"a","label":"Store choice","isOpen":true,"memid":"m1","opened":{"at":1}},{"id":"copy","label":"Pick a store","memid":"m1"},
-            {"id":"b","label":"unrelated","detail":"the long sentence about a Warehouse","isOpen":true,"memid":"m9","opened":{"at":now}}]))).unwrap();
-        fs::write(dir.path().join("eeeeeeee-0000-0000-0000-000000000005.json"), map(json!([{"id":"d","label":"Store → SQLite","kind":"conclusion","state":"done","detail":"One file is enough. Postgres was too much.","memid":"m1","opened":{"at":now}}]))).unwrap();
+        let (me, other, third) = ("aaaaaaaa-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000002", "eeeeeeee-0000-0000-0000-000000000005");
+        let mine = put(dir.path(), me, json!([{"id":"q","label":"Pick a store","memid":"m1"},{"id":"x","label":"old","state":"done"}]));
+        // The other session shows the same node (taken over), and has its own on the same problem.
+        map::take_over(dir.path(), other, &json!({"nodes": [mine["nodes"][0]]})).unwrap();
+        put(dir.path(), other, json!([{"id":"a","label":"Store choice","memid":"m1"},{"id":"b","label":"unrelated","detail":"the long sentence about a Warehouse","memid":"m9"}]));
+        put(dir.path(), third, json!([{"id":"d","label":"Store → SQLite","kind":"conclusion","state":"done","detail":"One file is enough. Postgres was too much.","memid":"m1"}]));
         let lines = list(dir.path(), me, 10);
-        assert!(lines[0].starts_with("m1 · Pick a store"), "own open node first");
+        assert!(lines[0].starts_with("m1 · Pick a store"), "own open node first: {lines:?}");
         assert!(lines.iter().any(|l| l.contains("Store choice")), "another node on the same problem is shown");
         assert!(lines.iter().any(|l| l.ends_with("· why: One file is enough")), "a decision carries its first reason: {lines:?}");
-        assert_eq!(lines.iter().filter(|l| l.contains("Pick a store")).count(), 1, "a carried copy of the same node: one line");
+        assert_eq!(lines.iter().filter(|l| l.contains("Pick a store")).count(), 1, "a node two sessions show: one line");
         assert!(lines.iter().any(|l| l.contains("unrelated")), "recent nodes of other sessions follow");
         assert!(!lines.iter().any(|l| l.contains("old")), "own closed nodes are not listed");
         mark_seen(dir.path(), me);
         std::thread::sleep(std::time::Duration::from_millis(5));
-        let at = chrono::Local::now().timestamp_millis();
-        let mut on_m1 = event(&format!("session/{other}"), "node.changed", &format!("{other}/a"), at, json!({"state": ["doing", "done"]}));
-        on_m1["memid"] = json!("m1");
-        record(dir.path(), at, &[on_m1,
-            event("person", "node.changed", &format!("{me}/q"), at, json!({"mark": [null, "important"]})),
-            event(&format!("session/{other}"), "node.added", &format!("{other}/z"), at, json!({"memid": "m5"}))]).unwrap();
+        // The other session settles its node on the problem, the person marks mine, and something unrelated is added.
+        put(dir.path(), other, json!([{"id":"a","state":"done"}, {"id":"z","label":"elsewhere","memid":"m5"}]));
+        map::person(dir.path(), json!([{"id": nid(&mine, "q"), "mark": "important"}])).unwrap();
         let d = delta(dir.path(), me);
         assert_eq!(d.len(), 2, "the change on its memory id and the person's mark, not an unrelated node: {d:?}");
+        assert!(d.iter().any(|l| l.contains("person · q ·")), "its own node by the id it knows: {d:?}");
         assert!(delta(dir.path(), me).is_empty(), "seen once");
-        assert_eq!(search(dir.path(), &["store".into()], 5).len(), 4);
+        assert_eq!(search(dir.path(), &["store".into()], 5).len(), 3);
         assert_eq!(search(dir.path(), &["warehouse".into()], 5).len(), 1, "the detail is searched too");
-        assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 4);
+        assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 3);
+        assert_eq!(show(dir.path(), &format!("{other}/q"))["nodes"][0]["label"], "Pick a store");
+    }
+
+    #[test]
+    fn a_node_taken_off_a_map_stays_in_the_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = put(dir.path(), "s", json!([{"id":"a","label":"Kept thought"},{"id":"b","label":"Other"}]));
+        let after = map::command(dir.path(), "s", Some(json!({"remove": ["a"]}))).unwrap();
+        assert_eq!(after["nodes"].as_array().unwrap().len(), 1);
+        assert_eq!(search(dir.path(), &["kept".into()], 5).len(), 1, "still found");
+        assert_eq!(show(dir.path(), &nid(&m, "a"))["events"].as_array().unwrap().last().unwrap()["type"], "session.unlinked");
+        assert!(list(dir.path(), "s", 10).iter().any(|l| l.contains("Kept thought")), "and listed again as a node not on this map");
     }
 
     #[test]
     fn the_board_sorts_nodes_into_its_sections() {
         let dir = tempfile::tempdir().unwrap();
         let s = "cccccccc-0000-0000-0000-000000000003";
-        fs::write(dir.path().join(format!("{s}.json")), json!({"updatedAt": 1, "nodes": [
-            {"id":"a","label":"meet","isOpen":true,"at":"2026-11-12 15:00","memid":"1"},
-            {"id":"b","label":"key","isOpen":true,"mark":"important","memid":"2"},
-            {"id":"c","label":"later","isOpen":true,"state":"postponed","memid":"3"},
-            {"id":"f","label":"maybe gone","suggest":{"state":"dropped","why":"replaced"},"memid":"6"},
-            {"id":"d","label":"gone","isOpen":false,"state":"removed","memid":"4"},
-            {"id":"e","label":"done","isOpen":false,"state":"done","mark":"important","memid":"5"}]}).to_string()).unwrap();
+        let m = put(dir.path(), s, json!([
+            {"id":"a","label":"meet","at":"2026-11-12 15:00"},
+            {"id":"b","label":"key"},
+            {"id":"c","label":"later","state":"postponed"},
+            {"id":"f","label":"maybe gone","suggest":{"state":"dropped","why":"replaced"}},
+            {"id":"d","label":"gone"},
+            {"id":"e","label":"done","state":"done"}]));
+        map::person(dir.path(), json!([{"id": nid(&m, "b"), "mark": "important"}, {"id": nid(&m, "e"), "mark": "important"}])).unwrap();
+        let action = map::trash(dir.path(), &nid(&m, "d"), false).unwrap();
         let b = board(dir.path(), None);
-        let n = |k: &str| b[k].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
-        assert_eq!((n("due"), n("marked"), n("held"), n("trash")), (vec!["a".into()], vec!["b".into(), "e".into()], vec!["c".into()], vec!["d".into()]), "a marked node shows even when done");
-        assert!(n("changed").is_empty(), "nothing settled or freed yet");
-        assert_eq!(n("check"), vec!["f".to_string()], "the agent's suggestion waits for the person");
-        let line_of = |id: &str| b["marked"].as_array().unwrap().iter().chain(b["held"].as_array().unwrap()).find(|i| i["node"]["id"] == id).unwrap()["line"].as_str().unwrap().to_string();
-        assert!(line_of("b").starts_with("! key"), "a marked node shows it");
-        assert!(line_of("c").contains("On hold") && !line_of("c").contains("postponed"), "the state in the person's words: {}", line_of("c"));
-        // A decision on the same problem in a map written later comes first; the suggestion still shows.
-        let later = "dddddddd-0000-0000-0000-000000000004";
-        fs::write(dir.path().join(format!("{later}.json")), json!({"updatedAt": 9, "nodes": [{"id":"x","label":"decided elsewhere","state":"done","memid":"6"}]}).to_string()).unwrap();
-        assert_eq!(board(dir.path(), None)["check"].as_array().unwrap().len(), 1);
-        assert!(n("open").is_empty(), "no conversation on show");
+        let n = |b: &Value, k: &str| { let mut v: Vec<String> = b[k].as_array().unwrap().iter().map(|i| i["node"]["label"].as_str().unwrap().to_string()).collect(); v.sort(); v };
+        assert_eq!((n(&b, "due"), n(&b, "marked"), n(&b, "held"), n(&b, "trash")), (vec!["meet".to_string()], vec!["done".to_string(), "key".into()], vec!["later".to_string()], vec!["gone".to_string()]), "a marked node shows even when done");
+        assert_eq!(b["trash"][0]["action"], json!(action), "the deletion can be undone by its action");
+        assert_eq!(b["trash"][0]["node"]["id"], json!(nid(&m, "d")), "a node is named by its number");
+        assert!(n(&b, "changed").is_empty(), "nothing settled or freed yet");
+        assert_eq!(n(&b, "check"), vec!["maybe gone".to_string()], "the agent's suggestion waits for the person");
+        let line_of = |label: &str| b["marked"].as_array().unwrap().iter().chain(b["held"].as_array().unwrap()).find(|i| i["node"]["label"] == label).unwrap()["line"].as_str().unwrap().to_string();
+        assert!(line_of("key").starts_with("! key"), "a marked node shows it");
+        assert!(line_of("later").contains("On hold") && !line_of("later").contains("postponed"), "the state in the person's words: {}", line_of("later"));
+        assert!(n(&b, "open").is_empty(), "no conversation on show");
         let mine = board(dir.path(), Some(s));
-        assert_eq!(mine["open"].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap()).collect::<Vec<_>>(), ["a", "b", "c", "f"], "its open nodes, marked or not");
-        fs::write(dir.path().join(format!("{s}.json")), json!({"updatedAt": 2, "nodes": [
-            {"id":"p","label":"first","isOpen":false,"state":"done","closed":{"at":5}},
-            {"id":"q","label":"then","isOpen":true,"requires":"p"},
-            {"id":"r","label":"blocked","isOpen":true,"requires":"p ∧ q"}]}).to_string()).unwrap();
+        assert_eq!(mine["open"].as_array().unwrap().iter().map(|i| i["node"]["label"].as_str().unwrap()).collect::<Vec<_>>(), ["meet", "key", "later", "maybe gone"], "its open nodes in the map's order, marked or not");
+        // A condition that now holds, and a problem a decision settled.
+        put(dir.path(), s, json!([{"id":"p","label":"first"}, {"id":"q","label":"then","requires":"p"}, {"id":"r","label":"blocked","requires":"p ∧ q"}]));
+        put(dir.path(), s, json!([{"id":"p","state":"done"}, {"id":"w","label":"decided","state":"done","links":[{"to":"b","rel":"resolves"}]}]));
         let b = board(dir.path(), None);
-        assert_eq!(b["changed"].as_array().unwrap().iter().map(|i| i["node"]["id"].as_str().unwrap()).collect::<Vec<_>>(), ["q"], "only what its condition now allows");
+        assert_eq!(n(&b, "changed"), ["key", "then"], "what a decision settled, and only what its condition now allows");
     }
 
     #[test]
-    fn events_are_appended_to_the_month_file() {
+    fn steps_follow_one_session_in_order() {
         let dir = tempfile::tempdir().unwrap();
-        let at = 1_794_000_000_000_i64;
-        record(dir.path(), at, &[event("person", "node.changed", "s/a", at, json!({}))]).unwrap();
-        record(dir.path(), at, &[event("person", "node.changed", "s/b", at, json!({}))]).unwrap();
-        let text = fs::read_to_string(file_for(dir.path(), at)).unwrap();
-        assert_eq!(text.lines().count(), 2);
-        assert!(file_for(dir.path(), at).to_string_lossy().ends_with(".jsonl"));
+        put(dir.path(), "s", json!([{"id":"t","label":"top"},{"id":"a","label":"a","state":"done"}]));
+        put(dir.path(), "s", json!([{"id":"t","state":"done"}]));
+        let st = steps(dir.path(), "s");
+        assert_eq!(st.iter().map(|x| (x.2.as_str(), x.3)).collect::<Vec<_>>(), [("t", false), ("a", true), ("t", true)]);
     }
 }

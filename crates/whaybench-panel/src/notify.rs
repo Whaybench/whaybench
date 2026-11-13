@@ -66,9 +66,8 @@ fn restore(d: &Data, action: &str) {
 
 /// Gone for good: the given trash items (session, node id).
 fn purge(d: &Data, items: &[(String, String)]) {
-    let mut by: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
-    for (s, n) in items { by.entry(s).or_default().push(n.clone()); }
-    for (s, ids) in by { if let Err(e) = wb_core::map::purge(&d.root, s, &ids) { say_error(d, e); } }
+    let nids: Vec<String> = items.iter().map(|(_, n)| n.clone()).collect();
+    if let Err(e) = wb_core::map::purge(&d.root, &nids) { say_error(d, e); }
 }
 
 fn popup(list: &gtk::ListBox, menu: &gio::Menu, group: &gio::SimpleActionGroup, x: f64, y: f64) {
@@ -88,11 +87,86 @@ fn item(menu: &gio::Menu, group: &gio::SimpleActionGroup, name: &str, label: &st
     group.add_action(&act);
 }
 
+/// Delete, as on the map panel: the branch or the node alone, in a submenu so it takes two presses. Here it deletes
+/// the node itself (it waits in the Deleted section), where the map panel only takes it off its map.
+fn delete_menu(menu: &gio::Menu, group: &gio::SimpleActionGroup, d: &Data, nid: &str, again: impl Fn() + Clone + 'static) {
+    let sub = gio::Menu::new();
+    let below = wb_core::map::below(&d.root, nid);
+    let add = |name: &str, label: String, branch: bool| {
+        sub.append(Some(&label), Some(&format!("a.{name}")));
+        let act = gio::SimpleAction::new(name, None);
+        let (d2, n2, again) = (d.clone(), nid.to_string(), again.clone());
+        act.connect_activate(move |_, _| { if let Err(e) = wb_core::map::trash(&d2.root, &n2, branch) { say_error(&d2, e); } again(); });
+        group.add_action(&act);
+    };
+    if below > 0 {
+        add("delete-branch", wb_core::i18n::f("delete-whole-branch-including-below", &[("below", below.to_string())]), true);
+        add("delete-node", t("delete-node-only-nodes-below-move").to_string(), false);
+    } else {
+        add("delete-node", t("delete-node").to_string(), false);
+    }
+    menu.append_submenu(Some(t("delete")), &sub);
+}
+
+/// Asks once before something that cannot be undone: the text, Cancel, and the button that does it.
+/// `lines` are shown under the text, to read before deciding: what goes with it.
+fn confirm(win: &gtk::ApplicationWindow, text: &str, lines: &[String], then: impl Fn() + 'static) {
+    let dlg = gtk::Window::builder().title(t("notify-purge")).transient_for(win).modal(true).decorated(false).build();
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    body.set_margin_top(10); body.set_margin_bottom(10); body.set_margin_start(10); body.set_margin_end(10);
+    let say = gtk::Label::new(Some(text));
+    say.set_xalign(0.0); say.set_wrap(true); say.set_max_width_chars(28);
+    body.append(&say);
+    if !lines.is_empty() {
+        let list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        for l in lines {
+            let line = gtk::Label::new(Some(l));
+            line.set_xalign(0.0); line.set_wrap(true); line.set_wrap_mode(gtk::pango::WrapMode::WordChar); line.add_css_class("dim");
+            list.append(&line);
+        }
+        let scroll = gtk::ScrolledWindow::new();
+        scroll.set_child(Some(&list));
+        scroll.set_vexpand(true);
+        body.append(&scroll);
+    }
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    row.set_halign(gtk::Align::End);
+    let (cancel, ok) = (gtk::Button::with_label(t("cancel")), gtk::Button::with_label(t("notify-purge")));
+    row.append(&cancel); row.append(&ok);
+    body.append(&row);
+    dlg.set_child(Some(&body));
+    { let w = dlg.clone(); cancel.connect_clicked(move |_| w.close()); }
+    let w = dlg.clone();
+    ok.connect_clicked(move |_| { w.close(); then(); });
+    dlg.present();
+}
+
+/// Before a node goes for good: its name and how many history entries go with it.
+fn confirm_purge(win: &gtk::ApplicationWindow, d: &Data, nid: &str, then: impl Fn() + 'static) {
+    let shown = memory::show(&d.root, nid);
+    let label = shown["nodes"][0]["label"].as_str().unwrap_or("").to_string();
+    let events = shown["events"].as_array().cloned().unwrap_or_default();
+    let n = events.len();
+    // The node's history, oldest first: what it was and how it changed, all of which goes.
+    let mut names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut lines: Vec<String> = crate::history::rows(&events, |s| names.entry(s.to_string()).or_insert_with(|| wb_core::sessions::session_name(d, s)).clone(), |nid| memory::label_of(&d.root, nid))
+        .iter().map(|r| format!("{} {}", r.day, r.line)).collect();
+    lines.reverse();
+    let (d2, n2) = (d.clone(), nid.to_string());
+    confirm(win, &wb_core::i18n::f("purge-confirm", &[("a1", label), ("n", n.to_string())]), &lines, move || {
+        // A node not deleted yet is deleted first (alone: what is under it moves up), then it goes for good.
+        let deleted = memory::show(&d2.root, &n2)["nodes"][0]["state"] == "removed";
+        if !deleted { if let Err(e) = wb_core::map::trash(&d2.root, &n2, false) { say_error(&d2, e); } }
+        purge(&d2, &[(String::new(), n2.clone())]);
+        then();
+    });
+}
+
 /// The person's choice for one node, written to its session's map as theirs.
-fn choose(d: &Data, sid: &str, node: &str, change: Value) {
+fn choose(d: &Data, _sid: &str, node: &str, change: Value) {
     let mut c = change;
     c["id"] = json!(node);
-    if let Err(e) = wb_core::map::person(&d.root, sid, json!([c])) { say_error(d, e); }
+    if let Err(e) = wb_core::map::person(&d.root, json!([c])) { say_error(d, e); }
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
@@ -117,7 +191,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let stack = gtk::Stack::new();
     stack.set_vexpand(true);
     stack.add_titled(&now, Some("now"), t("notify-tab-now"));
-    let (history_page, history_refresh) = history_tab(&d);
+    let (history_page, history_refresh) = history_tab(win, &d);
     stack.add_titled(&history_page, Some("history"), t("notify-tab-history"));
     let switcher = gtk::StackSwitcher::new();
     switcher.set_stack(Some(&stack));
@@ -143,7 +217,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let click = gtk::GestureClick::new();
     click.set_button(3);
     {
-        let (d, list2, view) = (d.clone(), list.clone(), view.clone());
+        let (d, list2, view, win) = (d.clone(), list.clone(), view.clone(), win.clone());
         click.connect_pressed(move |g, _, x, y| {
             let Some(r) = list2.row_at_y(y as i32) else { return };
             let name = r.widget_name().to_string();
@@ -153,12 +227,12 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             // The trash heading: empty it all (a menu, so it takes two presses).
             if name == "__trash__" {
                 g.set_state(gtk::EventSequenceState::Claimed);
-                let (d2, again) = (d.clone(), again.clone());
+                let (d2, again, win2) = (d.clone(), again.clone(), win.clone());
                 item(&menu, &group, "empty", "notify-empty-trash", move || {
                     let all: Vec<(String, String)> = memory::board(&d2.root, None)["trash"].as_array().into_iter().flatten()
                         .map(|i| (i["session"].as_str().unwrap_or("").to_string(), i["node"]["id"].as_str().unwrap_or("").to_string())).collect();
-                    purge(&d2, &all);
-                    again();
+                    let (d3, again) = (d2.clone(), again.clone());
+                    confirm(&win2, &wb_core::i18n::f("purge-all-confirm", &[("n", all.len().to_string())]), &[], move || { purge(&d3, &all); again(); });
                 });
                 popup(&list2, &menu, &group, x, y);
                 return;
@@ -171,8 +245,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                     let (d2, a2, again) = (d.clone(), action.clone(), again.clone());
                     item(&menu, &group, "restore", "notify-restore", move || { restore(&d2, &a2); again(); });
                 }
-                let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
-                item(&menu, &group, "purge", "notify-purge", move || { purge(&d2, &[(s2.clone(), n2.clone())]); again(); });
+                let (d2, n2, again, win2) = (d.clone(), node.clone(), again.clone(), win.clone());
+                item(&menu, &group, "purge", "notify-purge", move || confirm_purge(&win2, &d2, &n2, again.clone()));
                 popup(&list2, &menu, &group, x, y);
                 return;
             }
@@ -194,9 +268,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
                 item(&menu, &group, name, label, move || { choose(&d2, &s2, &n2, change.clone()); again(); });
             }
-            // To the trash alone: what is under it moves up, as the map panel's "node only".
-            let (d2, s2, n2, again) = (d.clone(), sid.clone(), node.clone(), again.clone());
-            item(&menu, &group, "trash", "notify-to-trash", move || { if let Err(e) = wb_core::map::trash(&d2.root, &s2, &n2, false) { say_error(&d2, e); } again(); });
+            delete_menu(&menu, &group, &d, node, again.clone());
             let (d2, s2) = (d.clone(), sid.clone());
             item(&menu, &group, "open", "notify-open-session", move || ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "show".into(), s2.clone()]));
             popup(&list2, &menu, &group, x, y);
@@ -221,7 +293,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
 const HISTORY_STEP: usize = 200;
 
 /// The History tab and what brings it up to date: the memory is read again only when its files changed.
-fn history_tab(d: &Data) -> (gtk::Box, Rc<dyn Fn()>) {
+fn history_tab(win: &gtk::ApplicationWindow, d: &Data) -> (gtk::Box, Rc<dyn Fn()>) {
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::None);
     let scroll = gtk::ScrolledWindow::new();
@@ -239,8 +311,10 @@ fn history_tab(d: &Data) -> (gtk::Box, Rc<dyn Fn()>) {
         let top = scroll.vadjustment().value();
         while let Some(r) = list.row_at_index(0) { list.remove(&r); }
         let mut day = "";
-        let add = |text: &str, class: Option<&str>, tip: &str| {
+        let add = |text: &str, class: Option<&str>, tip: &str, node: &str| {
             let label = gtk::Label::new(Some(text));
+            // The row's node and its name, for the right-click menu.
+            label.set_widget_name(node);
             label.set_xalign(0.0);
             label.set_wrap(true);
             label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
@@ -248,10 +322,10 @@ fn history_tab(d: &Data) -> (gtk::Box, Rc<dyn Fn()>) {
             if !tip.is_empty() { label.set_tooltip_text(Some(tip)); }
             list.append(&label);
         };
-        if h.rows.is_empty() { add(t("notify-none"), Some("dim"), ""); }
+        if h.rows.is_empty() { add(t("notify-none"), Some("dim"), "", ""); }
         for r in h.rows.iter().take(h.shown) {
-            if r.day != day { day = &r.day; add(day, Some("head"), ""); }
-            add(&r.line, None, &r.tip);
+            if r.day != day { day = &r.day; add(day, Some("head"), "", ""); }
+            add(&r.line, None, &r.tip, &format!("{}\t{}", r.nid, r.label));
         }
         let left = h.rows.len().saturating_sub(h.shown);
         more.set_visible(left > 0);
@@ -263,18 +337,43 @@ fn history_tab(d: &Data) -> (gtk::Box, Rc<dyn Fn()>) {
         let (hist, draw) = (hist.clone(), draw.clone());
         more.connect_clicked(move |_| { hist.borrow_mut().shown += HISTORY_STEP; draw(); });
     }
+    let d0 = d.clone();
     let d = d.clone();
     let refresh: Rc<dyn Fn()> = Rc::new(move || {
-        // Each month's file and its size: the log only grows, so a change in size is a change.
-        let mut files: Vec<String> = std::fs::read_dir(d.root.join("memory").join("events")).into_iter().flatten().flatten()
-            .map(|f| format!("{}:{}", f.file_name().to_string_lossy(), f.metadata().map(|m| m.len()).unwrap_or(0))).collect();
-        files.sort();
-        let sig = files.join(",");
+        let sig = memory::events_mark(&d.root);
         if hist.borrow().sig == sig { return; }
         let mut names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        let rows = crate::history::rows(&memory::events(&d.root), |s| names.entry(s.to_string()).or_insert_with(|| wb_core::sessions::session_name(&d, s)).clone());
+        let rows = crate::history::rows(&memory::events(&d.root), |s| names.entry(s.to_string()).or_insert_with(|| wb_core::sessions::session_name(&d, s)).clone(), |nid| memory::label_of(&d.root, nid));
         { let mut h = hist.borrow_mut(); h.sig = sig; h.rows = rows; }
         draw();
     });
+    // A row's node: put it on the conversation's map, delete it, or delete it for good.
+    let click = gtk::GestureClick::new();
+    click.set_button(3);
+    {
+        let (d, list2, refresh, win) = (d0, list.clone(), refresh.clone(), win.clone());
+        click.connect_pressed(move |g, _, x, y| {
+            let Some(name) = list2.row_at_y(y as i32).and_then(|r| r.child()).map(|c| c.widget_name().to_string()) else { return };
+            let Some((nid, label)) = name.split_once('\t').filter(|p| !p.0.is_empty()) else { return };
+            if memory::label_of(&d.root, nid).is_none() { return; }
+            g.set_state(gtk::EventSequenceState::Claimed);
+            let menu = gio::Menu::new();
+            let group = gio::SimpleActionGroup::new();
+            let (d2, n2, l2) = (d.clone(), nid.to_string(), label.to_string());
+            item(&menu, &group, "link", "history-link", move || match wb_core::sessions::target(&d2) {
+                None => status::say(&d2, t("history-link-none"), 6),
+                Some(s) => match wb_core::map::link(&d2.root, &s, &n2) {
+                    Ok(_) => status::say(&d2, &wb_core::i18n::f("history-linked", &[("a1", l2.chars().take(24).collect())]), 5),
+                    Err(e) => say_error(&d2, e),
+                },
+            });
+            let again = { let refresh = refresh.clone(); move || refresh() };
+            delete_menu(&menu, &group, &d, nid, again.clone());
+            let (d2, n2, win2) = (d.clone(), nid.to_string(), win.clone());
+            item(&menu, &group, "purge", "notify-purge", move || confirm_purge(&win2, &d2, &n2, again.clone()));
+            popup(&list2, &menu, &group, x, y);
+        });
+    }
+    list.add_controller(click);
     (page, refresh)
 }

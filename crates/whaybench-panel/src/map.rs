@@ -133,7 +133,7 @@ fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str)
     };
     let span = sessions::span(d, data.get("sessionId").and_then(Value::as_str).unwrap_or(""), &nodes);
     let path = wb_core::map::free_path(&maps_dir(d), &wb_core::map::file_name(span, root, prefix));
-    let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": data.get("sessionId"), "nodes": nodes});
+    let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": data.get("sessionId"), "nodes": wb_core::map::saved_nodes(&nodes)});
     std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default())?;
     Ok(path)
 }
@@ -281,9 +281,10 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
         // The person's important mark, written to this map as theirs.
         if let Some(sid) = data.get("sessionId").and_then(Value::as_str).map(String::from) {
             let marked = n.get("mark").is_some();
-            let (d2, id2) = (d.clone(), id.clone());
+            let (d2, id2) = (d.clone(), s(n, "nid").to_string());
             items.add(wb_core::i18n::t(if marked { "notify-unmark" } else { "notify-mark" }), true, move || {
-                if let Err(e) = wb_core::map::person(&d2.root, &sid, json!([{"id": id2, "mark": if marked { Value::Null } else { json!("important") }}])) {
+                let _ = &sid;
+                if let Err(e) = wb_core::map::person(&d2.root, json!([{"id": id2, "mark": if marked { Value::Null } else { json!("important") }}])) {
                     status::say(&d2, &wb_core::i18n::f("notify-not-written", &[("e", e.to_string())]), 8);
                 }
             });
@@ -340,15 +341,16 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
     }
     items.menu.append_section(None, &section.menu);
     if session.is_some() { let more = items.sub(); import_menu(d, &more); items.menu.append_section(None, &more.menu); }
-    // Deleting is a submenu, so it takes two presses; what goes waits in the trash, restorable from the notifications panel.
+    // Deleting is a submenu, so it takes two presses. The same as Delete in the notifications panel: the node itself
+    // is marked deleted, shows on no map, and waits in that panel's Deleted section to be restored or deleted for good.
     if let (Some(n), Some(target)) = (node, session.as_ref()) {
-        let (id, label) = (s(n, "id").to_string(), s(n, "label").to_string());
+        let (id, nid, label) = (s(n, "id").to_string(), s(n, "nid").to_string(), s(n, "label").to_string());
         let below = tree.below(&id).len();
         let drop = items.sub();
         let act = |branch: bool, what: String| {
-            let (d2, t2, label2, id2) = (d.clone(), target.clone(), label.clone(), id.clone());
+            let (d2, t2, label2, id2, nid2) = (d.clone(), target.clone(), label.clone(), id.clone(), nid.clone());
             let n = if branch { below + 1 } else { 1 };
-            move || match wb_core::map::trash(&d2.root, &t2, &id2, branch) {
+            move || match wb_core::map::trash(&d2.root, &nid2, branch) {
                 Ok(_) => {
                     record::decide("map", "delete", &what, &[("session", t2.clone()), ("node", id2.clone())]);
                     status::say(&d2, &wb_core::i18n::f("moved-to-trash", &[("a1", cut(&label2, 24)), ("n", n.to_string())]), 8);
@@ -781,16 +783,19 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
             style_chosen(&d, &panel, scope.as_ref());
         }
         // No session chosen: the map that changed last. A session without a map: the screen stays as it is.
-        let path = imported_of(scope.as_ref()).map(std::path::PathBuf::from).or_else(|| sessions::target(&d).map(|t| d.root.join(format!("{t}.json")))).unwrap_or_else(|| sessions::latest_map(&d));
-        let Ok(text) = std::fs::read_to_string(&path) else { return };
+        // An imported map's file and a session's map both list nodes; their content comes from the memory.
+        let (shown, mut data): (String, Option<Value>) = match imported_of(scope.as_ref()) {
+            Some(path) => { let Ok(m) = wb_core::map::view_file(&d.root, std::path::Path::new(path)) else { return }; (path.to_string(), Some(m)) }
+            None => { let Some(t) = sessions::target(&d) else { return }; let Some(m) = sessions::map_of(&d, &t) else { return }; (t, Some(m)) }
+        };
+        let text = data.as_ref().map(Value::to_string).unwrap_or_default();
         let counts = sessions::target(&d).map(|t| { let mut c: Vec<_> = records::file_counts(&d, &t).into_iter().collect(); c.sort(); format!("{c:?}") }).unwrap_or_default();
         // The style's settings too: a change in Display style settings draws the map again.
         let settings = mapstyles::find(&d, &panel.borrow().style).map(|x| x.raw.to_string()).unwrap_or_default();
-        let signature = format!("{}{text}{counts}{:?}{settings}", path.display(), wb_core::theme::load_active(&d));
+        let signature = format!("{shown}{text}{counts}{:?}{settings}", wb_core::theme::load_active(&d));
         if panel.borrow().signature == signature { return; }
         panel.borrow_mut().signature = signature;
         // The trash is the notifications panel's; the map shows what is left.
-        let mut data: Option<Value> = serde_json::from_str(&text).ok();
         if let Some(arr) = data.as_mut().and_then(|m| m["nodes"].as_array_mut()) { arr.retain(|n| n["state"] != "removed"); }
         panel.borrow_mut().data = data;
         draw(&list, &panel, &d, scope.as_ref());

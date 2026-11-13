@@ -46,7 +46,7 @@ pub fn definition() -> Value {
 /// An Err is a refused call, told back to the agent so it sends the change again, fixed.
 pub fn call(data: &Path, sid: &str, input: &Value) -> Result<String> {
     if let Some(from) = input.get("inherit").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-        let source = map::read_json(&data.join(format!("{}.json", map::safe_id(from)?)), Value::Null)?;
+        let source = map::view(data, map::safe_id(from)?)?;
         if source.get("nodes").is_none() { return Ok(format!("No map found for {from}.")); }
         map::take_over(data, sid, &source)?;
         // Whaybench follows this to show the old session's file records under the new one too.
