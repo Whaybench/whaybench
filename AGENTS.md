@@ -20,7 +20,7 @@ calls `~/.local/bin/whaybench`), and run one short session with a temporary data
   `--data-dir` to change it. No fixed paths in code. Paths stored in files
   are relative to that directory.
 - Only `whaybench map` writes map files. Only `whaybench record` and
-  `whaybench hook codex` write session records, states and answers.
+  `whaybench hook <agent>` write session records, states and answers.
   `mod/context-map` is the Claude Code connector and calls these commands.
 - Internal values (setting keys, stored values, states, log messages) are in
   English.

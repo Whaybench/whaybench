@@ -1,4 +1,4 @@
-//! The agents' hooks, `whaybench hook claude|codex`: one handler for the standard events Claude Code and Codex both
+//! The agents' hooks, `whaybench hook claude|<add-on id>`: one handler for the standard events Claude Code and the agent add-ons
 //! send (session start, prompt, tool use, notification, stop, end), so the session's record, what the agent is told
 //! each turn, its file records and answers are the same whatever the agent. The map tool itself is `whaybench mcp`.
 use std::{collections::{HashMap, HashSet}, fs, path::Path};
@@ -27,7 +27,7 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     let prompt = if name == "UserPromptSubmit" { Some(text(event, "prompt")?) } else { None };
     let shown = prompt.filter(|p| !p.starts_with('/') && !p.starts_with('[')).map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect::<String>());
     let tab = a.tab.map(safe_id).transpose()?;
-    let agent = (a.name == "codex").then_some("codex");
+    let agent = (a.name != crate::agents::CLAUDE).then_some(a.name);
     // Only a start or a prompt is activity: the other events must not undo what a record says of the past, such as
     // the person having ended the session (the end comes after Whaybench marks it).
     let existing = read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null)?;
@@ -67,10 +67,8 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     }
     if name == "SessionStart" || name == "UserPromptSubmit" {
         let mut parts = Vec::new();
-        if a.name == "codex" {
-            let vars = [("session", sid.to_string()), ("command", crate::codex::shell_quote(a.exe)?)];
-            parts.push(i18n::ai_f("codex-context", &vars));
-            parts.push(i18n::ai_f("codex-map-context", &vars));
+        if a.name != crate::agents::CLAUDE {
+            parts.extend(crate::agents::load(data, a.name)?.context(sid)?);
         } else {
             parts.push(i18n::ai("map-note").to_string());
         }

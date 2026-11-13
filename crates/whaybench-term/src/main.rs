@@ -78,17 +78,18 @@ impl Relay {
     fn start(&mut self, args: &[String]) -> Result<(), String> {
         self.started = Instant::now();
         let mut size = size_of(0);
-        let codex = wb_core::codex::active();
-        let program = if codex {
+        let agent = wb_core::agents::active().map(|id| wb_core::agents::load(&self.data.root, &id)).transpose().map_err(|e| e.to_string())?;
+        let addon = agent.is_some();
+        let program = if let Some(a) = &agent {
             let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-            wb_core::versions::find_program("codex", &std::env::var("PATH").unwrap_or_default(), home.as_deref()).ok_or("codex is not installed")?
+            wb_core::versions::find_program(&a.command, &std::env::var("PATH").unwrap_or_default(), home.as_deref()).ok_or_else(|| format!("{} is not installed", a.command))?
         } else { sessions::claude_program() };
         let c_program = CString::new(program.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
         let mut argv: Vec<CString> = vec![c_program.clone()];
-        let mut args = if codex { wb_core::codex::args(args) } else { args.to_vec() };
+        let mut args = agent.as_ref().map_or_else(|| args.to_vec(), |a| a.args(args));
         // The map is kept every turn: its tool (the plugin's MCP server) runs without asking. Attaching to a session
         // in the background takes no options; that session was started with them.
-        if !codex && args.first().is_none_or(|a| a != "attach") {
+        if !addon && args.first().is_none_or(|a| a != "attach") {
             args.extend(["--allowedTools".into(), MAP_TOOL.into()]);
             // Answers in the interface language, as Claude Code's own `language` setting does: once in the system
             // prompt, not a note every turn. A language the person set themselves is left alone.
@@ -213,7 +214,7 @@ impl Relay {
     fn panel_gone(&mut self) {
         if self.closing { return; }
         self.closing = true;
-        if wb_core::codex::active() {
+        if wb_core::agents::other() {
             self.leave_at = Some(Instant::now());
             return;
         }
@@ -274,7 +275,7 @@ impl Relay {
                 self.save_tab();
             }
         }
-        if wb_core::codex::active() {
+        if wb_core::agents::other() {
             if self.running {
                 if let Some(s) = &self.session {
                     let _ = fs::create_dir_all(sessions::alive_dir(&self.data));
@@ -436,7 +437,7 @@ impl Relay {
     }
 
     fn finish(&mut self) {
-        if wb_core::codex::active() {
+        if wb_core::agents::other() {
             if let Some(s) = &self.session { sessions::mark_off(&self.data, s); }
         }
         if self.running {
@@ -496,7 +497,7 @@ fn main() {
 
     // A new Claude Code conversation is given its number here, so the tab and the panels that follow it know the
     // session from the start, not only after its first prompt.
-    let new_id = (attach.is_none() && resume.is_none() && !wb_core::codex::active())
+    let new_id = (attach.is_none() && resume.is_none() && !wb_core::agents::other())
         .then(|| fs::read_to_string("/proc/sys/kernel/random/uuid").ok().map(|u| u.trim().to_string())).flatten();
     let session = attach.clone().or_else(|| resume.clone()).or_else(|| new_id.clone());
     let mut relay = Relay {

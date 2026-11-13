@@ -8,6 +8,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Codex is now an agent add-on (`addons/agents/codex/`): its command, settings folder, hook and MCP templates and
+  guidance are files, not code, so other agents with Claude Code-style hooks and MCP can be added as folders.
+  See `addons/agents/README.md`.
+- The agent is chosen per conversation: the session menu has `New conversation · <agent>` for Claude Code and each
+  agent add-on, Claude Code and Codex tabs run side by side, a session opens again with its own agent, and the session
+  list shows each session's agent. The `--agent` option is gone.
 - Claude Code in a conversation tab answers in the interface language (its `language` setting, given at start with
   `--settings`), so long tool work no longer drifts into English. A language set in `~/.claude/settings.json` is kept.
 

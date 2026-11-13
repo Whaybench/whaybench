@@ -42,7 +42,7 @@ fn describe(d: &Data, info: &Value) -> (String, String) {
     let id = sid(info);
     let alive = sessions::alive(d, id);
     let state = if alive { sessions::state_of(d, id) } else { None };
-    let mut parts = vec![match (alive, state.as_deref()) {
+    let mut parts = vec![wb_core::agents::name_of(&d.root, info.get("agent").and_then(Value::as_str)), match (alive, state.as_deref()) {
         (false, _) => wb_core::i18n::t("off").to_string(),
         (_, Some("working")) => wb_core::i18n::t("working").into(),
         (_, Some("waiting")) => wb_core::i18n::t("input-needed").into(),

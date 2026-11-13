@@ -1,8 +1,8 @@
 //! The agent side of the command: `whaybench map` (the conversation map, for every agent),
-//! `whaybench hook codex` and `whaybench --agent codex`.
-use std::{io, path::PathBuf};
+//! and `whaybench hook <agent>`.
+use std::io;
 
-use wb_core::{codex, i18n, map, paths::{self, Data}, session_record as rec};
+use wb_core::{agents, map, paths::Data, session_record as rec};
 
 pub fn map(data: &Data, words: &[String]) -> Result<(), String> {
     let input = || serde_json::from_reader::<_, serde_json::Value>(io::stdin().lock()).map_err(|e| e.to_string());
@@ -76,29 +76,13 @@ pub fn statusline(data: &Data) -> Result<(), String> {
 }
 
 pub fn hook(data: &Data, words: &[String]) -> Result<(), String> {
-    let name = match words { [a] if a == "claude" || a == "codex" => a.as_str(), _ => return Err("hook claude|codex".into()) };
+    let name = match words { [a] if wb_core::addons::valid_id(a) => a.as_str(), _ => return Err("hook claude|ID".into()) };
     let event = serde_json::from_reader(io::stdin().lock()).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let tab = std::env::var("WHAYBENCH_TAB").ok();
-    // Codex runs only inside Whaybench; Claude Code's plugin hooks also run in plain Claude Code sessions.
-    let inside = name == "codex" || std::env::var("WHAYBENCH").is_ok_and(|v| v == "1");
+    // Add-on agents run only inside Whaybench; Claude Code's plugin hooks also run in plain Claude Code sessions.
+    let inside = name != agents::CLAUDE || std::env::var("WHAYBENCH").is_ok_and(|v| v == "1");
     let agent = wb_core::hook::Agent { name, tab: tab.as_deref(), inside, exe: &exe };
     println!("{}", wb_core::hook::run(&data.root, &agent, &event).map_err(|e| e.to_string())?);
-    Ok(())
-}
-
-/// Before anything starts: Codex's folder is made ready and everything this run starts is told the agent.
-pub fn start_codex(data: &Data) -> Result<(), String> {
-    let source = std::env::var_os("CODEX_HOME").map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".codex"))).ok_or("HOME is not set")?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let home = codex::prepare(&data.root, &source, &exe).map_err(|e| e.to_string())?;
-    // No other thread exists yet.
-    unsafe {
-        std::env::set_var("CODEX_HOME", home);
-        std::env::set_var(codex::ENV_AGENT, "codex");
-        std::env::set_var(paths::ENV_DATA_DIR, &data.root);
-    }
-    println!("{}", i18n::t("codex-hooks"));
     Ok(())
 }

@@ -4,8 +4,11 @@ use std::{fs, io::Write, path::{Path, PathBuf}, process::{Command, Stdio}};
 use serde_json::{Value, json};
 use wb_core::{paths::Data, sessions};
 
+/// A data folder with the bundled add-ons, the Codex agent among them, as a start leaves it.
 fn scratch() -> tempfile::TempDir {
-    tempfile::tempdir().unwrap()
+    let dir = tempfile::tempdir().unwrap();
+    wb_core::addons::install_bundled(&Data::new(dir.path().to_path_buf()));
+    dir
 }
 
 fn adapter(data: &Path, args: &[&str], input: Option<&Value>, lang: &str) -> std::process::Output {
@@ -123,7 +126,7 @@ fn startup_and_every_prompt_provide_localized_map_instructions() {
             assert!(context.contains("automatically from the first question"), "the agent's text is English in every language");
             assert!(!context.contains("isOpen"));
             assert!(context.contains("context_map"));
-            assert!(!context.contains("{ $"));
+            assert!(!context.contains("{ $") && !context.contains("{session}"));
         }
     }
 }

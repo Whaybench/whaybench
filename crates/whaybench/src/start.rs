@@ -107,7 +107,7 @@ fn check_needed(parts: &[(String, String)]) {
 
 /// What a new conversation tab starts with.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TermOpen { pub attach: Option<String>, pub resume: Option<String>, pub map_from: Option<String> }
+pub struct TermOpen { pub attach: Option<String>, pub resume: Option<String>, pub map_from: Option<String>, #[serde(default)] pub agent: Option<String> }
 
 fn new_tab_id() -> String {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -123,11 +123,29 @@ pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<String, S
     let relay = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench-term");
     let tab = new_tab_id();
     // The terminal knows its tab too: a link opened from it goes to the views of this tab's session.
-    let mut command = format!("exec env WHAYBENCH_TAB={tab} alacritty --class {TERM_APP}-{tab} --config-file '{}' -e '{}' --tab {tab}", config.display(), relay.display());
+    let mut command = format!("exec env WHAYBENCH_TAB={tab} {} alacritty --class {TERM_APP}-{tab} --config-file '{}' -e '{}' --tab {tab}", agent_env(open, data)?, config.display(), relay.display());
     if let Some(a) = &open.attach { command += &format!(" --attach {a}"); }
     if let Some(r) = &open.resume { command += &format!(" --resume {r}"); }
     if let Some(m) = &open.map_from { command += &format!(" --map-from '{m}'"); }
     Ok(command)
+}
+
+/// The tab's agent, as variables for the relay and all it starts: the one asked for, else the agent of the session it
+/// opens or takes its map from, else Claude Code. An add-on's settings folder is made ready here.
+fn agent_env(open: &TermOpen, data: &paths::Data) -> Result<String, String> {
+    let of_session = || [&open.attach, &open.resume, &open.map_from].into_iter().flatten()
+        .find_map(|s| wb_core::sessions::record_of(data, s)?.get("agent")?.as_str().map(String::from));
+    let Some(id) = open.agent.clone().filter(|a| a != wb_core::agents::CLAUDE).or_else(of_session) else {
+        return Ok(format!("{}={}", wb_core::agents::ENV_AGENT, wb_core::agents::CLAUDE));
+    };
+    let agent = wb_core::agents::load(&data.root, &id).map_err(|e| e.to_string())?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut env = format!("{}={id}", wb_core::agents::ENV_AGENT);
+    if let Some((var, folder)) = agent.prepare(&data.root, &exe).map_err(|e| e.to_string())? {
+        env += &format!(" {var}={}", wb_core::agents::shell_quote(&folder).map_err(|e| e.to_string())?);
+    }
+    if let Some(command) = &agent.trust { wb_core::status::say(data, &wb_core::i18n::f("agent-hooks", &[("name", agent.name.clone()), ("command", command.clone())]), 8); }
+    Ok(env)
 }
 
 /// An app that belongs in a panel: it gets our socket, the data directory and the run.

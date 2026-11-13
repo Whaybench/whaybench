@@ -1,0 +1,16 @@
+{
+  "name": "Codex",
+  "command": "codex",
+  "args": ["--no-daemon", "--sandbox", "workspace-write"],
+  "resume": ["resume", "{session}"],
+  "home": {
+    "env": "CODEX_HOME",
+    "from": "~/.codex",
+    "copy": ["auth.json"],
+    "copy_keys": { "config.toml": ["model", "model_reasoning_effort"] }
+  },
+  "merge": { "config.toml": "mcp.toml" },
+  "write": { "hooks.json": "hooks.json" },
+  "context": "context.md",
+  "trust": "/hooks"
+}

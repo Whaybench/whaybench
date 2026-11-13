@@ -2,20 +2,23 @@
 
 > Codex CLI support is experimental. Some parts may not work yet; reports are welcome in [Issues](https://github.com/Whaybench/whaybench/issues).
 
-Run `whaybench --agent codex` and Codex CLI is the agent of that run. One run does not mix Claude Code and Codex.
-Without `--agent` the agent is Claude Code, and nothing on that path changes.
+Choose `New conversation · Codex` in the session menu and that tab runs Codex CLI. Claude Code and Codex tabs work side
+by side; a session opens again with the agent it was started with.
+Codex is an agent add-on, `addons/agents/codex/`: its command, arguments, settings folder, hook and MCP templates and
+guidance are files there, not code. How to make one is in `addons/agents/README.md`.
+Other tabs are Claude Code, and nothing on that path changes.
 
 ## Parts
 
 | Part | What it does | Where |
 |---|---|---|
-| `whaybench --agent codex` | Prepares `<data>/codex` as Codex's folder (`CODEX_HOME`) and passes `WHAYBENCH_AGENT=codex` to everything the run starts | `crates/whaybench/src/agent.rs`, `prepare` in `crates/wb-core/src/codex.rs` |
-| Terminal relay | Starts `codex --no-daemon --sandbox workspace-write` instead of Claude Code; a session comes back with `codex resume ID` | `Relay::start` in `crates/whaybench-term/src/main.rs`, `codex::args` |
+| Opening a Codex tab | Prepares `<data>/codex` as Codex's folder (`CODEX_HOME`) as `agent.json` says and passes `WHAYBENCH_AGENT=codex` to everything the tab starts | `agent_env` in `crates/whaybench/src/start.rs`, `prepare` in `crates/wb-core/src/agents.rs`, `addons/agents/codex/` |
+| Terminal relay | Starts the add-on's `command` and `args` (`codex --no-daemon --sandbox workspace-write`) instead of Claude Code; a session comes back with its `resume` (`codex resume ID`) | `Relay::start` in `crates/whaybench-term/src/main.rs`, `args` in `crates/wb-core/src/agents.rs` |
 | `whaybench hook codex` | Receives Codex's eight hooks (SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, Interrupt, SessionEnd). The same handler serves Claude Code's events (`whaybench hook claude`): the session record, state and heartbeat; at the start (and after a compaction) the map guidance, the view panel note and the whole memory list; on each prompt the memory changes and the files the person changed; after `apply_patch` the files it changed, as file records and memory events; at the end of a turn its count and answer | `crates/wb-core/src/hook.rs` |
 | `whaybench record SESSION touch\|state\|alive\|off\|answer\|moved\|carry-from` | Session record, state, heartbeat and answers. Only these functions write those files, whatever the agent | `crates/wb-core/src/session_record.rs` |
 | `whaybench mcp` | The conversation map tool `context_map` over MCP. Whaybench registers it in Codex's `config.toml` as the server `whaybench`, passes it `WHAYBENCH_TAB` (Codex passes an MCP server only the variables it lists) and lets the tool run without asking. The tab tells the server which session it serves | `crates/whaybench/src/mcp.rs`, `crates/wb-core/src/map_tool.rs` |
 | `whaybench map SESSION [--write]` | Reads or changes a conversation map. A change comes on stdin as `upsert`, `remove`, `current` (`nodes` for a whole replacement) | `command` in `crates/wb-core/src/map.rs` |
-| Agent guidance | At SessionStart and every UserPromptSubmit, the rules of keeping the map and the commands go into Codex's context | `codex-context`, `codex-map-context` in `config/lang/ai.ftl` (English in every language) |
+| Agent guidance | At SessionStart and every UserPromptSubmit, the rules of keeping the map and the commands go into Codex's context | `addons/agents/codex/context.md` (English) |
 
 ## How it differs from Claude Code
 
@@ -69,6 +72,6 @@ taking over another session's map, filling a map style's fields.
 
 ## Tests
 
-`cargo test --workspace`: the `codex` and `map` tests in `wb-core`, and `crates/whaybench/tests/codex.rs`, which
+`cargo test --workspace`: the `agents` and `map` tests in `wb-core`, and `crates/whaybench/tests/codex.rs`, which
 runs the real `whaybench` binary through a first prompt, two turns and a resume, and checks the guidance in
 English and Korean.

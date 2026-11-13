@@ -93,8 +93,7 @@ Settings → Language. Share it back as a pull request and everyone gets it.
 3. Start it:
 
    ```sh
-   whaybench                  # with Claude Code
-   whaybench --agent codex    # with Codex CLI (experimental)
+   whaybench
    ```
 
 Ask your agent something and watch the map grow.

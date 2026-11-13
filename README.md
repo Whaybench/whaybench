@@ -99,13 +99,12 @@ packages, and, when Claude Code is installed, installs its Whaybench plugin. To 
     claude plugin marketplace add whaybench/whaybench
     claude plugin install context-map@whaybench
 
-Codex CLI support is experimental: some parts may not work yet. With Codex CLI there is nothing more to install. Start with `--agent codex`, then open `/hooks` in the Codex tab once
+Codex CLI support is experimental: some parts may not work yet. With Codex CLI there is nothing more to install. Open a Codex conversation from the session menu (New conversation · Codex), then open `/hooks` in the Codex tab once
 and trust the Whaybench hooks. See [docs/codex.md](docs/codex.md).
 
 ### 3. Run
 
-    whaybench                  # with Claude Code
-    whaybench --agent codex    # with Codex CLI (experimental)
+    whaybench
 
 A conversation tab opens with the agent; ask it something and the map starts to grow. Settings → Language
 switches the interface language.

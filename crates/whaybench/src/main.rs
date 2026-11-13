@@ -18,11 +18,11 @@ use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::App;
 use wb_core::{log as record, paths};
 
-const USAGE: &str = "whaybench [--data-dir DIR] [--agent codex] [--app COMMAND]... [--no-session]    the agent is Claude Code unless given
+const USAGE: &str = "whaybench [--data-dir DIR] [--app COMMAND]... [--no-session]    the agent is Claude Code unless given
 whaybench map [--data-dir DIR] SESSION [--write < CHANGE.json | --take-over < MAP.json | --start-from < MAP.json | --end-turn] | --file MAP.json    read, change or take over a conversation map, count a finished turn, or read a saved map
 whaybench memory [--data-dir DIR] list SESSION | changes SESSION | show MEMID|SESSION/NODE | search WORD...    what the memory holds: a session's memory list, what changed since it last looked, one node, a search
 whaybench record [--data-dir DIR] SESSION touch|state|alive|off|answer|moved|carry-from ...    a session's record, state, heartbeat, answers
-whaybench hook [--data-dir DIR] claude|codex < EVENT.json    run by the agent's hooks
+whaybench hook [--data-dir DIR] claude|ID < EVENT.json    run by the agent's hooks
 whaybench mcp [--data-dir DIR]    the conversation map tool over MCP (stdio), for an agent in a Whaybench tab
 whaybench statusline [--data-dir DIR] < STATUS.json    a Claude Code status line: context and plan usage, kept for the notifications panel
 whaybench ctl [--data-dir DIR] session new [MAP-FROM] | show ID | type ID TEXT | end ID
@@ -36,12 +36,11 @@ struct Args {
     data_dir: Option<PathBuf>,
     apps: Vec<String>,
     no_session: bool,
-    codex: bool,
     ctl: Option<Vec<String>>,
 }
 
 fn parse_args(mut args: Vec<String>) -> Result<Args, String> {
-    let mut out = Args { data_dir: None, apps: Vec::new(), no_session: false, codex: false, ctl: None };
+    let mut out = Args { data_dir: None, apps: Vec::new(), no_session: false, ctl: None };
     // ctl, map, record and hook take the words after them as their own; map, record and hook stay as the first of them.
     if args.first().is_some_and(|a| matches!(a.as_str(), "ctl" | "map" | "record" | "hook" | "memory" | "statusline" | "mcp")) {
         if args[0] == "ctl" { args.remove(0); }
@@ -53,11 +52,6 @@ fn parse_args(mut args: Vec<String>) -> Result<Args, String> {
             "--data-dir" => out.data_dir = Some(it.next().ok_or("--data-dir needs a folder")?.into()),
             "--app" if out.ctl.is_none() => out.apps.push(it.next().ok_or("--app needs a command")?),
             "--no-session" if out.ctl.is_none() => out.no_session = true,
-            "--agent" if out.ctl.is_none() => match it.next().as_deref() {
-                Some("codex") => out.codex = true,
-                Some("claude") => out.codex = false,
-                _ => return Err("--agent takes claude or codex".into()),
-            },
             _ => match &mut out.ctl {
                 Some(rest) => rest.push(a),
                 None => return Err(format!("unknown argument: {a}")),
@@ -96,7 +90,6 @@ fn main() {
         if let Err(e) = done { fail(&e); }
         return;
     }
-    if args.codex { agent::start_codex(&data).unwrap_or_else(|e| fail(&e)); }
     if let Err(e) = run(data, args.apps, args.no_session) { fail(&e); }
 }
 
@@ -236,8 +229,7 @@ mod tests {
         assert_eq!(c.ctl.unwrap(), ["shot", "--out", "p"]);
         assert!(parse_args(a(&["--what"])).is_err());
         assert_eq!(parse_args(a(&["map", "--data-dir", "/d", "s1", "--write"])).unwrap().ctl.unwrap(), ["map", "s1", "--write"]);
-        assert!(parse_args(a(&["--agent", "codex"])).unwrap().codex);
-        assert!(parse_args(a(&["--agent", "gpt"])).is_err());
+        assert!(parse_args(a(&["--agent", "codex"])).is_err(), "the agent is chosen per conversation, in the session menu");
         assert!(parse_args(a(&["--app", "map"])).unwrap().ctl.is_none());
         assert!(parse_args(a(&["--data-dir"])).is_err());
     }

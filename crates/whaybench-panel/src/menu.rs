@@ -103,7 +103,10 @@ fn session_menu(d: &Data, k: &Maker) -> gio::Menu {
             status::send(&d2, "sessions", json!({"search": true}));
         });
     }
-    { let d2 = d.clone(); k.add(&m, wb_core::i18n::t("new-conversation-session"), move || ctl(&d2, session_args(&d2, &["new"]))); }
+    for (id, name) in wb_core::agents::list(&d.root) {
+        let d2 = d.clone();
+        k.add(&m, &wb_core::i18n::f("new-conversation-with", &[("name", name)]), move || ctl(&d2, session_args(&d2, &["new", "--agent", &id])));
+    }
     {
         let d2 = d.clone();
         k.add(&m, wb_core::i18n::t("end-this-tab-s-session"), move || {

@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::{log as record, paths::Data};
 
 /// The add-ons the program brings: where, file, content.
-const BUNDLED: [(&str, &str, &str); 17] = [
+const BUNDLED: [(&str, &str, &str); 21] = [
     ("languages/ko", "messages.ftl", include_str!("../../../addons/languages/ko/messages.ftl")),
     ("languages/ko", "language.json", include_str!("../../../addons/languages/ko/language.json")),
     ("map-styles/ibis", "style.json", include_str!("../../../addons/map-styles/ibis/style.json")),
@@ -25,13 +25,18 @@ const BUNDLED: [(&str, &str, &str); 17] = [
     ("themes/wada-dream", "theme.json", include_str!("../../../addons/themes/wada-dream/theme.json")),
     ("themes/wada-jasper", "theme.json", include_str!("../../../addons/themes/wada-jasper/theme.json")),
     ("project-docs/wbs", "WBS.md", include_str!("../../../addons/project-docs/wbs/WBS.md")),
+    ("agents/codex", "agent.json", include_str!("../../../addons/agents/codex/agent.json")),
+    ("agents/codex", "mcp.toml", include_str!("../../../addons/agents/codex/mcp.toml")),
+    ("agents/codex", "hooks.json", include_str!("../../../addons/agents/codex/hooks.json")),
+    ("agents/codex", "context.md", include_str!("../../../addons/agents/codex/context.md")),
 ];
 /// What the people who make add-ons read; written every time, it is not an add-on.
-const GUIDES: [(&str, &str); 4] = [
+const GUIDES: [(&str, &str); 5] = [
     ("languages", include_str!("../../../addons/languages/README.md")),
     ("map-styles", include_str!("../../../addons/map-styles/README.md")),
     ("themes", include_str!("../../../addons/themes/README.md")),
     ("project-docs", include_str!("../../../addons/project-docs/README.md")),
+    ("agents", include_str!("../../../addons/agents/README.md")),
 ];
 
 /// An add-on's id is its folder's name: letters, digits, `-` and `_`, so it is safe in a path and in a file.

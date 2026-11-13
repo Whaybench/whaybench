@@ -1,6 +1,6 @@
 //! What the compositor and the panel apps share: where data lives, the debug record, component versions.
 pub mod addons;
-pub mod codex;
+pub mod agents;
 pub mod db;
 pub mod hook;
 pub mod i18n;

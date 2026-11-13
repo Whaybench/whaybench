@@ -95,13 +95,16 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
     if !running(data) { return Err(format!("not running with data directory {}", data.root.display())); }
     match words.first().map(String::as_str) {
         Some("new") => {
-            let map_from = words.get(1).cloned();
+            let (agent, map_from) = match &words[1..] {
+                [flag, id, rest @ ..] if flag == "--agent" => (Some(id.clone()), rest.first().cloned()),
+                rest => (None, rest.first().cloned()),
+            };
             if let Some(m) = &map_from {
                 if !m.starts_with('/') && !data.root.join(format!("{m}.json")).exists() {
                     return Err(wb_core::i18n::t("new-tab-keep-map-not-opened-2").into());
                 }
             }
-            post(data, &Request::OpenTerm { open: TermOpen { map_from, ..Default::default() } })
+            post(data, &Request::OpenTerm { open: TermOpen { map_from, agent, ..Default::default() } })
         }
         Some("show") => show_session(data, words.get(1).ok_or("session show needs an id")?),
         Some("type") => {
@@ -204,7 +207,8 @@ pub fn open_first_tabs(data: &Data) {
         // Sessions handed to the background take a few seconds to carry on under their new number, and a tab of the
         // last run that showed one lets go of it a moment after the window closed: go as soon as every one runs in the
         // background, and at most 10 seconds after the window closed.
-        let ready = |s: &String| sessions::agent(&sessions::locate(&data, s)).is_some_and(|a| a.get("kind").and_then(|k| k.as_str()) != Some("interactive"));
+        // An add-on agent's session has no background: it is opened again from where it was saved.
+        let ready = |s: &String| sessions::record_of(&data, s).is_some_and(|r| r.get("agent").is_some()) || sessions::agent(&sessions::locate(&data, s)).is_some_and(|a| a.get("kind").and_then(|k| k.as_str()) != Some("interactive"));
         while now_secs() < at + 10 {
             sessions::refresh_agents();
             if tabs.iter().flatten().all(ready) { break; }

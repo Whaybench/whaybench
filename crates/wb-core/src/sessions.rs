@@ -135,9 +135,9 @@ pub fn continued_in(d: &Data, id: &str) -> Option<String> {
     continued_in_text(&String::from_utf8_lossy(&bytes)).filter(|n| n != id)
 }
 
-/// Whether Claude Code keeps a conversation under this number (its transcript). Codex keeps its own, elsewhere.
+/// Whether Claude Code keeps a conversation under this number (its transcript). An add-on agent keeps its own, elsewhere.
 pub fn saved(d: &Data, id: &str) -> bool {
-    record_of(d, id).and_then(|r| r.get("agent").and_then(Value::as_str).map(String::from)).as_deref() == Some("codex")
+    record_of(d, id).is_some_and(|r| r.get("agent").is_some())
         || transcript_of(d, id).is_some_and(|p| holds_conversation(&p))
 }
 
@@ -163,7 +163,7 @@ pub fn ghost(d: &Data, all: &[Value], id: &str) -> bool {
 /// wrote anything has no transcript, and Claude Code answers "No conversation found"; the conversation is
 /// then in the nearest earlier number that has one.
 pub fn resumable(d: &Data, id: &str) -> String {
-    if record_of(d, id).and_then(|r| r.get("agent").and_then(Value::as_str).map(String::from)).as_deref() == Some("codex") { return id.into(); }
+    if record_of(d, id).is_some_and(|r| r.get("agent").is_some()) { return id.into(); }
     resumable_by(d, id, |n| transcript_of(d, n).is_some_and(|p| holds_conversation(&p)))
 }
 
@@ -243,7 +243,7 @@ pub fn refresh_agents() { *AGENTS.lock().unwrap() = None; }
 /// Running sessions as Claude Code reports them, kept for 3 seconds. `kind` "interactive" is held by a
 /// terminal; anything else runs in the background.
 pub fn agents() -> Vec<Value> {
-    if crate::codex::active() { return Vec::new(); }
+    if crate::agents::other() { return Vec::new(); }
     let mut g = AGENTS.lock().unwrap();
     if let Some((at, list)) = g.as_ref() {
         if at.elapsed() < Duration::from_secs(3) { return list.clone(); }
