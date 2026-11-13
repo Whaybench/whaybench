@@ -18,6 +18,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The answer panel's earlier answers missed an answer when two came at once or came from a session not followed:
+  the list now comes from every session's answer log.
+- An answer to a request from another session (starting with `[`) was kept under the question before it; the
+  answer log now keeps each turn's own question.
 - Choosing a conversation panel switches the map, answer, view and usage at once, not up to a second later. A tab
   without a session yet (a Codex tab before its hooks report) shows them empty instead of the session seen before.
 - After an update replaced the program while it ran, a new Codex tab registered its hooks and map tool under the old

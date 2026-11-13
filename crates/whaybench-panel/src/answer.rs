@@ -1,5 +1,6 @@
 //! The answer panel: the chosen session's last answer, kept answers with back and forward, and the answers of a
-//! map node. The panel's own list holds the last 50 of all sessions.
+//! map node. The panel's own list holds the last 50 of all sessions, taken from every session's answer log, so answers
+//! that come at once, or from a session not followed, are all in it.
 use std::{cell::RefCell, rc::Rc};
 
 use gtk::prelude::*;
@@ -18,7 +19,27 @@ struct Panel {
     related: Option<(Vec<Value>, usize)>,
     followed: Option<String>,
     last_at: i64,
+    /// The newest answer taken from the logs, and when they were last looked at.
+    seen: i64,
+    scanned: i64,
 }
+
+/// Answers in the logs after `since`, oldest first, as (session, row). A log not written to since `scanned` is not read.
+fn logged_after(d: &Data, since: i64, scanned: i64) -> Vec<(String, Value)> {
+    let mut out = Vec::new();
+    for f in std::fs::read_dir(d.root.join("answer-log")).into_iter().flatten().flatten() {
+        let Some(sid) = f.file_name().to_str().and_then(|n| n.strip_suffix(".jsonl")).map(String::from) else { continue };
+        let modified = f.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(i64::MAX, |t| t.as_millis() as i64);
+        // A second of slack: the file's time and the clock read at the last look can differ a little.
+        if modified < scanned - 1000 { continue; }
+        let Ok(text) = std::fs::read_to_string(f.path()) else { continue };
+        out.extend(text.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l).ok()).take_while(|r| r["at"].as_i64().unwrap_or(0) > since).map(|r| (sid.clone(), r)));
+    }
+    out.sort_by_key(|(_, r)| r["at"].as_i64().unwrap_or(0));
+    out
+}
+
+fn same(r: &Value, at: i64, session: &str) -> bool { r["at"].as_i64() == Some(at) && r["session"].as_str() == Some(session) }
 
 fn time_of(ms: i64, format: &str) -> String {
     chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format(format).to_string()).unwrap_or_default()
@@ -113,7 +134,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
 
     let history: Vec<Value> = std::fs::read_to_string(history_file(&d)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default();
     let pos = history.len().saturating_sub(1);
-    let panel = Rc::new(RefCell::new(Panel { history, pos, related: None, followed: None, last_at: 0 }));
+    // A first start takes the last answers already logged; after that, what came while the panel was closed.
+    let seen = history.iter().filter_map(|r| r["at"].as_i64()).max().unwrap_or(0);
+    let panel = Rc::new(RefCell::new(Panel { history, pos, related: None, followed: None, last_at: 0, seen, scanned: 0 }));
     let w = Rc::new(Widgets { web, where_, back: back.clone(), forward: forward.clone(), drop: drop.clone(), shown: RefCell::default() });
     draw(&panel.borrow(), &w, &d);
 
@@ -173,6 +196,25 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 }
             }
             let session = sessions::target(&d);
+            let now = chrono::Utc::now().timestamp_millis();
+            let fresh = logged_after(&d, p.seen, p.scanned);
+            p.scanned = now;
+            if !fresh.is_empty() {
+                let mine = session.as_deref().map(|s| records::lineage(&d, s)).unwrap_or_default();
+                for (sid, a) in fresh.iter().rev().take(KEEP).rev() {
+                    let at = a["at"].as_i64().unwrap_or(0);
+                    p.seen = p.seen.max(at);
+                    if p.history.iter().any(|r| same(r, at, sid)) { continue; }
+                    p.history.push(json!({"at": at, "session": sid, "prompt": a["prompt"], "text": a["text"], "title": cut(&sessions::session_name(&d, sid), 24)}));
+                    // The followed session's answer is shown; another's waits in the list.
+                    if p.related.is_none() && mine.contains(sid) { p.pos = p.history.len() - 1; p.last_at = at; }
+                }
+                let skip = p.history.len().saturating_sub(KEEP);
+                p.history.drain(..skip);
+                p.pos = p.pos.saturating_sub(skip).min(p.history.len().saturating_sub(1));
+                save(&d, &p.history);
+                changed = true;
+            }
             if session != p.followed {
                 p.followed = session.clone();
                 p.related = None;
@@ -183,7 +225,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 let at = a["at"].as_i64().unwrap_or(0);
                 if at != p.last_at {
                     p.last_at = at;
-                    let known = p.history.iter().any(|r| r["at"].as_i64() == Some(at));
+                    let sid = a["sessionId"].as_str().unwrap_or("");
+                    let known = p.history.iter().any(|r| same(r, at, sid));
                     if !known {
                         let name = session.as_deref().map(|s| sessions::session_name(&d, s)).unwrap_or_default();
                         p.history.push(json!({"at": at, "session": a["sessionId"], "prompt": a["prompt"], "text": a["text"], "title": cut(&name, 24)}));
@@ -193,7 +236,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                         p.related = None;
                     }
                     if p.related.is_none() {
-                        if let Some(i) = p.history.iter().position(|r| r["at"].as_i64() == Some(at)) { p.pos = i; }
+                        if let Some(i) = p.history.iter().position(|r| same(r, at, sid)) { p.pos = i; }
                     }
                     changed = true;
                 }
@@ -203,4 +246,26 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         let _ = changed;
         draw(&panel.borrow(), &w, &d);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn answers_of_every_session_come_in_order_and_once() {
+        let root = std::env::temp_dir().join(format!("wb-answers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let d = Data::new(root.clone());
+        std::fs::create_dir_all(root.join("answer-log")).unwrap();
+        let row = |at: i64, t: &str| json!({"at": at, "prompt": "q", "text": t}).to_string();
+        std::fs::write(root.join("answer-log/claude.jsonl"), format!("{}\n{}\n", row(10, "old"), row(30, "c"))).unwrap();
+        std::fs::write(root.join("answer-log/codex.jsonl"), format!("{}\n", row(30, "x"))).unwrap();
+        let got: Vec<(String, String)> = logged_after(&d, 20, 0).into_iter().map(|(s, r)| (s, r["text"].as_str().unwrap().to_string())).collect();
+        assert_eq!(got.len(), 2, "two answers at the same moment from two sessions are both kept");
+        assert!(got.iter().any(|(s, t)| s == "codex" && t == "x") && !got.iter().any(|(_, t)| t == "old"));
+        assert!(logged_after(&d, 30, 0).is_empty());
+        assert!(logged_after(&d, 0, i64::MAX).is_empty(), "logs not written since the last look are not read");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

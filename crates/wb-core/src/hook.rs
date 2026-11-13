@@ -44,6 +44,9 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         _ => ("done", None),
     };
     if !state.is_empty() { session_record::state(data, sid, state, note)?; }
+    // The turn's own question for its answer, unfiltered: the record's lastPrompt leaves out commands and Whaybench's
+    // requests (they start with / or [), and the answer to one would be kept under the question before it.
+    if let Some(p) = prompt { write_json(&state_file(data, "prompt", sid), &json!(p))?; }
     session_record::alive(data, sid, name != "SessionEnd")?;
     let session_map = map::ensure(data, sid)?;
     if name == "SessionStart" || name == "UserPromptSubmit" {
@@ -114,7 +117,9 @@ fn stop(data: &Path, a: &Agent, sid: &str, event: &Value, record: &mut Value) ->
     // Claude Code's transcript holds the turn's every block of text; the last message alone misses what came before tools.
     let whole = if a.name == "claude" { event.get("transcript_path").and_then(Value::as_str).map(|p| whole_turn(Path::new(p), last)).unwrap_or_default() } else { String::new() };
     let answer = if whole.trim().is_empty() { last.to_string() } else { whole };
-    if !answer.trim().is_empty() { session_record::answer(data, sid, &json!({"text": answer, "turnId": turn}))?; }
+    let mut input = json!({"text": answer, "turnId": turn});
+    if let Some(p) = read_json(&state_file(data, "prompt", sid), Value::Null)?.as_str() { input["prompt"] = json!(p); }
+    if !answer.trim().is_empty() { session_record::answer(data, sid, &input)?; }
     Ok(())
 }
 
@@ -338,6 +343,24 @@ mod tests {
         let mut e = json!({"session_id": sid, "hook_event_name": name, "cwd": "/w"});
         for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); }
         e
+    }
+
+    #[test]
+    fn an_answer_is_kept_with_its_own_question_even_a_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let a = Agent { name: "codex", tab: None, inside: true };
+        let sid = "s-ask";
+        let ev = |name: &str, extra: Value| { let mut e = json!({"session_id": sid, "hook_event_name": name, "cwd": "w"}); for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); } e };
+        crate::addons::install_bundled(&crate::paths::Data::new(data.to_path_buf()));
+        run(data, &a, &ev("UserPromptSubmit", json!({"prompt": "install it"}))).unwrap();
+        run(data, &a, &ev("Stop", json!({"last_assistant_message": "installed", "turn_id": "t1"}))).unwrap();
+        run(data, &a, &ev("UserPromptSubmit", json!({"prompt": "[from another session] does read work?"}))).unwrap();
+        run(data, &a, &ev("Stop", json!({"last_assistant_message": "it works", "turn_id": "t2"}))).unwrap();
+        let log = fs::read_to_string(data.join("answer-log/s-ask.jsonl")).unwrap();
+        let rows: Vec<Value> = log.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!((rows[0]["prompt"].as_str(), rows[1]["prompt"].as_str()), (Some("install it"), Some("[from another session] does read work?")));
+        assert_eq!(read_json(&data.join("sessions/s-ask.json"), Value::Null).unwrap()["lastPrompt"], "install it", "the list still leaves requests out");
     }
 
     #[test]
