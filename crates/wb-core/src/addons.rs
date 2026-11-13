@@ -42,6 +42,8 @@ const GUIDES: [(&str, &str); 5] = [
 /// An add-on's id is its folder's name: letters, digits, `-` and `_`, so it is safe in a path and in a file.
 pub fn valid_id(id: &str) -> bool { !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') }
 
+fn valid_file(f: &str) -> bool { !f.is_empty() && !f.starts_with('.') && !f.contains('/') }
+
 pub fn install_bundled(data: &Data) {
     let root = data.root.join("addons");
     for (kind, text) in GUIDES {
@@ -56,6 +58,16 @@ pub fn install_bundled(data: &Data) {
         if before.iter().any(|d| d == place) && !dir.exists() { continue; }
         if fs::read_to_string(dir.join(file)).ok().as_deref() == Some(text) { if !done.iter().any(|d| d == place) { done.push(place.to_string()); } continue; }
         if fs::create_dir_all(&dir).is_ok() && fs::write(dir.join(file), text).is_ok() && !done.iter().any(|d| d == place) { done.push(place.to_string()); }
+    }
+    // A file an older version brought and this one does not is removed; what the program wrote beside them stays.
+    for place in done.iter().filter(|p| BUNDLED.iter().any(|(b, _, _)| b == p)) {
+        let dir = root.join(place);
+        if !dir.is_dir() { continue; }
+        let now: Vec<&str> = BUNDLED.iter().filter(|(b, _, _)| b == place).map(|(_, f, _)| *f).collect();
+        let list = dir.join(".bundled.json");
+        let before: Vec<String> = fs::read_to_string(&list).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        for old in before.iter().filter(|f| !now.contains(&f.as_str()) && valid_file(f)) { let _ = fs::remove_file(dir.join(old)); }
+        if before.iter().map(String::as_str).ne(now.iter().copied()) { let _ = fs::write(&list, Value::from(now).to_string()); }
     }
     // What a person making a language starts from; it is not a language.
     let _ = fs::write(root.join("languages/en.ftl"), include_str!("../../../config/lang/en.ftl"));
@@ -81,6 +93,12 @@ mod tests {
         install_bundled(&d);
         assert_ne!(fs::read_to_string(dir.join("addons/themes/black/theme.json")).unwrap(), "old");
         assert!(dir.join("addons/themes/black/settings.json").exists());
+        // A file a newer version no longer brings goes; the person's own beside it stays.
+        fs::write(dir.join("addons/agents/codex/.bundled.json"), r#"["agent.json","mcp.toml"]"#).unwrap();
+        fs::write(dir.join("addons/agents/codex/mcp.toml"), "old").unwrap();
+        install_bundled(&d);
+        assert!(!dir.join("addons/agents/codex/mcp.toml").exists());
+        assert!(dir.join("addons/agents/codex/agent.json").exists() && dir.join("addons/themes/black/settings.json").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }

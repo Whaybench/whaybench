@@ -18,6 +18,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A file a bundled add-on no longer brings is removed from the data folder at start; files the program or the person
+  wrote beside it stay.
 - In a Codex tab, `whaybench-view`, `whaybench-project` and `whaybench-files` failed with "Read-only file system": the
   data folder is now one of Codex's writable roots.
 - A Codex tab showed Claude Code's usage. Codex's context and plan windows now come from its session file, and each
