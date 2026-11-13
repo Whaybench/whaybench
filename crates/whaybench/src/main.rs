@@ -104,6 +104,7 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     let _ = std::fs::create_dir_all(data.maps());
     // An agent's sandbox can let it write in a folder only if the folder is there (addons/agents/codex/config.toml).
     for dir in ["view", "show", "projects", "node-files"] { let _ = std::fs::create_dir_all(data.root.join(dir)); }
+    wb_core::view::move_browser_data(&data);
     // Conversations, answers and the view panel's sign-ins are in here: only this account may read it.
     {
         use std::os::unix::fs::PermissionsExt;

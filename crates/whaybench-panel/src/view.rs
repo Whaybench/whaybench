@@ -272,17 +272,33 @@ fn link_menu(s: &Shared) {
 }
 
 /// `whaybench-view read`: the page's own text, without going through a screen picture.
+/// The reply where reply_file says, never through a link: the file is made new, old ones are cleared.
+fn write_reply(d: &Data, name: &str, out: &Value) {
+    let Some(path) = view::reply_file(d, name) else { record::warn("view", "read reply refused", "not a plain file name", &[("reply", name.chars().take(80).collect())]); return };
+    let dir = view::reply_dir(d);
+    let _ = std::fs::create_dir_all(&dir);
+    // Replies nobody took (an agent's sandbox cannot remove them) go after a minute.
+    for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+        if e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() > 60) { let _ = std::fs::remove_file(e.path()); }
+    }
+    let tmp = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    let made = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(out.to_string().as_bytes()));
+    if made.is_ok() { let _ = std::fs::rename(&tmp, &path); }
+}
+
 fn answer_read(v: &V, all: bool, reply: String) {
     let script = READ_SCRIPT.replace("ALL", if all { "true" } else { "false" });
     let url = v.hist.current().map(|c| c.0.clone()).unwrap_or_default();
     let link = view::link_note(&v.d, &v.link, v.followed.as_deref());
+    let d = v.d.clone();
     // The engine's PDF viewer keeps its text to itself, so a PDF is read from the file.
     if !view::is_web(&url) && url.to_lowercase().ends_with(".pdf") {
         let text = std::process::Command::new("pdftotext").args(["-layout", &url, "-"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
         let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
         let out = json!({"url": url, "title": title_for(&url), "selected": [], "text": lines, "link": link});
-        let tmp = format!("{reply}.tmp");
-        if std::fs::write(&tmp, out.to_string()).is_ok() { let _ = std::fs::rename(&tmp, &reply); }
+        write_reply(&d, &reply, &out);
         return;
     }
     v.web.evaluate_javascript(&script, None, None, None::<&gio::Cancellable>, move |result| {
@@ -292,8 +308,7 @@ fn answer_read(v: &V, all: bool, reply: String) {
         };
         out["url"] = json!(url);
         out["link"] = json!(link);
-        let tmp = format!("{reply}.tmp");
-        if std::fs::write(&tmp, out.to_string()).is_ok() { let _ = std::fs::rename(&tmp, &reply); }
+        write_reply(&d, &reply, &out);
     });
 }
 
@@ -355,7 +370,7 @@ fn tick(s: &Shared) {
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
-    let store = d.root.join("view/webkit");
+    let store = view::webkit_store(&d);
     let session = webkit6::NetworkSession::new(Some(&store.join("data").to_string_lossy()), Some(&store.join("cache").to_string_lossy()));
     // Sign-ins stay over restarts: without a file the cookies live only as long as the panel.
     if let Some(cookies) = session.cookie_manager() {
@@ -366,7 +381,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
     crate::common::follow_zoom(&web, &d);
     web.set_vexpand(true);
     web.set_hexpand(true);
-    if let Some(settings) = webkit6::prelude::WebViewExt::settings(&web) { settings.set_allow_file_access_from_file_urls(true); settings.set_default_charset("utf-8"); }
+    if let Some(settings) = webkit6::prelude::WebViewExt::settings(&web) { settings.set_allow_file_access_from_file_urls(false); settings.set_allow_universal_access_from_file_urls(false); settings.set_default_charset("utf-8"); }
     // A link that wants a new window stays in this view.
     web.connect_create(|w, action| {
         let action = action.clone();

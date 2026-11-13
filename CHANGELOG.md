@@ -13,6 +13,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Security: a `whaybench-view read` request named the reply file by path, so an agent that may write `view/` (Codex)
+  could make the view panel, outside its sandbox, overwrite any file of the person's. The reply is now a plain name
+  in `cache/view-read/`, written as a new file.
+- Security: an HTML page in the view panel could read other local files (file URLs read from file URLs).
+- Security: the Firefox profile and the view's WebKit data (sign-ins, cookies) moved from `view/` to `browser/`, out of
+  an agent's reach; they move once at start, or at a later start while a Firefox still runs on them.
+- Security: every value put in a conversation tab's shell command is quoted; a map path with a quote could run a
+  command.
 - A view kept on one session named the number it had when kept, not the one the conversation goes on under.
 - `whaybench-view read --firefox` now says the Firefox panel belongs to no session and every session reads the
   same tab.

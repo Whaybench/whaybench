@@ -123,10 +123,12 @@ pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<String, S
     let relay = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench-term");
     let tab = new_tab_id();
     // The terminal knows its tab too: a link opened from it goes to the views of this tab's session.
-    let mut command = format!("exec env WHAYBENCH_TAB={tab} {} alacritty --class {TERM_APP}-{tab} --config-file '{}' -e '{}' --tab {tab}", agent_env(open, data)?, config.display(), relay.display());
-    if let Some(a) = &open.attach { command += &format!(" --attach {a}"); }
-    if let Some(r) = &open.resume { command += &format!(" --resume {r}"); }
-    if let Some(m) = &open.map_from { command += &format!(" --map-from '{m}'"); }
+    let q = |s: &str| wb_core::agents::shell_quote(Path::new(s)).map_err(|e| e.to_string());
+    let mut command = format!("exec env WHAYBENCH_TAB={tab} {} alacritty --class {TERM_APP}-{tab} --config-file {} -e {} --tab {tab}", agent_env(open, data)?, q(&config.to_string_lossy())?, q(&relay.to_string_lossy())?);
+    // Every value from a request is quoted: a map path or a session number must never become shell syntax.
+    if let Some(a) = &open.attach { command += &format!(" --attach {}", q(a)?); }
+    if let Some(r) = &open.resume { command += &format!(" --resume {}", q(r)?); }
+    if let Some(m) = &open.map_from { command += &format!(" --map-from {}", q(m)?); }
     Ok(command)
 }
 
@@ -249,5 +251,8 @@ mod agent_tests {
         assert_eq!(env(TermOpen { map_from: Some("cx".into()), agent: Some("claude".into()), ..Default::default() }), "WHAYBENCH_AGENT=claude");
         std::fs::remove_dir_all(dir.path().join("addons/agents/codex")).unwrap();
         assert!(agent_env(&TermOpen { resume: Some("cx".into()), ..Default::default() }, &data).is_err(), "a deleted add-on is said, not run as Claude Code");
+        // A map path with shell syntax stays one argument.
+        let cmd = terminal_command(&TermOpen { map_from: Some("/x'; touch /tmp/pwned; '".into()), ..Default::default() }, &data).unwrap();
+        assert!(cmd.contains(r"--map-from '/x'\''; touch /tmp/pwned; '\''"), "{cmd}");
     }
 }

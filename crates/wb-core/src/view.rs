@@ -231,11 +231,20 @@ pub fn session_moved(d: &Data, old: &str, new: &str) {
 }
 
 /// What a view shows, as text. Asks the panel and waits for its answer.
+/// Where the view panel writes a read's reply: in cache/, which no agent sandbox may write, so a request can name only
+/// a file in it, never a path (an agent writes requests in view/; with a path it could make the panel overwrite any file).
+pub fn reply_dir(d: &Data) -> PathBuf { d.cache().join("view-read") }
+
+/// A reply's file in reply_dir, from the name a request gives; None for anything but a plain `.json` name.
+pub fn reply_file(d: &Data, name: &str) -> Option<PathBuf> {
+    let ok = name.ends_with(".json") && !name.starts_with('.') && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    ok.then(|| reply_dir(d).join(name))
+}
+
 pub fn read_panel(d: &Data, name: &str, all: bool) -> Result<Value, String> {
-    // In view/: an agent's sandbox lets it write there (addons/agents/codex/config.toml), so it can remove the reply.
-    let reply = d.root.join("view").join(format!("read-{}.json", std::process::id()));
-    let _ = std::fs::remove_file(&reply);
-    ask(d, &for_view(name), &json!({"do": "read", "all": all, "reply": reply})).map_err(|e| e.to_string())?;
+    let file = format!("read-{}-{}.json", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0));
+    let reply = reply_dir(d).join(&file);
+    ask(d, &for_view(name), &json!({"do": "read", "all": all, "reply": file})).map_err(|e| e.to_string())?;
     for _ in 0..60 {
         if let Ok(text) = std::fs::read_to_string(&reply) {
             let _ = std::fs::remove_file(&reply);
@@ -246,7 +255,26 @@ pub fn read_panel(d: &Data, name: &str, all: bool) -> Result<Value, String> {
     Err(crate::i18n::f("view-not-responding-whaybench-closed-or", &[("name", (name).to_string())]))
 }
 
-pub fn profile(d: &Data) -> PathBuf { d.root.join("view/firefox") }
+/// The browsers' sign-ins and settings: outside view/, which an agent's sandbox may write.
+pub fn profile(d: &Data) -> PathBuf { d.root.join("browser/firefox") }
+pub fn webkit_store(d: &Data) -> PathBuf { d.root.join("browser/webkit") }
+
+/// A Firefox still running on this profile (its `lock` link names host:+pid): it is moved at a later start.
+fn in_use(profile: &Path) -> bool {
+    std::fs::read_link(profile.join("lock")).ok()
+        .and_then(|t| t.to_string_lossy().rsplit('+').next().and_then(|p| p.parse::<u32>().ok()))
+        .is_some_and(|pid| Path::new(&format!("/proc/{pid}")).exists())
+}
+
+/// Once: the browser data of versions before 0.6.1 moves out of view/. Before any browser starts.
+pub fn move_browser_data(d: &Data) {
+    for (old, new) in [(d.root.join("view/firefox"), profile(d)), (d.root.join("view/webkit"), webkit_store(d))] {
+        if old.is_dir() && !new.exists() && !in_use(&old) {
+            if let Some(p) = new.parent() { let _ = std::fs::create_dir_all(p); }
+            let _ = std::fs::rename(&old, &new);
+        }
+    }
+}
 
 /// The panel's Firefox shows the page only: no tab strip, and the address bar only while it is in use (Ctrl+L). Its
 /// profile is the program's own, so these files are written at every start.
@@ -359,6 +387,28 @@ pub fn vim(d: &Data, path: &str) -> std::io::Result<()> { terminal(d, &["vim".to
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_read_reply_is_a_plain_name_in_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = Data::new(dir.path().to_path_buf());
+        assert_eq!(reply_file(&d, "read-1-2.json"), Some(d.cache().join("view-read/read-1-2.json")));
+        for bad in ["/etc/profile", "../ctl/a.json", "a/b.json", ".x.json", "a.json.tmp", "", "a b.json"] { assert!(reply_file(&d, bad).is_none(), "{bad}"); }
+    }
+
+    #[test]
+    fn browser_data_moves_out_of_view_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = Data::new(dir.path().to_path_buf());
+        std::fs::create_dir_all(dir.path().join("view/firefox")).unwrap();
+        std::fs::write(dir.path().join("view/firefox/prefs.js"), "x").unwrap();
+        std::os::unix::fs::symlink(format!("host:+{}", std::process::id()), dir.path().join("view/firefox/lock")).unwrap();
+        move_browser_data(&d);
+        assert!(!profile(&d).exists(), "not while a Firefox runs on it");
+        std::fs::remove_file(dir.path().join("view/firefox/lock")).unwrap();
+        move_browser_data(&d);
+        assert!(profile(&d).join("prefs.js").exists() && !dir.path().join("view/firefox").exists());
+    }
+
     #[test]
     fn a_read_says_whose_page_and_follows_a_moved_session() {
         let dir = tempfile::tempdir().unwrap();
