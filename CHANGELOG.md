@@ -18,6 +18,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Choosing a conversation panel switches the map, answer, view and usage at once, not up to a second later. A tab
+  without a session yet (a Codex tab before its hooks report) shows them empty instead of the session seen before.
 - After an update replaced the program while it ran, a new Codex tab registered its hooks and map tool under the old
   file's name ("... (deleted)") and every hook failed with exit code 127.
 - A conversation tab that cannot open (its agent add-on deleted, for one) says so in the status bar.

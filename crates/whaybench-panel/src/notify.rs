@@ -276,7 +276,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     list.add_controller(click);
     redraw(&d, &list, &view, true);
     let show_usage = { let d = d.clone(); move || {
-        let text = wb_core::usage::latest(&d.root, wb_core::sessions::target(&d).as_deref()).map(|u| wb_core::usage::line(&u)).unwrap_or_default();
+        let text = wb_core::sessions::target(&d).and_then(|t| wb_core::usage::latest(&d.root, Some(&t))).map(|u| wb_core::usage::line(&u)).unwrap_or_default();
         if usage.text() != text { usage.set_text(&text); }
         usage.set_visible(!text.is_empty());
     } };

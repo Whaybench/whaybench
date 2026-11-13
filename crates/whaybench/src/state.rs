@@ -101,7 +101,7 @@ pub struct App {
     /// The status line: below the surface, not a panel, not movable.
     pub status: Option<Window>,
     /// The front tab and session last made the chosen session.
-    pub focused_term: Option<(String, String)>,
+    pub focused_term: Option<(String, Option<String>)>,
     pub shaders: Option<crate::render::Shaders>,
     pub grabbed_popups: Vec<smithay::wayland::shell::xdg::PopupSurface>,
     data: Data,
@@ -354,10 +354,12 @@ impl App {
         let session = std::fs::read_to_string(wb_core::sessions::tab_file(&self.data, &tab)).ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
             .and_then(|v| v.get("session").and_then(|s| s.as_str()).map(String::from));
-        let Some(session) = session else { return };
         let pair = (tab, session);
         if self.focused_term.as_ref() != Some(&pair) {
-            wb_core::sessions::set_focus(&self.data, &pair.1, wb_core::i18n::t("input"));
+            match &pair.1 {
+                Some(s) => wb_core::sessions::set_focus(&self.data, s, wb_core::i18n::t("input")),
+                None => wb_core::sessions::set_focus_empty(&self.data, wb_core::i18n::t("input")),
+            }
             self.focused_term = Some(pair);
         }
     }
@@ -520,6 +522,8 @@ impl App {
             let keyboard = self.seat.get_keyboard().unwrap();
             keyboard.set_focus(self, Some(target), SERIAL_COUNTER.next_serial());
         }
+        // The panels follow the conversation chosen now, not at the next tick.
+        self.sync_focus();
     }
 
     /// Where the panel's front app has its origin on the surface.

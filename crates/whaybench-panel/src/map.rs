@@ -785,6 +785,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         // An imported map's file and a session's map both list nodes; their content comes from the memory.
         let (shown, mut data): (String, Option<Value>) = match imported_of(scope.as_ref()) {
             Some(path) => { let Ok(m) = wb_core::map::view_file(&d.root, std::path::Path::new(path)) else { return }; (path.to_string(), Some(m)) }
+            // A tab without a session in front: an empty map, not the one seen before.
+            None if sessions::empty_chosen(&d) => (String::new(), Some(serde_json::json!({"nodes": []}))),
             None => { let Some(t) = sessions::target(&d) else { return }; let Some(m) = sessions::map_of(&d, &t) else { return }; (t, Some(m)) }
         };
         let text = data.as_ref().map(Value::to_string).unwrap_or_default();

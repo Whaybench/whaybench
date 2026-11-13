@@ -331,6 +331,17 @@ pub fn clear_focus(d: &Data) { let _ = fs::remove_file(focus_file(d)); }
 
 pub fn latest(d: &Data) -> Option<String> { Some(current_id(d, read_json(&latest_map(d))?.get("sessionId")?.as_str()?)) }
 
+/// A conversation tab without a session yet is in front (an agent whose hooks have not told it): the panels show
+/// nothing rather than the session seen before, which would pass for this tab's.
+pub fn set_focus_empty(d: &Data, who: &str) {
+    if read_json(&focus_file(d)).is_some_and(|v| v["sessionId"].is_null()) { return; }
+    record::decide("session", "session chosen", "a tab without a session in front", &[("session", String::new()), ("by", who.to_string())]);
+    let _ = write_atomic(&focus_file(d), &serde_json::json!({"sessionId": null}).to_string());
+}
+
+/// Whether the tab in front has no session yet (set_focus_empty).
+pub fn empty_chosen(d: &Data) -> bool { read_json(&focus_file(d)).is_some_and(|v| v["sessionId"].is_null()) }
+
 pub fn set_focus(d: &Data, id: &str, who: &str) {
     let before = read_json(&focus_file(d)).and_then(|v| v.get("sessionId").and_then(Value::as_str).map(String::from)).unwrap_or_default();
     if before == id { return; }
@@ -348,6 +359,7 @@ pub fn focus(d: &Data) -> Option<String> {
 
 /// The session the program is on: the chosen one, else the one whose map changed last.
 pub fn target(d: &Data) -> Option<String> {
+    if empty_chosen(d) { return None; }
     focus(d).or_else(|| {
         let id = read_json(&latest_map(d))?.get("sessionId")?.as_str()?.to_string();
         Some(current_id(d, &id))
@@ -364,6 +376,18 @@ mod tests {
         Data::new(d)
     }
     pub(crate) fn rec(d: &Data, id: &str, v: Value) { fs::write(sessions_dir(d).join(format!("{id}.json")), v.to_string()).unwrap(); }
+
+    #[test]
+    fn a_tab_without_a_session_in_front_shows_no_session() {
+        let d = data("empty-focus");
+        fs::write(latest_map(&d), r#"{"sessionId":"older"}"#).unwrap();
+        assert_eq!(target(&d).as_deref(), Some("older"), "nothing chosen: the map that changed last");
+        set_focus_empty(&d, "test");
+        assert!(target(&d).is_none() && focus(&d).is_none(), "not the session seen before");
+        set_focus(&d, "s1", "test");
+        assert_eq!(target(&d).as_deref(), Some("s1"));
+        assert!(!empty_chosen(&d));
+    }
 
     #[test]
     fn moves_are_followed_to_the_end_and_a_loop_stops() {
