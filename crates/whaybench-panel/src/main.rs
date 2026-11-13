@@ -23,6 +23,7 @@ mod view;
 use gtk::{gio, glib, prelude::*};
 
 fn main() -> glib::ExitCode {
+    wb_core::paths::private_files();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let kind = args.first().cloned().unwrap_or_default();
     let view_name = args.get(1).cloned().unwrap_or_else(|| wb_core::view::FIRST_VIEW.to_string());

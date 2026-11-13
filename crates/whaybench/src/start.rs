@@ -167,7 +167,7 @@ fn open_shim(data: &paths::Data, bins: &str) -> String {
     if std::fs::read_to_string(&file).ok().as_deref() != Some(script.as_str()) {
         use std::os::unix::fs::PermissionsExt;
         let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, &script))
-            .and_then(|_| std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)));
+            .and_then(|_| std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)));
         if let Err(e) = written { record::warn("screen", "open shim not made", &e.to_string(), &[]); return String::new(); }
     }
     format!("{}:", dir.display())
@@ -181,7 +181,12 @@ pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
     let bins = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())).map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
     let shims = open_shim(data, &bins);
     let path = format!("{shims}{bins}:{}", std::env::var("PATH").unwrap_or_default());
-    let started = Command::new("sh").arg("-c").arg(command)
+    let umask = wb_core::paths::user_umask();
+    let mut sh = Command::new("sh");
+    // The apps write in the person's folders: their umask, not Whaybench's private one.
+    // SAFETY: umask is async-signal-safe.
+    unsafe { std::os::unix::process::CommandExt::pre_exec(&mut sh, move || { libc::umask(umask); Ok(()) }); }
+    let started = sh.arg("-c").arg(command)
         .env("PATH", path)
         .env("WAYLAND_DISPLAY", socket)
         // Inside, Korean and other input methods come through this compositor's text input; a GTK or Qt module of

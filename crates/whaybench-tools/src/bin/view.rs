@@ -165,6 +165,7 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
 }
 
 fn main() {
+    paths::private_files();
     let Some(root) = paths::resolve(None, |k| std::env::var(k).ok()) else { eprintln!("error: no data directory"); std::process::exit(1) };
     if let Err(e) = run(std::env::args().skip(1).collect(), &Data::new(root)) { eprintln!("{e}"); std::process::exit(1); }
 }

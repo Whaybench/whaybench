@@ -60,9 +60,57 @@ pub fn write_atomic(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<(
     std::fs::rename(tmp, path)
 }
 
+/// Holds the umask the person's programs had, so a program started for them inside keeps theirs.
+const ENV_UMASK: &str = "WHAYBENCH_UMASK";
+
+/// First thing in every Whaybench program, before any thread: what it writes (conversations, answers, maps, the
+/// memory) is for this account only, as Claude Code keeps its conversations: files 600, folders 700. The person's
+/// own umask is kept for the programs started for them (see `user_umask`).
+pub fn private_files() {
+    // SAFETY: umask only sets this process's mask.
+    let old = unsafe { libc::umask(0o077) };
+    // SAFETY: called first in main, while no other thread can read the environment.
+    if std::env::var_os(ENV_UMASK).is_none() { unsafe { std::env::set_var(ENV_UMASK, format!("{old:o}")) } }
+}
+
+/// The person's umask, for a program started for them (an app in a panel, Claude Code in a tab), so what they make
+/// in their own folders is as they would make it outside Whaybench.
+pub fn user_umask() -> libc::mode_t {
+    std::env::var(ENV_UMASK).ok().and_then(|v| libc::mode_t::from_str_radix(&v, 8).ok()).unwrap_or(0o022)
+}
+
+/// Files written before `private_files` (Whaybench up to 0.5.4) are made private too: folders 700, files 600,
+/// a script 700. Links are left alone.
+pub fn make_private(root: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for e in entries.flatten() {
+        let Ok(meta) = std::fs::symlink_metadata(e.path()) else { continue };
+        let mode = meta.permissions().mode() & 0o777;
+        let want = if meta.is_dir() || (meta.is_file() && mode & 0o100 != 0) { 0o700 } else if meta.is_file() { 0o600 } else { continue };
+        if mode != want { let _ = std::fs::set_permissions(e.path(), std::fs::Permissions::from_mode(want)); }
+        if meta.is_dir() { make_private(&e.path()); }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn old_files_are_made_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sessions");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("a.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("open"), "#!/bin/sh").unwrap();
+        for (p, m) in [(&sub, 0o755), (&sub.join("a.json"), 0o644), (&dir.path().join("open"), 0o755)] { std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap(); }
+        make_private(dir.path());
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&sub), 0o700);
+        assert_eq!(mode(&sub.join("a.json")), 0o600);
+        assert_eq!(mode(&dir.path().join("open")), 0o700);
+    }
     fn env<'a>(v: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |k| v.iter().find(|(n, _)| *n == k).map(|(_, x)| x.to_string())
     }

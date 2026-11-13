@@ -113,6 +113,7 @@ impl Relay {
         }
         let c_env: Vec<(CString, CString)> = env.iter().filter_map(|(k, v)| Some((CString::new(k.as_str()).ok()?, CString::new(v.as_str()).ok()?))).collect();
 
+        let umask = wb_core::paths::user_umask();
         let mut master = -1;
         let pid = unsafe { libc::forkpty(&mut master, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) };
         if pid < 0 { return Err(std::io::Error::last_os_error().to_string()); }
@@ -121,6 +122,8 @@ impl Relay {
                 libc::signal(libc::SIGHUP, libc::SIG_DFL);
                 libc::signal(libc::SIGPIPE, libc::SIG_DFL);
                 libc::chdir(c_cwd.as_ptr());
+                // The agent writes in the person's folders: their umask, not Whaybench's private one.
+                libc::umask(umask);
                 for (k, v) in &c_env { libc::setenv(k.as_ptr(), v.as_ptr(), 1); }
                 libc::execv(c_program.as_ptr(), ptrs.as_ptr());
                 libc::_exit(127);
@@ -455,6 +458,7 @@ fn set_raw() {
 }
 
 fn main() {
+    wb_core::paths::private_files();
     let mut args = std::env::args().skip(1);
     let (mut tab, mut attach, mut resume, mut map_from) = (None, None, None, None);
     while let Some(a) = args.next() {

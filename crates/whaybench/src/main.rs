@@ -68,6 +68,7 @@ fn parse_args(mut args: Vec<String>) -> Result<Args, String> {
 }
 
 fn main() {
+    wb_core::paths::private_files();
     let raw: Vec<String> = std::env::args().skip(1).collect();
     if raw.iter().any(|a| a == "--version") {
         println!("whaybench {} ({})", env!("CARGO_PKG_VERSION"), env!("WB_COMMIT"));
@@ -106,6 +107,7 @@ fn fail(message: &str) -> ! {
 
 fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), String> {
     std::fs::create_dir_all(data.cache()).map_err(|e| format!("cannot use {}: {e}", data.root.display()))?;
+    wb_core::paths::make_private(&data.root);
     let _ = std::fs::create_dir_all(data.maps());
     // Conversations, answers and the view panel's sign-ins are in here: only this account may read it.
     {

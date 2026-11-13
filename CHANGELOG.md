@@ -6,6 +6,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- What Whaybench writes in its data folder (conversations' records, answers, maps, the memory database) is readable
+  by this account only: files 600, folders 700, as Claude Code keeps its conversations. Files from before are changed
+  at start. Apps and the agent started inside keep the person's own umask for what they write in their folders.
+
 ### Fixed
 
 - Windows: Korean input stopped after Whaybench restarted. The fcitx5 Whaybench starts now keeps running when its

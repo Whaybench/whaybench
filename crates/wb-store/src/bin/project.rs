@@ -141,6 +141,7 @@ fn session_line(st: &Store, session: &str, result: &str, pid: &str, work: &str) 
 }
 
 fn main() {
+    paths::private_files();
     let Some(root) = paths::resolve(None, |k| std::env::var(k).ok()) else { eprintln!("error: no data directory"); std::process::exit(1) };
     let st = Store::new(Data::new(root));
     match run(std::env::args().skip(1).collect(), &st) {

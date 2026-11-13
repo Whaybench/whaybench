@@ -60,6 +60,7 @@ fn run(mut args: Vec<String>, data: &Data) -> Result<(), String> {
 fn read(path: &Path) -> Option<Value> { serde_json::from_str(&fs::read_to_string(path).ok()?).ok() }
 
 fn main() {
+    paths::private_files();
     let Some(root) = paths::resolve(None, |k| std::env::var(k).ok()) else { eprintln!("error: no data directory"); std::process::exit(1) };
     if let Err(e) = run(std::env::args().skip(1).collect(), &Data::new(root)) { eprintln!("{e}"); std::process::exit(1); }
 }
