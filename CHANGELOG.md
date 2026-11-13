@@ -6,6 +6,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-11-13
+
+Apps inside draw on the GPU, and Korean shows in the title bars under Windows.
+
 ### Changed
 
 - Apps inside draw on the GPU: the compositor offers its GPU through linux-dmabuf and takes their buffers without a
