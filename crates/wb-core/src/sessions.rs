@@ -221,6 +221,14 @@ pub fn moved_back(d: &Data, id: &str) {
     }
 }
 
+/// Whether the person set Claude Code's answer language themselves (`language` in ~/.claude/settings.json).
+pub fn claude_language_set() -> bool {
+    let Some(home) = std::env::var_os("HOME") else { return false };
+    std::fs::read_to_string(std::path::Path::new(&home).join(".claude/settings.json")).ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .is_some_and(|v| v["language"].as_str().is_some_and(|l| !l.is_empty()))
+}
+
 pub fn claude_program() -> PathBuf {
     let path = std::env::var("PATH").unwrap_or_default();
     let home = std::env::var("HOME").ok();

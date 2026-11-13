@@ -88,7 +88,14 @@ impl Relay {
         let mut args = if codex { wb_core::codex::args(args) } else { args.to_vec() };
         // The map is kept every turn: its tool (the plugin's MCP server) runs without asking. Attaching to a session
         // in the background takes no options; that session was started with them.
-        if !codex && args.first().is_none_or(|a| a != "attach") { args.extend(["--allowedTools".into(), MAP_TOOL.into()]); }
+        if !codex && args.first().is_none_or(|a| a != "attach") {
+            args.extend(["--allowedTools".into(), MAP_TOOL.into()]);
+            // Answers in the interface language, as Claude Code's own `language` setting does: once in the system
+            // prompt, not a note every turn. A language the person set themselves is left alone.
+            if let Some(l) = wb_core::i18n::agent_language(&self.data).filter(|_| !sessions::claude_language_set()) {
+                args.extend(["--settings".into(), serde_json::json!({"language": l}).to_string()]);
+            }
+        }
         for a in &args { argv.push(CString::new(a.as_bytes()).map_err(|e| e.to_string())?); }
         let mut ptrs: Vec<*const libc::c_char> = argv.iter().map(|a| a.as_ptr()).collect();
         ptrs.push(std::ptr::null());

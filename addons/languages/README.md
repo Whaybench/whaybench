@@ -5,10 +5,12 @@ A language is an add-on: one folder, one language. Delete the folder and the lan
 ```
 <data folder>/addons/languages/<language code>/
   messages.ftl    the texts (Fluent format, https://projectfluent.org)
-  language.json   { "format": 1, "name": "Deutsch", "version": "1.0" }
+  language.json   { "format": 1, "name": "Deutsch", "english": "German", "version": "1.0" }
 ```
 
 - The folder name is the language code: `de`, `ja`, `pt-BR`.
+- `english` is the language's name in English. Claude Code started in a conversation tab is told to answer in it
+  (its `language` setting), unless the person set one in `~/.claude/settings.json`.
 - It appears under `Settings → Language`. A change applies after a restart.
 - With no choice made, the program uses the system language if there is a folder for it, otherwise English.
 

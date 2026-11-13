@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Claude Code in a conversation tab answers in the interface language (its `language` setting, given at start with
+  `--settings`), so long tool work no longer drifts into English. A language set in `~/.claude/settings.json` is kept.
+
 ## [0.5.6] - 2026-11-14
 
 Updates come by themselves, six more themes, and panel titles that read better.

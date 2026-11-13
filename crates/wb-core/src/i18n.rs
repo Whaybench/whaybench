@@ -46,6 +46,13 @@ pub fn list(d: &Data) -> Vec<(String, String)> {
     found
 }
 
+/// The language the agent answers in, in English for its `language` setting ("Korean"): the interface language's
+/// `english` in its language.json. None for the default (English) or an add-on without one.
+pub fn agent_language(d: &Data) -> Option<String> {
+    let about: Value = fs::read_to_string(root(d).join(lang()).join("language.json")).ok().and_then(|t| serde_json::from_str(&t).ok())?;
+    about.get("english").and_then(Value::as_str).filter(|n| !n.is_empty()).map(String::from)
+}
+
 /// The chosen language; with no choice, the system's if there is an add-on for it; if its folder is gone, the default.
 pub fn active(d: &Data, system: Option<&str>) -> String {
     let there = |id: &str| id == DEFAULT || (valid_id(id) && root(d).join(id).join("messages.ftl").is_file());
