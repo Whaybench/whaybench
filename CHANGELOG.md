@@ -19,6 +19,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Security: an HTML page in the view panel could read other local files (file URLs read from file URLs).
 - Security: the Firefox profile and the view's WebKit data (sign-ins, cookies) moved from `view/` to `browser/`, out of
   an agent's reach; they move once at start, or at a later start while a Firefox still runs on them.
+- An update no longer replaces the programs one by one: each version is installed whole in a folder of its own
+  (`~/.local/lib/whaybench-versions/<version>`), and `~/.local/lib/whaybench` switches to it in one step. The version
+  before is kept, and `install.sh --rollback` goes back to it. A failed install leaves the version in use as it is.
+  Hooks, command links and restarts name the stable path, so they follow the version in use.
 - Security: releases are signed (minisign; the key is in the README). Whaybench updates itself only with an
   `install.sh` and a package signed for that version, and About → Update no longer runs a script piped from the network:
   it fetches and checks the release like an automatic update, then installs it at the restart. `install.sh` checks the

@@ -126,8 +126,11 @@ that check against this key, and `install.sh` checks the package with it when `m
 To check a download yourself: `minisign -Vm whaybench-x86_64-linux.tar.gz -P <the key above>`.
 
 To update, run the install command again; it updates the Claude Code plugin too. Whaybench may keep running: the
-status line then says a new version is waiting, and Whaybench → Restart starts it. To remove Whaybench, delete `~/.local/lib/whaybench` and
-`~/.local/bin/whaybench`; your data stays (see below).
+status line then says a new version is waiting, and Whaybench → Restart starts it. Each version is kept in a folder
+of its own and the one before stays: if a new version misbehaves, go back with
+`curl -fsSL https://github.com/Whaybench/whaybench/releases/latest/download/install.sh | sh -s -- --rollback` and restart.
+To remove Whaybench, delete `~/.local/lib/whaybench`, `~/.local/lib/whaybench-versions` and `~/.local/bin/whaybench`;
+your data stays (see below).
 
 ### Windows
 

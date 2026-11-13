@@ -2,7 +2,9 @@
 # Installs the latest Whaybench release for this user:
 #   curl -fsSL https://github.com/Whaybench/whaybench/releases/latest/download/install.sh | sh
 # With whaybench-x86_64-linux.tar.gz (and its .sha256) already in the current folder, that file is installed instead.
-# The programs go to ~/.local/lib/whaybench, the command to ~/.local/bin/whaybench. When Claude Code is installed, its
+# Each version goes to a folder of its own in ~/.local/lib/whaybench-versions; ~/.local/lib/whaybench is a link to the
+# one in use, switched in one step, and the version before is kept: `sh install.sh --rollback` goes back to it.
+# The command is ~/.local/bin/whaybench. When Claude Code is installed, its
 # Whaybench plugin is installed too. System packages are only checked: their install command is shown.
 set -eu
 
@@ -11,10 +13,24 @@ REPO="${WHAYBENCH_REPO:-https://github.com/Whaybench/whaybench}"
 KEY=RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia
 NAME=whaybench-x86_64-linux
 LIB="$HOME/.local/lib/whaybench"
+VERS="$HOME/.local/lib/whaybench-versions"
 BIN="$HOME/.local/bin"
 
 say() { printf '%s\n' "$*"; }
 fail() { say "whaybench install: $*" >&2; exit 1; }
+
+# Points the link at another folder in one step: a program starting meanwhile finds the old version or the new one.
+switch() { ln -sfn "$1" "$LIB.new" && mv -T "$LIB.new" "$LIB"; }
+
+if [ "${1:-}" = --rollback ]; then
+    prev=$(readlink "$VERS/previous" 2>/dev/null) || fail "there is no earlier version to go back to."
+    [ -x "$prev/whaybench" ] || fail "the earlier version in $prev is incomplete."
+    now=$(readlink "$LIB" 2>/dev/null || true)
+    switch "$prev"
+    [ -n "$now" ] && ln -sfn "$now" "$VERS/previous"
+    say "Back to $("$LIB/whaybench" --version 2>/dev/null || echo "$prev"). Restart Whaybench to use it."
+    exit 0
+fi
 
 [ "$(uname -s)" = Linux ] || fail "Whaybench runs on Linux only."
 [ "$(uname -m)" = x86_64 ] || fail "there is a build for x86_64 only; build from source on $(uname -m)."
@@ -42,14 +58,30 @@ else
 fi
 tar xzf "$tmp/$NAME.tar.gz" -C "$tmp"
 
-mkdir -p "$LIB" "$BIN"
-# A running program's file cannot be written over ("Text file busy"): the old file is removed and a new one made,
-# so an update works while Whaybench runs, which then shows that a new version waits for a restart.
+ver=$("$tmp/$NAME/whaybench" --version 2>/dev/null | awk '{print $2}')
+[ -n "$ver" ] || fail "the package's program does not run here."
+mkdir -p "$VERS" "$BIN"
+# The new version is complete in its folder before anything uses it; a failure here leaves the one in use as it is.
 # Alacritty, for the terminal tabs, comes with the release.
-for f in "$tmp/$NAME"/whaybench* "$tmp/$NAME"/alacritty; do rm -f "$LIB/${f##*/}"; cp "$f" "$LIB"/; done
-cp "$tmp/$NAME"/NOTICE "$tmp/$NAME"/*LICENSE* "$LIB"/
+dest="$VERS/$ver"
+rm -rf "$dest.part"
+mkdir -p "$dest.part"
+cp "$tmp/$NAME"/whaybench* "$tmp/$NAME"/alacritty "$tmp/$NAME"/NOTICE "$tmp/$NAME"/*LICENSE* "$dest.part"/
+rm -rf "$dest"
+mv "$dest.part" "$dest"
+# Versions before 0.6.1 put the programs straight in $LIB: that folder becomes the version to go back to.
+if [ -d "$LIB" ] && [ ! -L "$LIB" ]; then rm -rf "$VERS/before-0.6.1"; mv "$LIB" "$VERS/before-0.6.1"; ln -sfn "$VERS/before-0.6.1" "$VERS/previous"; fi
+now=$(readlink "$LIB" 2>/dev/null || true)
+# A running Whaybench keeps its own files; it shows that a new version waits for a restart.
+switch "$dest"
+[ -n "$now" ] && [ "$now" != "$dest" ] && ln -sfn "$now" "$VERS/previous"
+# This version and the one before; older ones go.
+keep=$(readlink "$VERS/previous" 2>/dev/null || true)
+for d in "$VERS"/*; do
+    [ "$d" = "$VERS/previous" ] || [ "$d" = "$dest" ] || [ "$d" = "$keep" ] || rm -rf "$d"
+done
 ln -sf "$LIB/whaybench" "$BIN/whaybench"
-say "Installed $("$LIB/whaybench" --version 2>/dev/null || echo whaybench) in $LIB"
+say "Installed $("$LIB/whaybench" --version 2>/dev/null || echo whaybench) in $dest"
 
 if command -v claude >/dev/null; then
     # An existing marketplace makes add fail; only a failed install is reported, with the reason.
@@ -64,7 +96,7 @@ if command -v claude >/dev/null; then
         say "Then run:  claude plugin marketplace add Whaybench/whaybench && claude plugin install context-map@whaybench && claude plugin update context-map@whaybench"
     fi
 else
-    say "Claude Code was not found. With Codex CLI start Whaybench with --agent codex."
+    say "Claude Code was not found. With Codex CLI, open a conversation with Session → New conversation · Codex."
 fi
 
 # What the programs need from the system.

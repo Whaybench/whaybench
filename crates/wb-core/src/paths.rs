@@ -42,8 +42,29 @@ impl Data {
 /// trusting that, and would ask in every new session.
 /// This program's file. After an update replaced it while it runs, Linux names the old one "<path> (deleted)"; the
 /// path is still where the program is, now the new one.
+/// For an installed release it is the stable path, ~/.local/lib/whaybench/<name>: that folder is a link to the version
+/// in use (install.sh), so hooks, links and a restart name the version installed now, not the one this process began as.
 pub fn own_exe() -> std::io::Result<PathBuf> {
-    std::env::current_exe().map(|p| PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)")))
+    let exe = std::env::current_exe().map(|p| PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)")))?;
+    Ok(stable(&exe, std::env::var_os("HOME").map(PathBuf::from).as_deref()).unwrap_or(exe))
+}
+
+/// `<home>/.local/lib/whaybench-versions/<version>/<name>` as `<home>/.local/lib/whaybench/<name>`.
+fn stable(exe: &Path, home: Option<&Path>) -> Option<PathBuf> {
+    let lib = home?.join(".local/lib");
+    let name = exe.file_name()?;
+    (exe.parent()?.parent()? == lib.join("whaybench-versions")).then(|| lib.join("whaybench").join(name))
+}
+
+#[cfg(test)]
+mod stable_tests {
+    use super::*;
+    #[test]
+    fn an_installed_version_is_named_by_the_stable_path() {
+        let home = Path::new("/h");
+        assert_eq!(stable(Path::new("/h/.local/lib/whaybench-versions/0.6.1/whaybench-term"), Some(home)), Some(PathBuf::from("/h/.local/lib/whaybench/whaybench-term")));
+        assert_eq!(stable(Path::new("/src/target/release/whaybench"), Some(home)), None, "a build of its own stays itself");
+    }
 }
 
 pub fn work_dir(data: &Data, home: &Path) -> PathBuf {

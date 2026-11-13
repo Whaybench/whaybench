@@ -18,10 +18,12 @@ const PACKAGE: &str = "whaybench-x86_64-linux.tar.gz";
 
 fn now_ms() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_millis() as u64).unwrap_or(0) }
 
-/// Whether this program came from install.sh, which puts every program in ~/.local/lib/whaybench.
+/// Whether this program came from install.sh: a version folder in ~/.local/lib/whaybench-versions, or, before 0.6.1,
+/// ~/.local/lib/whaybench itself.
 pub fn installed_release() -> bool {
     let (Ok(exe), Some(home)) = (std::env::current_exe(), std::env::var_os("HOME")) else { return false };
-    exe.parent() == Some(Path::new(&home).join(".local/lib/whaybench").as_path())
+    let lib = Path::new(&home).join(".local/lib");
+    exe.parent() == Some(lib.join("whaybench").as_path()) || exe.parent().and_then(Path::parent) == Some(lib.join("whaybench-versions").as_path())
 }
 
 /// The version in a release page's address: `…/releases/tag/v0.4.1` gives `0.4.1`.
