@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-14
+
+Agents are add-ons and chosen per conversation: Claude Code and Codex side by side, each tab and panel showing
+which one it is, and the panels following the conversation you choose at once.
+
 ### Changed
 
 - Codex is now an agent add-on (`addons/agents/codex/`): its command, settings folder, hook and MCP templates and
