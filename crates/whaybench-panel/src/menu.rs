@@ -9,7 +9,7 @@ use wb_core::{paths::Data, sessions, status, theme, view::{self, Link}};
 use crate::common::ctl;
 
 fn panel_program() -> std::path::PathBuf {
-    std::env::current_exe().map(|p| std::path::PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)"))).unwrap_or_else(|_| "whaybench-panel".into())
+    wb_core::paths::own_exe().unwrap_or_else(|_| "whaybench-panel".into())
 }
 
 fn panel_command(kind: &str) -> String { format!("exec '{}' {kind}", panel_program().display()) }

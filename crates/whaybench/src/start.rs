@@ -12,7 +12,7 @@ const NEEDED: [(&str, &str); 3] = [("Alacritty", "install the alacritty package"
 /// The commands a session uses, where every session finds them: one in the background keeps the environment of the
 /// day it started, whose PATH may not have this build's folder. A file of another origin stays as it is.
 fn link_commands() {
-    let (Some(home), Some(bins)) = (std::env::var_os("HOME"), std::env::current_exe().ok().map(|e| PathBuf::from(e.to_string_lossy().trim_end_matches(" (deleted)")))) else { return };
+    let (Some(home), Some(bins)) = (std::env::var_os("HOME"), paths::own_exe().ok()) else { return };
     let Some(bins) = bins.parent().map(PathBuf::from) else { return };
     let dir = PathBuf::from(home).join(".local/bin");
     let _ = std::fs::create_dir_all(&dir);
@@ -138,7 +138,8 @@ fn agent_env(open: &TermOpen, data: &paths::Data) -> Result<String, String> {
     let id = open.agent.clone().or_else(of_session).unwrap_or_else(|| wb_core::agents::CLAUDE.into());
     if id == wb_core::agents::CLAUDE { return Ok(format!("{}={id}", wb_core::agents::ENV_AGENT)); }
     let agent = wb_core::agents::load(&data.root, &id).map_err(|e| e.to_string())?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // This process runs for days and updates replace its file: the hooks must name the path, not the old file.
+    let exe = paths::own_exe().map_err(|e| e.to_string())?;
     let mut env = format!("{}={id}", wb_core::agents::ENV_AGENT);
     if let Some((var, folder)) = agent.prepare(&data.root, &exe).map_err(|e| e.to_string())? {
         env += &format!(" {var}={}", wb_core::agents::shell_quote(&folder).map_err(|e| e.to_string())?);
@@ -242,6 +243,8 @@ mod agent_tests {
         let codex = env(TermOpen { resume: Some("cx".into()), ..Default::default() });
         assert!(codex.starts_with("WHAYBENCH_AGENT=codex CODEX_HOME="), "{codex}");
         assert!(env(TermOpen { agent: Some("codex".into()), ..Default::default() }).starts_with("WHAYBENCH_AGENT=codex "));
+        let hooks = std::fs::read_to_string(dir.path().join("codex/hooks.json")).unwrap();
+        assert!(!hooks.contains("(deleted)"), "the hooks name the program's path");
         // Claude Code asked for, on a Codex session's map: Claude Code.
         assert_eq!(env(TermOpen { map_from: Some("cx".into()), agent: Some("claude".into()), ..Default::default() }), "WHAYBENCH_AGENT=claude");
         std::fs::remove_dir_all(dir.path().join("addons/agents/codex")).unwrap();

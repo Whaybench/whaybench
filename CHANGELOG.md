@@ -18,6 +18,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- After an update replaced the program while it ran, a new Codex tab registered its hooks and map tool under the old
+  file's name ("... (deleted)") and every hook failed with exit code 127.
 - A conversation tab that cannot open (its agent add-on deleted, for one) says so in the status bar.
 - A file a bundled add-on no longer brings is removed from the data folder at start; files the program or the person
   wrote beside it stay.

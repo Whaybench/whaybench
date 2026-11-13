@@ -168,7 +168,7 @@ fn free_firefox(data: &paths::Data) {
 fn start_again(data: &paths::Data, args: Vec<String>) {
     use std::os::unix::process::CommandExt;
     free_firefox(data);
-    let exe = std::env::current_exe().map(|p| std::path::PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)"))).unwrap_or_else(|_| "whaybench".into());
+    let exe = wb_core::paths::own_exe().unwrap_or_else(|_| "whaybench".into());
     let e = std::process::Command::new(exe).args(args).env_remove(record::ENV_RUN).env(ENV_AGAIN, "1").exec();
     record::error("run", "restart failed", &[("error", e.to_string())]);
 }

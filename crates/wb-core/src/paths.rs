@@ -40,6 +40,12 @@ impl Data {
 /// Where a new conversation starts: `work_dir` in the data directory's settings.json, else ~/work. Written with
 /// `~/` so the setting survives moving to another computer. Not the home folder: Claude Code does not remember
 /// trusting that, and would ask in every new session.
+/// This program's file. After an update replaced it while it runs, Linux names the old one "<path> (deleted)"; the
+/// path is still where the program is, now the new one.
+pub fn own_exe() -> std::io::Result<PathBuf> {
+    std::env::current_exe().map(|p| PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)")))
+}
+
 pub fn work_dir(data: &Data, home: &Path) -> PathBuf {
     let set = std::fs::read_to_string(data.root.join("settings.json")).ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())

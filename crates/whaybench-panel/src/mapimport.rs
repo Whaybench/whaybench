@@ -103,7 +103,7 @@ pub fn app_id(path: &str) -> String {
 pub fn message_key(path: &str) -> String { format!("map-{}", app_id(path)) }
 
 fn program() -> PathBuf {
-    std::env::current_exe().map(|p| PathBuf::from(p.to_string_lossy().trim_end_matches(" (deleted)"))).unwrap_or_else(|_| "whaybench-panel".into())
+    wb_core::paths::own_exe().unwrap_or_else(|_| "whaybench-panel".into())
 }
 
 /// Opens the file's panel, or brings it up if it is open, at a node if one is given.
