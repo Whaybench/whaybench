@@ -18,10 +18,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A conversation tab that cannot open (its agent add-on deleted, for one) says so in the status bar.
 - A file a bundled add-on no longer brings is removed from the data folder at start; files the program or the person
   wrote beside it stay.
 - In a Codex tab, `whaybench-view`, `whaybench-project` and `whaybench-files` failed with "Read-only file system": the
-  data folder is now one of Codex's writable roots.
+  folders those commands write in (`view`, `show`, `projects`, `node-files`) are now Codex's writable roots; its own
+  settings, the add-ons and other tabs' input stay out of reach.
 - A Codex tab showed Claude Code's usage. Codex's context and plan windows now come from its session file, and each
   agent's sessions show that agent's plan; a session not heard from yet shows no context instead of another's.
 - Claude Code in a conversation tab answers in the interface language (its `language` setting, given at start with

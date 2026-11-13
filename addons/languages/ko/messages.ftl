@@ -275,6 +275,7 @@ remove-from-history-the-file-stays = 기록에서 제거 (파일은 유지)
 ended = 종료됨
 new-session = 새 세션
 new-tab-keep-map-not-opened-2 = 새 탭 (지도 유지) 미실행 · 선택된 세션에 지도 없음
+tab-not-opened = 대화 탭 열지 못함 · { $e }
 not-run-no-conversation-tab-open = { $head } 미실행 · 대화 탭 없음 · 세션 목록에서 열기
 session-ended-hidden-in-the-session = 세션 종료됨 · 세션 목록에서 숨김
 running-in-another-terminal-type-bg = 다른 터미널에서 실행 중 · 해당 터미널에서 /bg 입력 후 연결 가능 · 현재 지도·답변만 표시

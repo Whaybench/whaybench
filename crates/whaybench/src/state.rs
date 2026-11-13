@@ -221,7 +221,11 @@ impl App {
                 let run = record::run_id(&self.data);
                 crate::start::spawn_app(&command, &self.socket_name, &self.data, &run);
             }
-            Err(e) => record::error("session", "tab not opened", &[("error", e)]),
+            Err(e) => {
+                // Said, not only logged: otherwise the click seems to do nothing (an agent add-on deleted, for one).
+                wb_core::status::say(&self.data, &wb_core::i18n::f("tab-not-opened", &[("e", e.clone())]), 8);
+                record::error("session", "tab not opened", &[("error", e)]);
+            }
         }
     }
 

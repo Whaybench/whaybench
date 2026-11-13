@@ -10,6 +10,8 @@ env_vars = ["WHAYBENCH_TAB"]
 [mcp_servers.whaybench.tools.context_map]
 approval_mode = "approve"
 
-# Whaybench's commands (whaybench-view, whaybench-project, whaybench-files) write their requests in the data folder.
+# Whaybench's commands write their requests in these folders of the data folder: whaybench-view in view and show,
+# whaybench-project in projects, whaybench-files in node-files. Only these: the rest (Codex's own settings, the
+# add-ons, the other tabs' input) stays out of reach, or Codex could undo its own sandbox.
 [sandbox_workspace_write]
-writable_roots = ["{data}"]
+writable_roots = ["{data}/view", "{data}/show", "{data}/projects", "{data}/node-files"]

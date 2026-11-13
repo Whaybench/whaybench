@@ -223,3 +223,28 @@ pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
         Err(e) => record::error("screen", "app not started", &[("command", command.to_string()), ("error", e.to_string())]),
     }
 }
+
+#[cfg(test)]
+mod agent_tests {
+    use super::*;
+
+    #[test]
+    fn a_tab_runs_the_agent_asked_for_else_its_sessions_else_claude_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = paths::Data::new(dir.path().to_path_buf());
+        wb_core::addons::install_bundled(&data);
+        std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
+        std::fs::write(dir.path().join("sessions/cx.json"), r#"{"id":"cx","agent":"codex"}"#).unwrap();
+        std::fs::write(dir.path().join("sessions/cl.json"), r#"{"id":"cl"}"#).unwrap();
+        let env = |open: TermOpen| agent_env(&open, &data).unwrap();
+        assert_eq!(env(TermOpen::default()), "WHAYBENCH_AGENT=claude");
+        assert_eq!(env(TermOpen { resume: Some("cl".into()), ..Default::default() }), "WHAYBENCH_AGENT=claude");
+        let codex = env(TermOpen { resume: Some("cx".into()), ..Default::default() });
+        assert!(codex.starts_with("WHAYBENCH_AGENT=codex CODEX_HOME="), "{codex}");
+        assert!(env(TermOpen { agent: Some("codex".into()), ..Default::default() }).starts_with("WHAYBENCH_AGENT=codex "));
+        // Claude Code asked for, on a Codex session's map: Claude Code.
+        assert_eq!(env(TermOpen { map_from: Some("cx".into()), agent: Some("claude".into()), ..Default::default() }), "WHAYBENCH_AGENT=claude");
+        std::fs::remove_dir_all(dir.path().join("addons/agents/codex")).unwrap();
+        assert!(agent_env(&TermOpen { resume: Some("cx".into()), ..Default::default() }, &data).is_err(), "a deleted add-on is said, not run as Claude Code");
+    }
+}

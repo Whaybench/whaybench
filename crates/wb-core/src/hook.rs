@@ -13,7 +13,7 @@ const EDITS_KEPT: usize = 200;
 const TEXT_KEPT: usize = 40_000;
 
 /// Who runs the hook, and whether it runs inside Whaybench (the view panel is there).
-pub struct Agent<'a> { pub name: &'a str, pub tab: Option<&'a str>, pub inside: bool, pub exe: &'a Path }
+pub struct Agent<'a> { pub name: &'a str, pub tab: Option<&'a str>, pub inside: bool }
 
 fn files_dir(data: &Path) -> std::path::PathBuf { data.join("files") }
 fn state_file(data: &Path, kind: &str, sid: &str) -> std::path::PathBuf { data.join("cache").join("hook").join(format!("{sid}.{kind}.json")) }
@@ -344,8 +344,7 @@ mod tests {
     fn a_claude_session_is_recorded_told_and_kept_from_clashing() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path();
-        let exe = data.join("whaybench");
-        let a = Agent { name: "claude", tab: Some("t1"), inside: true, exe: &exe };
+        let a = Agent { name: "claude", tab: Some("t1"), inside: true };
         let sid = "aaaaaaaa-0000-0000-0000-000000000001";
         let start = run(data, &a, &ev(sid, "SessionStart", json!({"source": "startup"}))).unwrap();
         let told = start["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
@@ -395,8 +394,7 @@ mod tests {
     fn a_session_the_person_ended_stays_ended() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path();
-        let exe = data.join("whaybench");
-        let a = Agent { name: "claude", tab: Some("t1"), inside: true, exe: &exe };
+        let a = Agent { name: "claude", tab: Some("t1"), inside: true };
         let sid = "aaaaaaaa-0000-0000-0000-000000000002";
         run(data, &a, &ev(sid, "SessionStart", json!({}))).unwrap();
         let d = crate::paths::Data::new(data.to_path_buf());
@@ -411,8 +409,7 @@ mod tests {
     fn a_tab_started_from_a_map_takes_it_once() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path();
-        let exe = data.join("whaybench");
-        let a = Agent { name: "claude", tab: None, inside: true, exe: &exe };
+        let a = Agent { name: "claude", tab: None, inside: true };
         let from = "aaaaaaaa-0000-0000-0000-00000000000f";
         map::command(data, from, Some(json!({"upsert": [{"id": "t", "label": "Kept"}]}))).unwrap();
         // shortcut: the process environment is shared by the tests; only this test sets the variable.

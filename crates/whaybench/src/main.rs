@@ -102,6 +102,8 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     std::fs::create_dir_all(data.cache()).map_err(|e| format!("cannot use {}: {e}", data.root.display()))?;
     wb_core::paths::make_private(&data.root);
     let _ = std::fs::create_dir_all(data.maps());
+    // An agent's sandbox can let it write in a folder only if the folder is there (addons/agents/codex/config.toml).
+    for dir in ["view", "show", "projects", "node-files"] { let _ = std::fs::create_dir_all(data.root.join(dir)); }
     // Conversations, answers and the view panel's sign-ins are in here: only this account may read it.
     {
         use std::os::unix::fs::PermissionsExt;

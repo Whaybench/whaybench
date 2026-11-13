@@ -120,11 +120,16 @@ impl Agent {
     /// The agent's own settings folder `<data>/<id>`, made ready before anything starts. Logins and choices are copied
     /// from the person's folder once; the templates are written each time. Returns the variable and folder to set.
     pub fn prepare(&self, data: &Path, exe: &Path) -> Result<Option<(String, PathBuf)>> {
+        self.prepare_with(data, exe, self.home.as_ref().and_then(|h| std::env::var_os(&h.env)).map(PathBuf::from))
+    }
+
+    /// `own`: the person's folder as the variable names it, when set.
+    fn prepare_with(&self, data: &Path, exe: &Path, own: Option<PathBuf>) -> Result<Option<(String, PathBuf)>> {
         let Some(h) = &self.home else { return Ok(None) };
         let home = data.join(&self.id);
         fs::DirBuilder::new().recursive(true).mode(0o700).create(&home)?;
         fs::set_permissions(&home, fs::Permissions::from_mode(0o700))?;
-        let source = std::env::var_os(&h.env).map(PathBuf::from).map_or_else(|| expand(&h.from), Ok)?;
+        let source = own.map_or_else(|| expand(&h.from), Ok)?;
         for file in &h.copy {
             if home.join(file).exists() { continue; }
             match fs::read(source.join(file)) {
@@ -235,8 +240,7 @@ mod tests {
     }
 
     fn call(data: &Path, event: &Value) -> Result<Value> {
-        let exe = data.join("whaybench");
-        crate::hook::run(data, &crate::hook::Agent { name: "codex", tab: Some("tab1"), inside: true, exe: &exe }, event)
+        crate::hook::run(data, &crate::hook::Agent { name: "codex", tab: Some("tab1"), inside: true }, event)
     }
 
     fn with_addons(data: &Path) { crate::addons::install_bundled(&crate::paths::Data::new(data.to_path_buf())); }
@@ -267,8 +271,7 @@ mod tests {
         let exe = dir.path().join("bin/whaybench");
         let codex = load(&data, "codex")?;
         // The person's own CODEX_HOME is where the login is copied from.
-        unsafe { std::env::set_var("CODEX_HOME", &source); }
-        let (var, home) = codex.prepare(&data, &exe)?.unwrap();
+        let (var, home) = codex.prepare_with(&data, &exe, Some(source.clone()))?.unwrap();
         assert_eq!((var.as_str(), &home), ("CODEX_HOME", &data.join("codex")));
         assert_eq!(fs::metadata(&home)?.permissions().mode() & 0o777, 0o700);
         assert_eq!(fs::metadata(home.join("auth.json"))?.permissions().mode() & 0o777, 0o600);
@@ -278,11 +281,13 @@ mod tests {
         assert_eq!(mcp["command"].as_str(), exe.to_str(), "a path with a quote stays one value");
         assert_eq!((mcp["args"][0].as_str(), mcp["args"][2].as_str(), mcp["env_vars"][0].as_str()), (Some("mcp"), data.to_str(), Some("WHAYBENCH_TAB")), "the map tool is Codex's MCP server");
         assert_eq!(mcp["tools"]["context_map"]["approval_mode"].as_str(), Some("approve"), "kept every turn without asking");
-        assert_eq!(config["sandbox_workspace_write"]["writable_roots"][0].as_str(), data.to_str(), "Whaybench's commands can write their requests");
+        let roots: Vec<&str> = config["sandbox_workspace_write"]["writable_roots"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        assert!(roots.contains(&data.join("view").to_str().unwrap()), "Whaybench's commands can write their requests");
+        assert!(!roots.iter().any(|r| *r == data.to_str().unwrap() || r.ends_with("/codex") || r.ends_with("/addons") || r.ends_with("/cache")), "not its own settings, the add-ons or other tabs' input");
         assert_eq!(fs::metadata(home.join("config.toml"))?.permissions().mode() & 0o777, 0o600, "still private after the server is added");
         assert_eq!(config.len(), 4, "model, effort, the MCP server and the sandbox; nothing else is copied");
         fs::write(home.join("auth.json"), "refreshed-login")?;
-        codex.prepare(&data, &exe)?;
+        codex.prepare_with(&data, &exe, Some(source.clone()))?;
         assert_eq!(fs::read_to_string(home.join("auth.json"))?, "refreshed-login");
         let hooks = read_json(&home.join("hooks.json"), Value::Null)?;
         let events = hooks["hooks"].as_object().unwrap();

@@ -78,11 +78,10 @@ pub fn statusline(data: &Data) -> Result<(), String> {
 pub fn hook(data: &Data, words: &[String]) -> Result<(), String> {
     let name = match words { [a] if wb_core::addons::valid_id(a) => a.as_str(), _ => return Err("hook claude|ID".into()) };
     let event = serde_json::from_reader(io::stdin().lock()).map_err(|e| e.to_string())?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let tab = std::env::var("WHAYBENCH_TAB").ok();
     // Add-on agents run only inside Whaybench; Claude Code's plugin hooks also run in plain Claude Code sessions.
     let inside = name != agents::CLAUDE || std::env::var("WHAYBENCH").is_ok_and(|v| v == "1");
-    let agent = wb_core::hook::Agent { name, tab: tab.as_deref(), inside, exe: &exe };
+    let agent = wb_core::hook::Agent { name, tab: tab.as_deref(), inside };
     println!("{}", wb_core::hook::run(&data.root, &agent, &event).map_err(|e| e.to_string())?);
     Ok(())
 }
