@@ -6,6 +6,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-11-14
+
+Whaybench's files are for this account only, and fixes for Windows and for several sessions at once.
+
 ### Security
 
 - What Whaybench writes in its data folder (conversations' records, answers, maps, the memory database) is readable
