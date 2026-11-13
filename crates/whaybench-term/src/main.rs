@@ -457,6 +457,41 @@ fn stop_copy(old: &str) {
     }
 }
 
+/// Shows what an add-on agent will run and asks; the screen is raw, so lines end in \r\n and one key answers.
+fn confirm_agent(data: &Data, agent: &wb_core::agents::Agent) -> bool {
+    use std::io::Read;
+    let (program, files, told) = agent.summary();
+    let t = |k: &str, v: &[(&str, String)]| wb_core::i18n::f(k, v);
+    // The long part first, what runs last: the program stays on screen next to the question.
+    let mut text = String::new();
+    if !told.trim().is_empty() { text += &format!("{}\n{}\n\n", t("agent-trust-context", &[]), told.trim()); }
+    text += &format!("{}\n\n    {program}\n\n", t("agent-trust-title", &[("name", agent.name.clone()), ("path", agent.folder().display().to_string())]));
+    if !files.is_empty() { text += &format!("{}\n\n", t("agent-trust-files", &[("files", files.join(", "))])); }
+    text += &t("agent-trust-ask", &[]);
+    // What the terminal sent by itself before the question (answers to its own queries) is not an answer.
+    unsafe { libc::tcflush(0, libc::TCIFLUSH); }
+    write_all(1, text.replace('\n', "\r\n").as_bytes());
+    let mut key = [0u8; 1];
+    let yes = loop {
+        if !std::io::stdin().read(&mut key).is_ok_and(|n| n == 1) { break false; }
+        match key[0] {
+            // An escape sequence (a focus change, a terminal's reply): skipped to its final letter.
+            0x1b => { while std::io::stdin().read(&mut key).is_ok_and(|n| n == 1) && !key[0].is_ascii_alphabetic() && key[0] != b'~' {} }
+            b'y' | b'Y' => break true,
+            k if k >= 0x20 || k == b'\r' => break false,
+            _ => {}
+        }
+    };
+    if yes {
+        if let Err(e) = agent.trust(&data.root) { record::warn("session", "agent confirmation not kept", &e.to_string(), &[]); }
+        write_all(1, b"\r\n");
+        return true;
+    }
+    write_all(1, format!("\r\n{}\r\n", t("agent-trust-declined", &[])).as_bytes());
+    let _ = std::io::stdin().read(&mut key);
+    false
+}
+
 fn set_raw() {
     unsafe {
         let mut t: libc::termios = std::mem::zeroed();
@@ -516,6 +551,13 @@ fn main() {
         (_, Some(r)) => vec!["--resume".into(), r.clone()],
         _ => new_id.map(|id| vec!["--session-id".into(), id]).unwrap_or_default(),
     };
+    // An add-on agent runs a program as the person: one not as the program brings it is shown and asked first.
+    if let Some(agent) = wb_core::agents::active().and_then(|id| wb_core::agents::load(&relay.data.root, &id).ok()) {
+        if !agent.trusted(&relay.data.root) && !confirm_agent(&relay.data, &agent) {
+            record::decide("session", "agent not started", "the person did not confirm the add-on", &[("agent", agent.id.clone())]);
+            std::process::exit(0);
+        }
+    }
     if let Err(e) = relay.start(&argv) {
         record::error("session", "program not started", &[("error", e.clone())]);
         let _ = writeln!(std::io::stderr(), "whaybench-term: {e}");

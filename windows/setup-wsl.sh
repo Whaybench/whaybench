@@ -14,9 +14,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 say "account $user"
 id "$user" >/dev/null 2>&1 || adduser --disabled-password --gecos "" "$user"
-# Installing a language engine later needs no password the person never set.
-echo "$user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/whaybench
-chmod 0440 /etc/sudoers.d/whaybench
+# No sudo without a password: an agent running as this user could take root with it. Root work goes through
+# `wsl -d Whaybench -u root` from Windows. Earlier versions wrote the rule; a new run takes it away.
+rm -f /etc/sudoers.d/whaybench
 cat > /etc/wsl.conf <<EOF
 [boot]
 systemd=true

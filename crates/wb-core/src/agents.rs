@@ -106,7 +106,47 @@ pub fn shell_quote(path: &Path) -> Result<String> {
     Ok(format!("'{}'", path.replace('\'', "'\\''")))
 }
 
+fn trust_file(data: &Path) -> PathBuf { data.join("addon-trust.json") }
+
 impl Agent {
+    /// Every file the add-on brings, in a fixed order: what the person confirms before it runs.
+    fn fingerprint(&self) -> Result<String> {
+        use sha1::{Digest, Sha1};
+        let mut names: Vec<&String> = self.merge.values().chain(self.write.values()).chain(&self.context).collect();
+        names.sort();
+        let mut h = Sha1::new();
+        for n in std::iter::once(&"agent.json".to_string()).chain(names) {
+            h.update(n.as_bytes());
+            h.update([0]);
+            h.update(fs::read(self.dir.join(n))?);
+            h.update([0]);
+        }
+        Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    }
+
+    /// An add-on agent runs programs as the person: it runs only as the program brings it, or once the person has
+    /// confirmed exactly these files (map styles' instructions are confirmed the same way).
+    pub fn trusted(&self, data: &Path) -> bool {
+        crate::addons::bundled_as_is(&crate::paths::Data::new(data.to_path_buf()), &format!("agents/{}", self.id))
+            || self.fingerprint().ok().is_some_and(|f| crate::map::read_json(&trust_file(data), Value::Null).ok().is_some_and(|t| t[format!("agents/{}", self.id)] == f))
+    }
+
+    pub fn trust(&self, data: &Path) -> Result<()> {
+        let mut t = crate::map::read_json(&trust_file(data), serde_json::json!({}))?;
+        t[format!("agents/{}", self.id)] = Value::String(self.fingerprint()?);
+        write_json(&trust_file(data), &t)
+    }
+
+    /// What the person reads before confirming: the program and its arguments, the settings it writes, what it is told.
+    pub fn summary(&self) -> (String, Vec<String>, String) {
+        let program = std::iter::once(self.command.as_str()).chain(self.args.iter().map(String::as_str)).collect::<Vec<_>>().join(" ");
+        let files = self.merge.keys().chain(self.write.keys()).cloned().collect();
+        let told = self.context.as_ref().and_then(|c| fs::read_to_string(self.dir.join(c)).ok()).unwrap_or_default();
+        (program, files, told)
+    }
+
+    pub fn folder(&self) -> &Path { &self.dir }
+
     /// The program's arguments; a session coming back (`--resume ID` or `attach ID`) is the add-on's `resume`.
     pub fn args(&self, args: &[String]) -> Vec<String> {
         let mut out = self.args.clone();
@@ -326,6 +366,22 @@ mod tests {
         assert_eq!(codex.args(&[]).len(), 3);
         assert!(!a.iter().any(|s| s.contains("bypass")));
         assert!(codex.context("sid")?.unwrap().contains("Whaybench session sid."));
+        Ok(())
+    }
+
+    #[test]
+    fn an_add_on_runs_as_brought_or_once_confirmed() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        with_addons(dir.path());
+        let codex = load(dir.path(), "codex")?;
+        assert!(codex.trusted(dir.path()), "the program's own, unchanged");
+        fs::write(dir.path().join("addons/agents/codex/context.md"), "changed")?;
+        let codex = load(dir.path(), "codex")?;
+        assert!(!codex.trusted(dir.path()), "changed: confirm first");
+        codex.trust(dir.path())?;
+        assert!(codex.trusted(dir.path()));
+        fs::write(dir.path().join("addons/agents/codex/agent.json"), fs::read_to_string(dir.path().join("addons/agents/codex/agent.json"))?.replace("--no-daemon", "--other"))?;
+        assert!(!load(dir.path(), "codex")?.trusted(dir.path()), "a confirmation holds for those files only");
         Ok(())
     }
 

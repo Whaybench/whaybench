@@ -89,6 +89,14 @@ pub fn post(data: &Data, request: &Request) -> Result<(), String> {
     write_atomic(&data.ctl().join(format!("{name}-{}.json", std::process::id())), &text).map_err(|e| e.to_string())
 }
 
+/// Text one conversation's agent puts in another: marked as coming from that conversation, so the receiving agent
+/// does not take it for the person's own words; a command (`/`) or a shell line (`!`) is refused.
+fn from_other(text: &str, who: &str) -> Result<String, String> {
+    let head = text.trim_start();
+    if head.starts_with('/') || head.starts_with('!') { return Err(wb_core::i18n::t("type-command-from-another-session").into()); }
+    Ok(format!("{} {text}", wb_core::i18n::ai_f("typed-from-session", &[("session", who.to_string())])))
+}
+
 /// Where to go back to once an asked session answers (`session type` from another tab).
 pub fn return_file(data: &Data) -> std::path::PathBuf { data.cache().join("focus-return.json") }
 
@@ -118,12 +126,19 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 let head = text.split_whitespace().next().unwrap_or(text);
                 return Err(wb_core::i18n::f("not-run-no-conversation-tab-open", &[("head", (head).to_string())]));
             };
+            // From another conversation tab, that is from its agent: said so, and never a command or a shell line.
+            let from = std::env::var("WHAYBENCH_TAB").ok().filter(|f| *f != tab.tab);
+            let text = match &from {
+                Some(f) => from_other(text, &sessions::session_of_tab(data, f).map(|s| wb_core::agents::session_label(&data.root, &s)).unwrap_or_else(|| f.clone()))?,
+                None => text.clone(),
+            };
+            let text = &text;
             let dir = sessions::tab_inbox(data, &tab.tab);
             fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             let name = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
             write_atomic(&dir.join(format!("{name}.json")), serde_json::json!({"text": text, "enter": true}).to_string().as_bytes()).map_err(|e| e.to_string())?;
             // Asked from another conversation tab: when the answer comes, the person is taken back to the one that asked.
-            if let Some(from) = std::env::var("WHAYBENCH_TAB").ok().filter(|f| *f != tab.tab) {
+            if let Some(from) = from {
                 let back = serde_json::json!({"session": id, "tab": from, "at": now_ms()});
                 write_atomic(&return_file(data), back.to_string().as_bytes()).map_err(|e| e.to_string())?;
             }
@@ -327,6 +342,13 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn another_conversations_text_says_where_it_is_from_and_runs_no_command() {
+        let t = super::from_other("does read work?", "Claude Code a3cf3125").unwrap();
+        assert!(t.starts_with("[From the Claude Code a3cf3125 conversation") && t.ends_with("does read work?"), "{t}");
+        for bad in ["/exit", "  !rm -rf x", "!ls"] { assert!(super::from_other(bad, "x").is_err(), "{bad}"); }
+    }
+
     use super::*;
     fn w(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
 

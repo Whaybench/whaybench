@@ -60,3 +60,4 @@ view-link-follow-none = View: follows the conversation the person chose; none is
 view-link-session = View: stays on { $session }, whatever conversation the person chose.
 view-link-page = View: pinned to this page by the person, whatever conversation is chosen; every session reads the same page.
 view-link-firefox = View: the Firefox panel. It belongs to no session: every session reads the same tab the person has in front.
+typed-from-session = [From the { $session } conversation: its agent sent this, the person did not type it.]

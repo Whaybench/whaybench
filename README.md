@@ -134,6 +134,9 @@ WSL distributions are not touched), Firefox, the input method for your Windows d
 Whaybench. This takes a while. Then start Whaybench from the Start menu or the desktop, and the first time sign in to
 Claude in the browser that opens. If the setup stops, run the installer again: it goes on from where it stopped.
 
+Your account in that Ubuntu has no password and no `sudo`, so an AI agent running as you cannot become root. To install
+something system-wide, open PowerShell and run `wsl -d Whaybench -u root`.
+
 Whaybench updates itself from its menu, as on Linux. To remove it, uninstall Whaybench in Windows Settings → Apps; it
 asks whether to delete the Whaybench Linux system too, with everything kept in it.
 

@@ -19,6 +19,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Security: an HTML page in the view panel could read other local files (file URLs read from file URLs).
 - Security: the Firefox profile and the view's WebKit data (sign-ins, cookies) moved from `view/` to `browser/`, out of
   an agent's reach; they move once at start, or at a later start while a Firefox still runs on them.
+- Security: the Windows (WSL) account no longer has passwordless sudo, so an agent running as you cannot become root.
+  Root work goes through `wsl -d Whaybench -u root`; running the installer again takes the old rule away.
+- Security: an agent add-on runs only as Whaybench brings it, or after you confirmed it in its tab: the program it runs,
+  the settings it writes and what it tells the agent are shown, and `y` runs it. A changed add-on is asked again.
+- Security: text one conversation's agent puts in another (`whaybench ctl session type`) starts with where it came
+  from, and a command (`/`) or a shell line (`!`) from another conversation is refused.
 - Security: every value put in a conversation tab's shell command is quoted; a map path with a quote could run a
   command.
 - A view kept on one session named the number it had when kept, not the one the conversation goes on under.
