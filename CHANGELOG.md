@@ -6,6 +6,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The browser no longer says "Firefox is already running, but is not responding": a lock left in its profile by a
+  Firefox that is gone (seen under WSL) is taken away before it starts, and a click on Panels → Browser while it is
+  still starting does not start a second one.
+- The browser's address bar shows all the time; it showed only once focused (Ctrl+L), so it looked missing. The tab
+  bar stays hidden.
+
 ## [0.6.6] - 2026-11-15
 
 ### Changed

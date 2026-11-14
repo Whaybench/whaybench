@@ -277,10 +277,14 @@ pub fn move_browser_data(d: &Data) {
 /// The panel's Firefox shows the page only: no tab strip, and the address bar only while it is in use (Ctrl+L). Its
 /// profile is the program's own, so these files are written at every start.
 const USER_JS: &str = "user_pref(\"toolkit.legacyUserProfileCustomizations.stylesheets\", true);\n";
-const USER_CHROME: &str = "#TabsToolbar { visibility: collapse !important; }\n#navigator-toolbox:not(:focus-within) { visibility: collapse !important; }\n";
+/// The tab bar is hidden (the panel shows one page); the address bar stays, to see and type where the page is.
+const USER_CHROME: &str = "#TabsToolbar { visibility: collapse !important; }\n";
 
 fn prepare_profile(d: &Data) {
     let p = profile(d);
+    // A lock left by a Firefox that is gone (a crash, WSL shut down under it) stops the next start with "already
+    // running, but is not responding": Firefox cannot tell its owner is gone when the host's address changed since.
+    if firefox_pid(d).is_none() { for f in ["lock", ".parentlock"] { let _ = std::fs::remove_file(p.join(f)); } }
     let _ = std::fs::create_dir_all(p.join("chrome"));
     let _ = std::fs::write(p.join("user.js"), USER_JS);
     let _ = std::fs::write(p.join("chrome/userChrome.css"), USER_CHROME);
@@ -567,6 +571,11 @@ mod tests {
         assert!(firefox_command(&d, "").contains("--profile"));
         assert!(std::fs::read_to_string(profile(&d).join("user.js")).unwrap().contains("legacyUserProfileCustomizations.stylesheets\", true"));
         assert!(std::fs::read_to_string(profile(&d).join("chrome/userChrome.css")).unwrap().contains("#TabsToolbar"));
+        // A lock of a Firefox that is gone (here none runs with this profile) goes before the next start.
+        std::os::unix::fs::symlink("127.0.1.1:+8425", profile(&d).join("lock")).unwrap();
+        std::fs::write(profile(&d).join(".parentlock"), "").unwrap();
+        firefox_command(&d, "");
+        assert!(std::fs::symlink_metadata(profile(&d).join("lock")).is_err() && !profile(&d).join(".parentlock").exists());
     }
 
 }

@@ -88,6 +88,9 @@ pub struct App {
     pub chrome: Chrome,
     /// The person's zoom of the title bars (Ctrl+wheel on one), over the theme's text size; in settings.json.
     pub title_zoom: f64,
+    /// Panels of the panel menu started and not yet open, by key: a click again while one starts (Firefox takes
+    /// seconds) would start a second, which finds the first one's profile locked.
+    pub starting: HashMap<String, Instant>,
     pub solid_ids: Vec<(smithay::backend::renderer::element::Id, [f32; 4])>,
     /// The shaded boxes of the last frame, with how each looked (render::Frame).
     /// An app asked to the front before its window appeared, and when.
@@ -194,6 +197,7 @@ impl App {
             act: Act::Idle, pointer: (0.0, 0.0), hover: None, guides: Vec::new(), zone: None, band: (None, now),
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
             title_zoom,
+            starting: HashMap::new(),
             shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
             compositor_state, xdg_shell_state, shm_state, dmabuf: None, gpu: None, output_manager_state, seat_state, data_device_state, clip,
@@ -303,7 +307,10 @@ impl App {
         let found = self.surface.panels.iter().flat_map(|p| p.tabs.iter()).find(|t| t.key == key || t.key.starts_with(&prefix)).map(|t| t.id);
         match (found, command) {
             (Some(id), _) => { if let Some(w) = self.windows.get(&id) { w.toplevel().unwrap().send_close(); } }
-            (None, Some(c)) => self.spawn(c),
+            (None, Some(_)) if self.starting.get(key).is_some_and(|at| at.elapsed() < Duration::from_secs(30)) => {
+                record::decide("screen", "panel not started again", "it is still starting", &[("app", key.to_string())]);
+            }
+            (None, Some(c)) => { self.starting.insert(key.to_string(), Instant::now()); self.spawn(c); }
             (None, None) => {}
         }
     }
@@ -497,6 +504,7 @@ impl App {
         let asked = self.focus_when_open.take_if(|(prefix, at)| key.starts_with(prefix.as_str()) && at.elapsed() < std::time::Duration::from_secs(30));
         if asked.is_some()
             && let Some(p) = self.surface.get_mut(pid) && let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; }
+        self.starting.retain(|k, _| key != *k && !key.starts_with(&format!("{k}#")));
         record::decide("screen", "panel opened", if fitted { "a dialog or settings window, at its content's size" } else { "a new app" }, &[("panel", pid.to_string()), ("app", key)]);
         self.focus_panel(pid);
         self.save_due = true;
