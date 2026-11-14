@@ -223,17 +223,6 @@ pub fn web_menu_in_language(web: &webkit6::WebView) {
     });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn pipes_in_code_stay_in_their_cell() {
-        assert_eq!(table_pipes("| `a [b | c]` | d |"), "| `a [b \\| c]` | d |");
-        assert_eq!(table_pipes("| a | b |"), "| a | b |");
-        assert_eq!(table_pipes("text `a | b`"), "text `a | b`", "only in a table");
-        assert_eq!(table_pipes("| `a \\| b` |"), "| `a \\| b` |", "already escaped");
-    }
-}
 
 /// Asks once before a step: the text, Cancel, and the button `ok` that takes it.
 /// `lines` are shown under the text, to read before deciding: what goes with it.
@@ -305,4 +294,16 @@ pub fn install_engine(win: &gtk::ApplicationWindow, d: &Data, package: String, n
             if done.is_ok() { then(); }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn pipes_in_code_stay_in_their_cell() {
+        assert_eq!(table_pipes("| `a [b | c]` | d |"), "| `a [b \\| c]` | d |");
+        assert_eq!(table_pipes("| a | b |"), "| a | b |");
+        assert_eq!(table_pipes("text `a | b`"), "text `a | b`", "only in a table");
+        assert_eq!(table_pipes("| `a \\| b` |"), "| `a \\| b` |", "already escaped");
+    }
 }
