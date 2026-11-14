@@ -75,6 +75,37 @@ pub fn targets(r: Rect, ring: f64, gap: f64) -> [(How, f64, f64); 5] {
      (How::Side(Side::Top), cx, ty.max(top + ring / 2.0).min(cy)), (How::Side(Side::Bottom), cx, by.max(cy))]
 }
 
+/// Where a panel that went out comes back: into the panel it was a tab of, or alone in the place it had.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Home { Join(u64), Place(Rect) }
+
+/// Where the tab `tab` lived in `before`: with others in their panel, or alone in its place.
+pub fn home_of(before: &[Panel], tab: u64) -> Option<Home> {
+    let p = before.iter().find(|p| p.tabs.iter().any(|t| t.id == tab))?;
+    Some(if p.tabs.len() > 1 { Home::Join(p.pid) } else { Home::Place(p.rect) })
+}
+
+/// The panels a move changed: those of `before` (as they were) whose place or tabs are not found as such in `now`.
+pub fn touched(before: &[Panel], now: &[Panel]) -> Vec<Panel> {
+    let same = |a: &Panel, b: &Panel| a.rect == b.rect && a.tabs.iter().map(|t| t.id).eq(b.tabs.iter().map(|t| t.id));
+    before.iter().filter(|b| !b.transient && !now.iter().any(|n| same(b, n))).cloned().collect()
+}
+
+/// Undoes one move: the panels it changed (`was`, as they were) come back, the tabs they hold leave wherever they
+/// are now, and everything else stays as it is. Tabs whose window is gone (`live`) are left out.
+pub fn undo_one(now: &[Panel], was: &[Panel], live: impl Fn(u64) -> bool) -> Vec<Panel> {
+    let theirs: Vec<u64> = was.iter().flat_map(|p| p.tabs.iter().map(|t| t.id)).collect();
+    let mut out: Vec<Panel> = now.iter().cloned().map(|mut p| { p.tabs.retain(|t| !theirs.contains(&t.id)); p.active = p.active.min(p.tabs.len().saturating_sub(1)); p }).filter(|p| !p.tabs.is_empty()).collect();
+    for p in was {
+        let mut p = p.clone();
+        p.tabs.retain(|t| live(t.id));
+        p.active = p.active.min(p.tabs.len().saturating_sub(1));
+        p.set_rect(p.rect);
+        if !p.tabs.is_empty() { out.push(p); }
+    }
+    out
+}
+
 impl Panel {
     pub fn new(pid: u64, tab: Tab, rect: Rect) -> Self {
         Panel { pid, tabs: vec![tab], active: 0, rect, tx: rect.x, ty: rect.y, transient: false, fitted: false, modal: false, saved_at: None }
@@ -1022,4 +1053,30 @@ mod tests {
         assert_eq!(s.panels[0].rect, s.first_place("view").unwrap());
         assert_eq!(s.panels[1].rect, s.first_place("map").unwrap());
     }
+    #[test]
+    fn undoing_one_move_brings_back_only_the_panels_it_changed() {
+        // 1 beside 2; then 1 was dropped beside 2 (both changed) and 3 moved on its own.
+        let before = surface(&[Rect::new(0.0, 0.0, 400.0, 400.0), Rect::new(408.0, 0.0, 400.0, 400.0), Rect::new(900.0, 0.0, 200.0, 200.0)]).panels;
+        let mut now = before.clone();
+        (now[0].rect, now[1].rect) = (Rect::new(0.0, 0.0, 200.0, 400.0), Rect::new(208.0, 0.0, 600.0, 400.0));
+        let was = touched(&before, &now);
+        assert_eq!(was.iter().map(|p| p.pid).collect::<Vec<_>>(), [1, 2], "the third is not part of this move");
+        now[2].set_rect(Rect::new(950.0, 300.0, 200.0, 200.0));
+        let back = undo_one(&now, &was, |_| true);
+        let at = |pid| back.iter().find(|p| p.pid == pid).unwrap().rect;
+        assert_eq!((at(1), at(2)), (Rect::new(0.0, 0.0, 400.0, 400.0), Rect::new(408.0, 0.0, 400.0, 400.0)));
+        assert_eq!(at(3), Rect::new(950.0, 300.0, 200.0, 200.0), "another move stays");
+        // Dropped as a tab of 2: undoing takes it out of 2 again.
+        let mut tabbed = before.clone();
+        let moved = tabbed.remove(0).tabs.remove(0);
+        tabbed[0].tabs.push(moved);
+        let was = touched(&before, &tabbed);
+        let back = undo_one(&tabbed, &was, |_| true);
+        assert_eq!(back.iter().map(|p| (p.pid, p.tabs.iter().map(|t| t.id).collect::<Vec<_>>())).collect::<Vec<_>>(), [(3, vec![3]), (1, vec![1]), (2, vec![2])]);
+        let back = undo_one(&tabbed, &was, |id| id != 1);
+        assert_eq!(back.iter().map(|p| p.pid).collect::<Vec<_>>(), [3, 2], "a window closed since stays out");
+        assert_eq!(home_of(&tabbed, 1), Some(Home::Join(2)));
+        assert_eq!(home_of(&before, 3), Some(Home::Place(Rect::new(900.0, 0.0, 200.0, 200.0))));
+    }
+
 }

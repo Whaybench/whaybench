@@ -202,7 +202,18 @@ impl App {
                     self.act = Act::Swallow;
                     return false;
                 }
+                Some(BarHit::Undo) => {
+                    self.undo_move(top);
+                    self.act = Act::Swallow;
+                    return false;
+                }
+                Some(BarHit::BrowserBack) => {
+                    self.move_browser(false);
+                    self.act = Act::Swallow;
+                    return false;
+                }
                 Some(BarHit::Tab(i)) => {
+                    self.drag_begins(self.surface.get(top).and_then(|p| p.tabs.get(i)).map(|t| t.id));
                     if let Some(p) = self.surface.get_mut(top) { p.active = i; }
                     self.act = Act::TabPull { pid: top, tab: i, x, y };
                     self.focus_panel(top);
@@ -211,6 +222,7 @@ impl App {
                 }
                 Some(BarHit::Bar) => {
                     let (gx, gy, dock) = { let p = self.surface.get(top).unwrap(); (x - p.rect.x, y - p.rect.y, crate::render::on_dot(&self.theme, p, x, y)) };
+                    self.drag_begins(self.surface.get(top).map(|p| p.tab().id));
                     self.act = Act::Hold { pid: top, gx, gy, dock };
                     self.focus_panel(top);
                     return false;
@@ -225,7 +237,18 @@ impl App {
 
     fn pointer_released(&mut self) {
         match std::mem::replace(&mut self.act, Act::Idle) {
+            Act::Hold { pid, .. } if std::mem::take(&mut self.out_zone) => {
+                record::decide("screen", "browser dropped at the edge", "it goes out", &[("panel", pid.to_string())]);
+                self.surface.keep_reachable(pid);
+                self.guides.clear();
+                // Out there it shows no ↩: the conversations' panel shows the way back, to where it was before the drag.
+                let tab = self.surface.get(pid).map(|p| p.tab().id);
+                if let (Some(start), Some(t)) = (self.drag_from.take(), tab) { self.browser_home = crate::layout::home_of(&start, t); }
+                self.move_browser(true);
+            }
             Act::Hold { pid, .. } => {
+                // The moved one by its front tab: as a tab of another panel it is found there.
+                let tab = self.surface.get(pid).map(|p| p.tab().id);
                 match self.zone.take() {
                     Some(zone) => {
                         let how = match zone.how { How::Tab => "as a tab", How::Side(_) => "gave way" };
@@ -236,6 +259,7 @@ impl App {
                     }
                     None => self.surface.keep_reachable(pid),
                 }
+                if let Some(t) = tab { self.moved(t); }
                 self.guides.clear();
             }
             Act::Resize { .. } | Act::TabPull { .. } | Act::Swallow | Act::Idle => {}

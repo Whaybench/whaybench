@@ -6,6 +6,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The browser can go out to a window of its own on the desktop and come back, the same Firefox with its tabs and
+  sign-ins: drag its panel by the dot onto the band along the window's edge, or ask the agent (`whaybench-view
+  detach`). The others take its room; while it is out, the conversations' panel shows "↩ Browser" on its title bar,
+  which (like Panels → Browser) brings it back to where it was. The panel Firefox restores its session at each start.
+- A panel move can be undone for 10 seconds by the ↩ on the moved panel's title bar: the panels that move changed go
+  back as they were, other moves stay.
+
 ### Changed
 - Docking a panel: the middle of a title bar shows a dot; dragged by it, every other panel shows five soft target
   circles (middle: into its tabs; at each edge: beside it), and the one the dot is in stands out. Dragged anywhere else

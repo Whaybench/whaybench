@@ -152,12 +152,12 @@ impl Card {
 }
 
 /// Where the pointer is in a panel's title bar.
-pub enum BarHit { Close, CloseTab(usize), Tab(usize), Bar }
+pub enum BarHit { Close, CloseTab(usize), Tab(usize), Undo, BrowserBack, Bar }
 
 /// Each tab's area in the bar, as many as fit: left of the close button.
 fn tab_rects(state: &mut App, p: &Panel) -> Vec<Rect> {
     // With tabs each has its own close button, so the bar has none: nothing closes a whole group by accident.
-    let limit = p.rect.right() - 6.0;
+    let limit = marks_left(state, p) - 6.0;
     let mut x = p.rect.x + 6.0;
     let mut out = Vec::new();
     for t in &p.tabs {
@@ -178,9 +178,32 @@ pub fn on_dot(t: &Theme, p: &Panel, x: f64, y: f64) -> bool {
     !p.transient && p.tabs.len() == 1 && p.rect.bar().contains(x, y) && (x - dx).hypot(y - dy) <= reach / 2.0 + 4.0
 }
 
+/// Where the marks at the end of this panel's bar are: the ↩ of its last move, and on the conversations' panel the way
+/// back for the browser while it is out; left of the close button, or at the end of a bar of tabs.
+fn undo_rect(state: &App, p: &Panel) -> Option<Rect> {
+    state.undo_of(p.pid)?;
+    Some(Rect::new(marks_right(p) - CLOSE, p.rect.y, CLOSE, title()))
+}
+
+fn back_rect(state: &mut App, p: &Panel) -> Option<Rect> {
+    if state.browser_back_panel() != Some(p.pid) { return None; }
+    let w = state.chrome.width(wb_core::i18n::t("browser-back")) + 12.0;
+    let right = marks_right(p) - if state.undo_of(p.pid).is_some() { CLOSE } else { 0.0 };
+    Some(Rect::new(right - w, p.rect.y, w, title()))
+}
+
+fn marks_right(p: &Panel) -> f64 { if p.tabs.len() == 1 { p.rect.right() - CLOSE } else { p.rect.right() } }
+
+/// Where the bar's own content ends: before the marks.
+fn marks_left(state: &mut App, p: &Panel) -> f64 {
+    back_rect(state, p).or_else(|| undo_rect(state, p)).map_or(marks_right(p), |r| r.x)
+}
+
 pub fn bar_hit(state: &mut App, pid: u64, x: f64, y: f64) -> Option<BarHit> {
     let p = state.surface.get(pid)?.clone();
     if !p.rect.bar().contains(x, y) { return None; }
+    if undo_rect(state, &p).is_some_and(|r| r.contains(x, y)) { return Some(BarHit::Undo); }
+    if back_rect(state, &p).is_some_and(|r| r.contains(x, y)) { return Some(BarHit::BrowserBack); }
     if p.tabs.len() > 1 {
         if let Some((i, r)) = tab_rects(state, &p).iter().enumerate().find(|(_, r)| r.contains(x, y)) {
             return Some(if x >= r.right() - TAB_CLOSE { BarHit::CloseTab(i) } else { BarHit::Tab(i) });
@@ -281,6 +304,9 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
     if p.tabs.len() == 1 {
         add_text(state, renderer, &mut f.out, "×", t.ink, Rect::new(p.rect.right() - CLOSE, p.rect.y, CLOSE, title()));
     }
+    let ink = [(t.accent[0] * 255.0) as u8, (t.accent[1] * 255.0) as u8, (t.accent[2] * 255.0) as u8];
+    if let Some(r) = undo_rect(state, p) { add_text(state, renderer, &mut f.out, "↩", ink, r); }
+    if let Some(r) = back_rect(state, p) { add_text(state, renderer, &mut f.out, wb_core::i18n::t("browser-back"), ink, r); }
     if p.tabs.len() > 1 {
         let rects = tab_rects(state, p);
         for (i, r) in rects.iter().enumerate() {
@@ -293,7 +319,8 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
         // The name at the bar's left; its width only as far as the close button.
         let wide = state.chrome.width(&p.tab().name) + 2.0;
         let left = 8.0 + (radius / 2.0).max(0.0);
-        let area = Rect::new(p.rect.x + left, p.rect.y, wide.min((p.rect.w - CLOSE - left - 6.0).max(1.0)), title());
+        let end = marks_left(state, p);
+        let area = Rect::new(p.rect.x + left, p.rect.y, wide.min((end - p.rect.x - left - 6.0).max(1.0)), title());
         add_text(state, renderer, &mut f.out, &p.tab().name.clone(), if front { t.ink } else { t.ink_soft }, area);
     }
     f.out.extend(app_elements(state, p, renderer, app));
@@ -341,8 +368,22 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
         Act::Hold { pid, dock: true, .. } if let Some(held) = state.surface.get(pid).filter(|p| !p.transient).cloned() => {
             let (dx, dy) = crate::state::dot_at(&held);
             f.disc(shaders.as_ref(), dx, dy, t.dock_dot_size, dot, true);
-            let lit = |target: u64, how: How| state.zone.is_some_and(|z| z.target == target && z.how == how);
+            let zone = state.zone;
+            let lit = |target: u64, how: How| zone.is_some_and(|z| z.target == target && z.how == how);
             let panels: Vec<Panel> = state.surface.panels.iter().filter(|p| p.pid != pid && !p.transient).cloned().collect();
+            // The browser can go out: a soft band along each edge of the window, the one the dot is in stronger.
+            if crate::state::holds_browser(&held) {
+                let (sw, sh, b) = (state.surface.w, state.surface.h, t.dock_ring_size);
+                let at = crate::state::out_edge(sw, sh, b, dx, dy).filter(|_| state.out_zone);
+                for (side, r) in [(Side::Top, Rect::new(0.0, 0.0, sw, b)), (Side::Bottom, Rect::new(0.0, sh - b, sw, b)), (Side::Left, Rect::new(0.0, b, b, sh - 2.0 * b)), (Side::Right, Rect::new(sw - b, b, b, sh - 2.0 * b))] {
+                    let a = if at == Some(side) { (ring[3] * 1.4).min(1.0) } else { ring[3] * 0.4 };
+                    if at == Some(side) {
+                        let ink = [(t.accent[0] * 255.0) as u8, (t.accent[1] * 255.0) as u8, (t.accent[2] * 255.0) as u8];
+                        add_text(state, renderer, &mut f.out, wb_core::i18n::t("browser-detach-here"), ink, r);
+                    }
+                    f.solid(r, premultiplied([ring[0], ring[1], ring[2], a]));
+                }
+            }
             for p in &panels {
                 for (how, cx, cy) in targets(p.rect, t.dock_ring_size, state.surface.m.gap) {
                     // The one the dot is in stands out; the others stay soft over what is behind them.

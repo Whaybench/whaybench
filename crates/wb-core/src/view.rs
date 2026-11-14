@@ -276,7 +276,9 @@ pub fn move_browser_data(d: &Data) {
 
 /// The panel's Firefox shows the page only: no tab strip, and the address bar only while it is in use (Ctrl+L). Its
 /// profile is the program's own, so these files are written at every start.
-const USER_JS: &str = "user_pref(\"toolkit.legacyUserProfileCustomizations.stylesheets\", true);\n";
+/// The look (userChrome below), and the session back at each start: moving the browser out of its panel and back is a
+/// restart of Firefox, and the tabs, sign-ins and history go along.
+const USER_JS: &str = "user_pref(\"toolkit.legacyUserProfileCustomizations.stylesheets\", true);\nuser_pref(\"browser.startup.page\", 3);\n";
 /// The tab bar is hidden (the panel shows one page); the address bar stays, to see and type where the page is.
 const USER_CHROME: &str = "#TabsToolbar { visibility: collapse !important; }\n";
 
@@ -288,6 +290,26 @@ fn prepare_profile(d: &Data) {
     let _ = std::fs::create_dir_all(p.join("chrome"));
     let _ = std::fs::write(p.join("user.js"), USER_JS);
     let _ = std::fs::write(p.join("chrome/userChrome.css"), USER_CHROME);
+}
+
+/// Whether the panel's Firefox is out in a window of its own on the desktop (moved out by the person).
+pub fn detached(d: &Data) -> bool { detached_file(d).exists() }
+
+pub fn set_detached(d: &Data, on: bool) {
+    let f = detached_file(d);
+    if on { let _ = std::fs::create_dir_all(d.cache()); let _ = std::fs::write(&f, ""); } else { let _ = std::fs::remove_file(&f); }
+}
+
+fn detached_file(d: &Data) -> PathBuf { d.cache().join("browser-detached") }
+
+/// Waits for the panel's Firefox to be gone, up to `limit`; whether it is.
+pub fn firefox_gone(d: &Data, limit: std::time::Duration) -> bool {
+    let started = std::time::Instant::now();
+    while firefox_pid(d).is_some() {
+        if started.elapsed() > limit { return false; }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    true
 }
 
 /// The panel's Firefox, as a shell command. Accessibility is on for it alone: the system setting stays.

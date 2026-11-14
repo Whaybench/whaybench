@@ -63,6 +63,14 @@ fn front_of_group(key: &str) -> bool { key.starts_with("dev.whaybench.sessions#"
 pub const FIRST_WINDOW: (f64, f64) = (1500.0, 900.0);
 
 /// What the pointer is doing, from press to release.
+/// How long the ↩ of the last move stays on a title bar.
+pub const UNDO_FOR: Duration = Duration::from_secs(10);
+
+/// A move that can be undone for a while: the moved panel's front tab (its title bar shows the ↩), the whole layout
+/// when the first of its drags began (moves of one panel one after another are one), and the panels it changed, as
+/// they were.
+pub struct Undo { pub at: Instant, pub mark: u64, pub start: Vec<Panel>, pub was: Vec<Panel> }
+
 pub enum Act {
     Idle,
     /// The panel follows the pointer, stiffly; gx, gy is where it was picked up. `dock`: held by the title bar's dot
@@ -85,12 +93,21 @@ pub struct App {
     pub hover: Option<(u64, Edges, Vec<(u64, Side)>)>,
     pub guides: Vec<Guide>,
     pub zone: Option<Zone>,
+    /// The held browser's dot is in the band along the window's edge: dropped, the browser goes out to the desktop.
+    pub out_zone: bool,
     pub chrome: Chrome,
     /// The person's zoom of the title bars (Ctrl+wheel on one), over the theme's text size; in settings.json.
     pub title_zoom: f64,
     /// Panels of the panel menu started and not yet open, by key: a click again while one starts (Firefox takes
     /// seconds) would start a second, which finds the first one's profile locked.
     pub starting: HashMap<String, Instant>,
+    /// Where the browser goes when it comes back by ↩: the panel it was a tab of, or the place it had.
+    pub browser_home: Option<layout::Home>,
+    /// The layout when a drag began, and the last move's, to go back to for a while (the ↩ on a title bar).
+    pub drag_from: Option<Vec<Panel>>,
+    pub undos: Vec<Undo>,
+    /// Whether the browser is out on the desktop, looked at once a second (it reads /proc): its title bar label.
+    pub browser_away: (bool, Instant),
     pub solid_ids: Vec<(smithay::backend::renderer::element::Id, [f32; 4])>,
     /// The shaded boxes of the last frame, with how each looked (render::Frame).
     /// An app asked to the front before its window appeared, and when.
@@ -194,10 +211,14 @@ impl App {
             shaders: None,
             grabbed_popups: Vec::new(),
             windows: HashMap::new(), unmapped: Vec::new(), next_tab: 1,
-            act: Act::Idle, pointer: (0.0, 0.0), hover: None, guides: Vec::new(), zone: None,
+            act: Act::Idle, pointer: (0.0, 0.0), hover: None, guides: Vec::new(), zone: None, out_zone: false,
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
             title_zoom,
             starting: HashMap::new(),
+            browser_home: None,
+            drag_from: None,
+            undos: Vec::new(),
+            browser_away: (false, now),
             shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
             compositor_state, xdg_shell_state, shm_state, dmabuf: None, gpu: None, seat_state, data_device_state, clip,
@@ -240,6 +261,85 @@ impl App {
 
     pub fn spawn(&self, command: &str) {
         crate::start::spawn_app(command, &self.socket_name, &self.data, &record::run_id(&self.data));
+    }
+
+    /// When a drag of the panel showing `tab` begins: the layout to go back to. A move of the same panel while its ↩
+    /// is there continues it, so ↩ goes back to before the first (a tab pulled out, then put somewhere).
+    pub fn drag_begins(&mut self, tab: Option<u64>) {
+        let going = self.undos.iter().position(|u| Some(u.mark) == tab && u.at.elapsed() < UNDO_FOR);
+        self.drag_from = Some(match going { Some(i) => self.undos.remove(i).start, None => self.surface.panels.clone() });
+    }
+
+    /// After a drag of the panel showing `tab`: its move can be undone for a while, if it changed the layout. A move
+    /// that changes a panel another one changed takes that one's ↩ away: undone, it would not fit any more.
+    pub fn moved(&mut self, tab: u64) {
+        let Some(start) = self.drag_from.take() else { return };
+        let was = layout::touched(&start, &self.surface.panels);
+        if was.is_empty() { return; }
+        let ids = |ps: &[Panel]| ps.iter().flat_map(|p| p.tabs.iter().map(|t| t.id)).collect::<Vec<_>>();
+        let mine = ids(&was);
+        self.undos.retain(|u| u.at.elapsed() < UNDO_FOR && !ids(&u.was).iter().any(|t| mine.contains(t)));
+        self.undos.push(Undo { at: Instant::now(), mark: tab, start, was });
+    }
+
+    /// The ↩ this panel shows: the last move of a panel whose tab it holds, while it lasts.
+    pub fn undo_of(&self, pid: u64) -> Option<usize> {
+        self.undos.iter().rposition(|u| u.at.elapsed() < UNDO_FOR && self.surface.holding_tab(u.mark).is_some_and(|p| p.pid == pid))
+    }
+
+    /// The ↩ of a panel: the panels its last move changed go back to how they were; the rest stays.
+    pub fn undo_move(&mut self, pid: u64) {
+        let Some(i) = self.undo_of(pid) else { return };
+        let u = self.undos.remove(i);
+        self.surface.panels = layout::undo_one(&self.surface.panels, &u.was, |id| self.windows.contains_key(&id));
+        record::decide("screen", "move undone", "the ↩ on a title bar", &[("panels", u.was.len().to_string())]);
+        self.save_due = true;
+    }
+
+    /// The panel that shows the way back for the browser while it is out: the one with the conversations.
+    pub fn browser_back_panel(&self) -> Option<u64> {
+        if !self.browser_away.0 { return None; }
+        self.surface.panels.iter().find(|p| p.tabs.iter().any(|t| t.key.starts_with(crate::start::TERM_APP))).map(|p| p.pid)
+    }
+
+    /// Moves the panel's Firefox out to a window of its own on the desktop, or back into a panel. It is a restart of
+    /// Firefox on the other display: it saves its session when it ends and restores it when it starts
+    /// (browser.startup.page), so the tabs, sign-ins and history go along. Out, its panel closes and the others take
+    /// the room, as when any panel closes; back, it takes a place as any panel opened (or, by ↩, its own place).
+    pub fn move_browser(&mut self, out: bool) {
+        let data = self.data.clone();
+        if if out { browser_out(&data) } else { !wb_core::view::detached(&data) } { return; }
+        wb_core::view::set_detached(&data, out);
+        self.browser_away = (out, Instant::now());
+        record::decide("browser", if out { "moved out" } else { "moved in" }, "asked", &[]);
+        self.relaunch_browser(out);
+    }
+
+    /// Ends the panel's Firefox where it is and starts it on the other display, off the event loop.
+    fn relaunch_browser(&mut self, out: bool) {
+        let (data, run) = (self.data.clone(), record::run_id(&self.data));
+        // The compositor runs with the desktop's display (start.rs); its apps get this one.
+        let display: OsString = if out { std::env::var_os("WAYLAND_DISPLAY").unwrap_or_default() } else { self.socket_name.clone() };
+        if out {
+            // Its windows close: with the last one Firefox ends, as it does when the person closes it.
+            self.close_app(wb_core::view::FIREFOX_APP);
+        } else if let Some(pid) = wb_core::view::firefox_pid(&data) {
+            // Out there it has no window of ours to close: asked to end, as on a desktop's log out.
+            unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+        }
+        std::thread::spawn(move || {
+            if !wb_core::view::firefox_gone(&data, Duration::from_secs(15)) {
+                return record::warn("browser", "not moved", "Firefox did not end in 15 s", &[]);
+            }
+            crate::start::spawn_app(&wb_core::view::firefox_command(&data, ""), &display, &data, &run);
+        });
+    }
+
+    /// Asks every window of the app to close.
+    fn close_app(&mut self, app: &str) {
+        let mine = format!("{app}#");
+        let ids: Vec<u64> = self.surface.panels.iter().flat_map(|p| p.tabs.iter()).filter(|t| t.key == app || t.key.starts_with(&mine)).map(|t| t.id).collect();
+        for id in ids { if let Some(w) = self.windows.get(&id) { w.toplevel().unwrap().send_close(); } }
     }
 
     /// Brings the panel of an app to the front, its tab in front.
@@ -310,7 +410,14 @@ impl App {
             (None, Some(_)) if self.starting.get(key).is_some_and(|at| at.elapsed() < Duration::from_secs(30)) => {
                 record::decide("screen", "panel not started again", "it is still starting", &[("app", key.to_string())]);
             }
-            (None, Some(c)) => { self.starting.insert(key.to_string(), Instant::now()); self.spawn(c); }
+            // The browser moved out comes back into its panel, rather than a second window out there (or a second
+            // panel beside the one that stands in for it, when the person closed it out there).
+            (None, Some(_)) if key == wb_core::view::FIREFOX_APP && wb_core::view::detached(&self.data) => self.move_browser(false),
+            (None, Some(c)) => {
+                if key == wb_core::view::FIREFOX_APP { wb_core::view::set_detached(&self.data, false); }
+                self.starting.insert(key.to_string(), Instant::now());
+                self.spawn(c);
+            }
             (None, None) => {}
         }
     }
@@ -436,8 +543,16 @@ impl App {
         let parent_panel = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i)).and_then(|i| self.surface.holding_tab(i)).map(|p| p.rect);
         let parent_modal = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i))
             .and_then(|i| self.surface.holding_tab(i)).is_some_and(|p| p.modal);
+        let home = (app_id == wb_core::view::FIREFOX_APP).then(|| self.browser_home.take()).flatten();
         // A dialog of a window that is not a panel (the menu bar, the status line) goes where a settings window goes.
-        let pid = if modal || (parent.is_some() && parent_panel.is_none()) {
+        let pid = if let Some(home) = home {
+            // The browser back by ↩: where it was before it went out (the others are back where they were too).
+            match home {
+                layout::Home::Join(pid) if let Some(p) = self.surface.get_mut(pid) => { p.tabs.push(tab); p.active = p.tabs.len() - 1; pid }
+                layout::Home::Join(_) => { let pid = self.surface.new_pid(); let r = self.surface.free_place(); self.surface.panels.push(Panel::new(pid, tab, r)); pid }
+                layout::Home::Place(rect) => { let pid = self.surface.new_pid(); self.surface.panels.push(Panel::new(pid, tab, rect)); pid }
+            }
+        } else if modal || (parent.is_some() && parent_panel.is_none()) {
             let pid = self.surface.new_pid();
             let (w, h) = ((self.surface.w - 80.0).clamp(layout::MIN_W, 760.0), (self.surface.h - 80.0).max(layout::MIN_H));
             let mut p = Panel::new(pid, tab, Rect::new(((self.surface.w - w) / 2.0).max(0.0), 40.0_f64.min(self.surface.h / 10.0), w, h));
@@ -634,6 +749,7 @@ impl App {
     /// One frame's work outside drawing: movement, sizes, names, the drop preview, saving.
     pub fn frame(&mut self, ms: f64) {
         self.follow_theme();
+        if self.browser_away.1.elapsed() > Duration::from_secs(1) { self.browser_away = (browser_out(&self.data), Instant::now()); }
         self.surface.step(ms);
         self.surface.keep_order();
         self.update_hold();
@@ -695,6 +811,9 @@ impl App {
         // onto a target: what shows and what counts are the same.
         let dot = self.surface.get(pid).map(dot_at);
         self.zone = match dot { Some((dx, dy)) if dock && !free => self.surface.drop_zone(pid, dx, dy, self.theme.dock_ring_size), _ => None };
+        // The browser's dot at the window's edge, not on a target: it goes out.
+        self.out_zone = dock && !free && self.zone.is_none() && self.surface.get(pid).is_some_and(holds_browser)
+            && dot.is_some_and(|(dx, dy)| out_edge(self.surface.w, self.surface.h, self.theme.dock_ring_size, dx, dy).is_some());
         let (tx, ty, guides) = if free || self.zone.is_some() {
             (x - gx, y - gy, Vec::new())
         } else {
@@ -757,3 +876,32 @@ fn title_zoom(data: &Data) -> f64 {
 
 /// Where the docking dot of a panel is: the middle of its title bar as drawn now.
 pub fn dot_at(p: &Panel) -> (f64, f64) { (p.rect.x + p.rect.w / 2.0, p.rect.y + layout::title() / 2.0) }
+
+/// Whether the panel's Firefox is out on the desktop now: moved out, and still running (the person may have closed it
+/// out there, or Whaybench started again since).
+fn browser_out(data: &wb_core::paths::Data) -> bool { wb_core::view::detached(data) && wb_core::view::firefox_pid(data).is_some() }
+
+/// Whether the panel holds the browser: the one that can go out to the desktop.
+pub fn holds_browser(p: &Panel) -> bool {
+    let app = wb_core::view::FIREFOX_APP;
+    p.tabs.iter().any(|t| t.key == app || t.key.starts_with(&format!("{app}#")))
+}
+
+/// The edge of the window whose band (`band` deep) the point is in, the nearest if in two.
+pub fn out_edge(w: f64, h: f64, band: f64, x: f64, y: f64) -> Option<Side> {
+    [(Side::Left, x), (Side::Right, w - x), (Side::Top, y), (Side::Bottom, h - y)].into_iter()
+        .filter(|(_, d)| *d <= band).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(s, _)| s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_band_at_the_window_edge_is_the_nearest_edge_within_its_depth() {
+        assert_eq!(out_edge(1000.0, 800.0, 48.0, 10.0, 400.0), Some(Side::Left));
+        assert_eq!(out_edge(1000.0, 800.0, 48.0, 500.0, 790.0), Some(Side::Bottom));
+        assert_eq!(out_edge(1000.0, 800.0, 48.0, 995.0, 5.0), Some(Side::Right), "in two bands: the nearer edge");
+        assert_eq!(out_edge(1000.0, 800.0, 48.0, 500.0, 400.0), None);
+    }
+}

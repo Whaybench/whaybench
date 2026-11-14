@@ -24,6 +24,8 @@ Work on an app through its connector or API; use this to show things and to see 
   whaybench-view where [--text]            the page the person is on in a PDF opened with --firefox; --text adds its text
                                            (read works on a PDF in the view panel too, but gives the whole file's text)
   whaybench-view shot [--out FILE.png] [--firefox]   a picture of the panel, only when text cannot tell; prints the file's path
+  whaybench-view detach | attach           only when the person asks: the Whaybench browser (the same Firefox, its tabs
+                                           and sign-ins) into a window of its own on their desktop, or back into its panel
   whaybench-view new [--title T] [--session|--pin] [PATH|URL]   one more view. Default: linked to the chosen session;
                                            --session: stays on this session; --pin: stays on this page or file
   whaybench-view show NAME PATH|URL        show it in that view
@@ -166,6 +168,7 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
             print!("{}", String::from_utf8_lossy(&o.stdout));
             Ok(())
         }
+        Some(w @ ("detach" | "attach")) => wb_core::status::post(d, &json!({"cmd": "browser", "out": w == "detach"})).map_err(|e| e.to_string()),
         _ => Err(HELP.into()),
     }
 }

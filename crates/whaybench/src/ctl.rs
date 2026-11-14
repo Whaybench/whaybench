@@ -24,6 +24,8 @@ pub enum Request {
     TogglePanel { key: String, #[serde(default)] command: Option<String> },
     /// An app to run with this compositor's socket, so its window lands in a panel.
     Spawn { command: String },
+    /// The panel's Firefox out to a window of its own on the desktop (`out`), or back into a panel.
+    Browser { out: bool },
     CloseTerm { tab: String },
     /// For tests: the same path as a person's pointer, without a person.
     Pointer { x: f64, y: f64 },
@@ -69,6 +71,11 @@ pub fn parse_request(words: &[String]) -> Result<Request, String> {
             }
             Ok(Request::Shot { out: out.ok_or("shot needs --out FILE.png")?, panel, app })
         }
+        Some("browser") => match words.get(1).map(String::as_str) {
+            Some("detach") => Ok(Request::Browser { out: true }),
+            Some("attach") => Ok(Request::Browser { out: false }),
+            _ => Err("browser needs detach or attach".into()),
+        },
         Some("theme") => Ok(Request::Theme { name: words.get(1).cloned().ok_or("theme needs a NAME")? }),
         Some("pointer") => {
             let n = |i: usize| words.get(i).and_then(|v| v.parse().ok()).ok_or("pointer needs X Y");
@@ -398,6 +405,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
                     Some(Request::ResetLayout) => state.reset_layout(),
                     Some(Request::TogglePanel { key, command }) => state.toggle_panel(&key, command.as_deref()),
                     Some(Request::Spawn { command }) => state.spawn(&command),
+                    Some(Request::Browser { out }) => state.move_browser(out),
                     Some(Request::CloseTerm { tab }) => state.close_term(&tab),
                     Some(Request::Pointer { x, y }) => state.test_pointer(x, y),
                     Some(Request::Press { right }) => state.test_button(true, if right { 0x111 } else { 0x110 }),
@@ -424,6 +432,15 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn the_browser_moves_out_and_back_by_ctl_and_as_whaybench_view_writes_it() {
+        let w = |t: &str| t.split_whitespace().map(String::from).collect::<Vec<_>>();
+        assert_eq!(parse_request(&w("browser detach")), Ok(Request::Browser { out: true }));
+        assert_eq!(parse_request(&w("browser attach")), Ok(Request::Browser { out: false }));
+        assert!(parse_request(&w("browser")).is_err());
+        assert_eq!(serde_json::from_str::<Request>(r#"{"cmd": "browser", "out": true}"#).unwrap(), Request::Browser { out: true });
+    }
 
     #[test]
     fn an_agents_request_is_delivered_marked_and_a_command_is_not() {
