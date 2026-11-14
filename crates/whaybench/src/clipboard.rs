@@ -68,7 +68,8 @@ impl Bridge {
         std::thread::spawn(move || {
             let Ok(out) = Command::new("wl-paste").args(["--no-newline", "--type", "text"]).stdin(Stdio::null()).stderr(Stdio::null()).output() else { return };
             if !out.status.success() || out.stdout.is_empty() || out.stdout.len() as u64 > LIMIT { return; }
-            let tmp = inbox.with_extension("once");
+            // Its own name: a read on focus and one when the watch ends may run at once.
+            let tmp = inbox.with_extension(format!("once.{:?}", std::thread::current().id()).replace(['(', ')'], ""));
             if fs::write(&tmp, &out.stdout).is_ok() { let _ = fs::rename(tmp, inbox); }
         });
     }

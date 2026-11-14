@@ -97,6 +97,9 @@ fn from_other(text: &str, who: &str) -> Result<String, String> {
     Ok(format!("{} {text}", wb_core::i18n::ai_f("typed-from-session", &[("session", who.to_string())])))
 }
 
+/// When text was last typed into a session through `session type`.
+fn asked_file(data: &Data, id: &str) -> PathBuf { data.cache().join("asked").join(id) }
+
 /// Requests to type in another conversation, from an agent whose sandbox keeps the tabs' input out of its reach.
 pub fn ask_dir(data: &Data) -> PathBuf { data.root.join("ask") }
 
@@ -120,6 +123,8 @@ fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool) -
     let name = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     fs::create_dir_all(&dir).and_then(|_| write_atomic(&dir.join(format!("{name}.json")), serde_json::json!({"text": text, "enter": true}).to_string().as_bytes()))
         .map_err(|e| Refused::Write(e.to_string()))?;
+    // When it was asked: an answer that comes before `session wait` starts is still the answer to it.
+    let _ = write_atomic(&asked_file(data, id), now_ms().to_string().as_bytes());
     // Typed in: what fails after this is not sent again, or the other conversation would get it twice.
     if let Some(from) = from {
         let back = serde_json::json!({"session": id, "tab": from, "at": now_ms()});
@@ -189,7 +194,11 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
         Some("wait") => {
             let id = words.get(1).ok_or("session wait needs an id")?;
             let limit = words.get(2).map(|s| s.parse::<u64>().map_err(|_| "session wait: SECONDS is a number")).transpose()?.unwrap_or(900);
-            let since = now_ms();
+            // From the last time something was typed into it, if that was in the last hour: the answer may have come
+            // already between `type` and this wait.
+            let now = now_ms();
+            let asked = fs::read_to_string(asked_file(data, id)).ok().and_then(|t| t.trim().parse::<i64>().ok()).filter(|at| now - at < 3_600_000);
+            let since = asked.unwrap_or(now);
             let since_newer = |file: std::path::PathBuf| -> Option<serde_json::Value> {
                 let v: serde_json::Value = serde_json::from_slice(&fs::read(file).ok()?).ok()?;
                 (v["at"].as_i64()? >= since).then_some(v)

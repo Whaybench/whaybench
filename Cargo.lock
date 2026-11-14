@@ -2559,7 +2559,7 @@ dependencies = [
 
 [[package]]
 name = "wb-core"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "chrono",
  "fluent-bundle",
@@ -2576,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "wb-store"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "regex",
  "serde_json",
@@ -2640,7 +2640,7 @@ dependencies = [
 
 [[package]]
 name = "whaybench"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "ab_glyph",
  "libc",
@@ -2654,7 +2654,7 @@ dependencies = [
 
 [[package]]
 name = "whaybench-panel"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "chrono",
  "gtk4",
@@ -2669,7 +2669,7 @@ dependencies = [
 
 [[package]]
 name = "whaybench-term"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "libc",
  "serde_json",
@@ -2679,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "whaybench-tools"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "gio",
  "glob",

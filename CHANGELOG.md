@@ -6,10 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-11-14
+
+Agents ask each other across conversations, Codex included, and Korean input and the Windows clipboard work under
+WSL.
+
 ### Added
 - `whaybench ctl session wait ID [SECONDS]`: after `session type`, waits for that session's next answer and prints
   it, so an agent asking another can wait in the background instead of looking again and again. It ends early when
-  that session stops to ask the person (a permission or an input), and says so.
+  that session stops to ask the person (a permission or an input), and says so. An answer that came between `type`
+  and `wait` is still taken.
 - Codex can ask another conversation too: from inside its sandbox, `session type` leaves a request in the data
   folder's `ask/`, and Whaybench, outside the sandbox, checks it (marked as from another conversation, no / command or
   ! line) and types it in. The other tabs' input stays out of Codex's reach.

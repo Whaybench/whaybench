@@ -4,7 +4,7 @@ members = ["crates/wb-core", "crates/whaybench", "crates/whaybench-term", "crate
 exclude = ["third_party/smithay"]
 
 [workspace.package]
-version = "0.6.3"
+version = "0.6.4"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/whaybench/whaybench"
