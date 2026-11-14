@@ -6,7 +6,18 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- The map tool asks for where (path:line), what and the next step in the detail of a task or problem about files, so
+  a later session can carry on without looking again.
+
+### Added
+- Conversation map → Carried to a new conversation: the display style a new conversation from the map is given in.
+  Focus passes the way to where the conversation is and the open nodes, and that conversation's memory list lists
+  only open nodes of others; the other styles pass the whole map. It starts as the main map's style.
+
 ### Fixed
+- A new Codex conversation from a map takes the map in: Codex makes its session only at its first prompt, so the tab
+  starts it with the request to read the map (agent add-on key `prompt`).
 - The remaining state files (view lists and history, extra map panels, hidden files, usage, heartbeats, saved and
   exported maps, add-on lists, language choice, terminal settings) are written whole or not at all, so a reader never
   sees half a file.

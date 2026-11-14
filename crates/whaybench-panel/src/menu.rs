@@ -88,10 +88,10 @@ fn session_args(d: &Data, rest: &[&str]) -> Vec<String> {
 }
 
 fn new_tab_with_map(d: &Data, agent: &str) {
-    match sessions::target(d) {
-        Some(s) => ctl(d, session_args(d, &["new", "--agent", agent, &s])),
-        None => status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6),
-    }
+    let Some(s) = sessions::target(d) else { return status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6) };
+    // A style that shows part of the map passes that part on; the whole map is taken over from the session.
+    let from = crate::mapstyles::carry_file(d, &s, &crate::mapstyles::carry_choice(d)).map_or(s, |f| f.to_string_lossy().to_string());
+    ctl(d, session_args(d, &["new", "--agent", agent, &from]));
 }
 
 fn session_menu(d: &Data, k: &Maker) -> gio::Menu {
@@ -130,6 +130,16 @@ fn map_menu(d: &Data, k: &Maker) -> gio::Menu {
         k.add(&sec, &wb_core::i18n::f("new-tab-keep-map-with", &[("name", name)]), move || new_tab_with_map(&d2, &id));
     }
     m.append_section(None, &sec);
+    // What the new conversation takes: the way a display style shows the map. Chosen here, in the same menu.
+    let sec = gio::Menu::new();
+    let chosen = crate::mapstyles::carry_choice(d);
+    let styles = std::iter::once((crate::mapstyles::DEFAULT.to_string(), wb_core::i18n::t("default").to_string()))
+        .chain(crate::mapstyles::list(d).into_iter().filter(|s| s.frame().is_some()).map(|s| (s.id, s.name)));
+    for (id, name) in styles {
+        let d2 = d.clone();
+        k.check(&sec, &name, id == chosen, move || crate::mapstyles::set_current(&d2, "carry", &id));
+    }
+    m.append_section(Some(wb_core::i18n::t("carried-to-new-conversation")), &sec);
     let sec = gio::Menu::new();
     {
         let d2 = d.clone();
@@ -228,7 +238,7 @@ fn make(d: &Data) -> (gio::Menu, gio::SimpleActionGroup) {
 }
 
 /// What the menus depend on; they are made again only when it changes.
-fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {} {:?} {:?} {} {:?}", wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), crate::mapstyles::current(d, "map"), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
+fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {} {:?} {:?} {} {} {:?}", wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), crate::mapstyles::current(d, "map"), crate::mapstyles::carry_choice(d), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
 
 /// Whether one of the bar's menus is showing.
 fn menu_open(w: &gtk::Widget) -> bool {

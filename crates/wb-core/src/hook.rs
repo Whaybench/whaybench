@@ -499,7 +499,11 @@ fn carry_in(data: &Path, sid: &str) -> Option<String> {
     let label = if from.starts_with('/') {
         let body = map::view_file(data, Path::new(&from)).ok()?;
         if body["nodes"].as_array().is_none_or(Vec::is_empty) { return None; }
-        map::start_from(data, sid, &body).ok()?;
+        // A part of a session's map passed on in a display style keeps where that conversation was.
+        if body.get("style").is_some() {
+            map::take_over(data, sid, &body).ok()?;
+            let _ = crate::paths::write_atomic(&crate::memory::part_carried(data, sid), body["style"].as_str().unwrap_or(""));
+        } else { map::start_from(data, sid, &body).ok()?; }
         format!("imported map '{}'", body["title"].as_str().unwrap_or(&from))
     } else {
         let source = read_json(&data.join(format!("{}.json", safe_id(&from).ok()?)), Value::Null).ok()?;

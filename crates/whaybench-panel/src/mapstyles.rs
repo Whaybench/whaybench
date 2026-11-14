@@ -146,6 +146,45 @@ pub fn set_current(d: &Data, panel: &str, id: &str) {
     let _ = write_json(&choice_file(d), &v);
 }
 
+/// The style a new conversation from the map is given by: the one chosen for it, else the main map's.
+pub fn carry_choice(d: &Data) -> String {
+    let id = read(&choice_file(d)).and_then(|v| v.get("carry")?.as_str().map(String::from)).unwrap_or_default();
+    if id == DEFAULT || find(d, &id).is_some() { id } else { current(d, "map") }
+}
+
+/// What a new conversation from the map takes when this style is chosen: a tree with the path filter (Focus) takes the
+/// way to the current node and every open node, with the branches above them; every other style takes the whole map.
+pub fn carried(style: Option<&Style>, nodes: &[Value], current: &str) -> Vec<Value> {
+    let focus = style.is_some_and(|st| st.frame() == Some("tree") && s(&st.raw, "filter") == "path");
+    if !focus { return nodes.to_vec(); }
+    let mut keep: HashSet<String> = path_to(nodes, current).iter().map(|n| s(n, "id").to_string()).collect();
+    for n in nodes.iter().filter(|n| wb_core::map::is_open(n)) {
+        keep.extend(path_to(nodes, s(n, "id")).iter().map(|a| s(a, "id").to_string()));
+    }
+    nodes.iter().filter(|n| keep.contains(s(n, "id"))).cloned().collect()
+}
+
+/// The session's map as `style` passes it on, written for `session new` to start from. None when the style takes the
+/// whole map: the new conversation then takes it over from the session itself.
+pub fn carry_file(d: &Data, session: &str, style: &str) -> Option<PathBuf> {
+    let st = find(d, style)?;
+    let data = wb_core::sessions::map_of(d, session)?;
+    let nodes = arr(&data, "nodes");
+    let kept = carried(Some(&st), nodes, s(&data, "current"));
+    if kept.len() == nodes.len() { return None; }
+    let dir = d.cache().join("carry");
+    // Read when their conversation started; a day later they are of no use.
+    for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
+        if e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() > 86_400) { let _ = fs::remove_file(e.path()); }
+    }
+    let path = dir.join(format!("{session}-{}.json", chrono::Local::now().timestamp_millis()));
+    let title = format!("{} · {}", wb_core::sessions::session_name(d, session), st.name);
+    let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "from": session, "style": style,
+        "current": data.get("current"), "nodes": wb_core::map::saved_nodes(&kept)});
+    wb_core::paths::write_atomic(&path, body.to_string()).ok()?;
+    Some(path)
+}
+
 /// The nodes under a root, the root included, or all. Parents outside are dropped by the frames.
 pub fn scoped(data: &Value, root: Option<&str>) -> Vec<Value> {
     let nodes = arr(data, "nodes");
@@ -226,6 +265,15 @@ pub fn allow(d: &Data, style: &Style) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn focus_carries_the_way_and_the_open_nodes_others_all() {
+        let n = |id: &str, parent: &str, state: &str| json!({"id": id, "parent": parent, "state": state});
+        let nodes = vec![n("a", "", "done"), n("a1", "a", "done"), n("a2", "a", "plan"), n("b", "", "done"), n("b1", "b", "done"), n("c", "", "doing")];
+        let focus = Style { id: "focus".into(), name: "Focus".into(), raw: json!({"frame": "tree", "filter": "path"}), path: PathBuf::new() };
+        let ids = |v: Vec<Value>| v.iter().map(|x| s(x, "id").to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(carried(Some(&focus), &nodes, "b1")), ["a", "a2", "b", "b1", "c"], "way to b1, open a2 with its branch, open c; a1 stays");
+        assert_eq!(carried(None, &nodes, "b1").len(), 6, "the tree takes all");
+    }
     struct St { data: Data }
     fn scratch(name: &str) -> St {
         let d = std::env::temp_dir().join(format!("wb-panel-{name}-{}", std::process::id()));

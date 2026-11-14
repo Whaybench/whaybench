@@ -3,6 +3,7 @@
   "command": "codex",
   "args": ["--no-daemon", "--sandbox", "workspace-write"],
   "resume": ["resume", "{session}"],
+  "prompt": ["{prompt}"],
   "home": {
     "env": "CODEX_HOME",
     "from": "~/.codex",

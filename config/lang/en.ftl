@@ -152,6 +152,7 @@ restart-tabs-kept = Restart
 restarting-tabs-come-back-shortly = Restarting · Restoring tabs
 new-tab-keep-map-not-opened = New tab (keep map) not opened · No session selected
 new-tab-keep-map-with = New conversation from this map · { $name }
+carried-to-new-conversation = Carried to a new conversation
 end-this-tab-s-session = End this tab's session
 reset-layout = Reset layout
 new-view = New view panel

@@ -27,6 +27,7 @@ An agent without these cannot keep the map or the session list.
 | `command` | yes | The program, found on `PATH` |
 | `args` | no | Arguments given every time |
 | `resume` | no | Arguments that open a session again; `{session}` is its number |
+| `prompt` | no | Arguments that start the agent with a first prompt; `{prompt}` is its text. For an agent that makes its session only at its first prompt (Codex): a new conversation from a map is started with the request to read the map, so its start hook takes the map in |
 | `home` | no | A settings folder of the agent's own, `<data>/<id>`, so the agent used elsewhere is not changed. `env`: the variable that names it to the agent. `from`: the person's own folder (`~/` allowed; the variable `env`, when set, wins). `copy`: files copied once from there. `copy_keys`: `{ "file.toml": ["key", ...] }`, keys copied once into a new file |
 | `merge` | no | `{ "settings file": "template" }`: the template's keys are written into the settings file in `home`; the person's other keys stay. TOML only |
 | `write` | no | `{ "settings file": "template" }`: the template becomes the whole settings file in `home`, each start. JSON or TOML |

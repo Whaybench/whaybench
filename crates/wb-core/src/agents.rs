@@ -31,6 +31,10 @@ pub struct Agent {
     args: Vec<String>,
     #[serde(default)]
     resume: Vec<String>,
+    /// Arguments that start the agent with a first prompt, `{prompt}` being its text; for an agent that makes its
+    /// session, and runs its start hook, only once it has a prompt.
+    #[serde(default)]
+    prompt: Vec<String>,
     home: Option<Home>,
     #[serde(default)]
     merge: BTreeMap<String, String>,
@@ -156,6 +160,11 @@ impl Agent {
             _ => out.extend(args.iter().cloned()),
         }
         out
+    }
+
+    /// The arguments that give a new session its first prompt, if the add-on has them.
+    pub fn first_prompt(&self, text: &str) -> Option<Vec<String>> {
+        (!self.prompt.is_empty()).then(|| self.prompt.iter().map(|a| a.replace("{prompt}", text)).collect())
     }
 
     /// What the agent is told at session start and with each prompt.

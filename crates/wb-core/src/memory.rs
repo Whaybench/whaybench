@@ -90,7 +90,9 @@ pub fn list(data: &Path, sid: &str, limit: usize) -> Vec<String> {
         for nid in by_file(&conn, sid)?.1 { if let Some(n) = db::node_get(&conn, &nid)? { push(&n, &mut out); } }
         let soon = (chrono::Local::now().date_naive() + chrono::Duration::days(7)).format("%Y-%m-%d 99").to_string();
         for n in db::nodes(&conn, &format!("{OPEN} AND coalesce(due, at) <= ?"), &[&soon])? { push(&n, &mut out); }
-        for n in db::nodes(&conn, &format!("1 ORDER BY {RECENT} LIMIT {cap}"), &[])? { push(&n, &mut out); }
+        // A conversation given only part of a map (a display style such as Focus) gets only open nodes of others too.
+        let which = if part_carried(data, sid).exists() { OPEN } else { "1" };
+        for n in db::nodes(&conn, &format!("{which} ORDER BY {RECENT} LIMIT {cap}"), &[])? { push(&n, &mut out); }
         Ok(out)
     };
     inner().unwrap_or_else(|e| unread("list", e))
@@ -101,6 +103,9 @@ fn unread(what: &str, e: Box<dyn std::error::Error>) -> Vec<String> {
     crate::log::warn("memory", "memory not read", &e.to_string(), &[("for", what.to_string())]);
     Vec::new()
 }
+
+/// Marks a session that started from part of a map; holds the display style it was passed in.
+pub fn part_carried(data: &Path, sid: &str) -> PathBuf { data.join("cache").join("carried-part").join(sid) }
 
 fn seen_file(data: &Path, sid: &str) -> PathBuf { data.join("cache").join("memory-seen").join(sid) }
 
@@ -265,6 +270,12 @@ mod tests {
         assert_eq!(lines.iter().filter(|l| l.contains("Pick a store")).count(), 1, "a node two sessions show: one line");
         assert!(lines.iter().any(|l| l.contains("unrelated")), "recent nodes of other sessions follow");
         assert!(!lines.iter().any(|l| l.contains("old")), "own closed nodes are not listed");
+        put(dir.path(), "third", json!([{"id":"c","label":"closed elsewhere","state":"done"}]));
+        assert!(list(dir.path(), me, 20).iter().any(|l| l.contains("closed elsewhere")), "recent closed nodes of others are listed");
+        crate::paths::write_atomic(&part_carried(dir.path(), me), "focus").unwrap();
+        let part = list(dir.path(), me, 20);
+        assert!(!part.iter().any(|l| l.contains("closed elsewhere")) && part.iter().any(|l| l.contains("unrelated")), "part of a map carried: only open ones: {part:?}");
+        std::fs::remove_file(part_carried(dir.path(), me)).unwrap();
         mark_seen(dir.path(), me);
         std::thread::sleep(std::time::Duration::from_millis(5));
         // The other session settles its node on the problem, the person marks mine, and something unrelated is added.

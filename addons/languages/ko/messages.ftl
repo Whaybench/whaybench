@@ -152,6 +152,7 @@ restart-tabs-kept = 재시작
 restarting-tabs-come-back-shortly = 재시작 중 · 탭 복원 대기
 new-tab-keep-map-not-opened = 새 탭 (지도 유지) 미실행 · 선택된 세션 없음
 new-tab-keep-map-with = 현재 지도로 새 대화 · { $name }
+carried-to-new-conversation = 새 대화 전달 범위
 end-this-tab-s-session = 현재 탭 세션 종료
 reset-layout = 배치 초기화
 new-view = 새 보기 패널
