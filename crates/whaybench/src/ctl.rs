@@ -104,13 +104,14 @@ enum Refused { Rule(String), Write(String) }
 
 /// Types text in the tab that shows session `id`. From another conversation tab, that is from its agent: said so, and
 /// never a command or a shell line; when the answer comes, the person is taken back to the tab that asked.
-fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>) -> Result<(), Refused> {
+fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool) -> Result<(), Refused> {
     let tab = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(id));
     let Some(tab) = tab else {
         let head = text.split_whitespace().next().unwrap_or(text);
         return Err(Refused::Rule(wb_core::i18n::f("not-run-no-conversation-tab-open", &[("head", (head).to_string())])));
     };
-    let from = from.filter(|f| *f != tab.tab);
+    // Typing in one's own tab is the agent's own; a request from ask/ names its sender itself, so it is always marked.
+    let from = from.filter(|f| asked || *f != tab.tab);
     let text = match from {
         Some(f) => from_other(text, &sessions::session_of_tab(data, f).map(|s| wb_core::agents::session_label(&data.root, &s)).unwrap_or_else(|| f.to_string())).map_err(Refused::Rule)?,
         None => text.to_string(),
@@ -119,24 +120,28 @@ fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>) -> Result<(), 
     let name = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     fs::create_dir_all(&dir).and_then(|_| write_atomic(&dir.join(format!("{name}.json")), serde_json::json!({"text": text, "enter": true}).to_string().as_bytes()))
         .map_err(|e| Refused::Write(e.to_string()))?;
+    // Typed in: what fails after this is not sent again, or the other conversation would get it twice.
     if let Some(from) = from {
         let back = serde_json::json!({"session": id, "tab": from, "at": now_ms()});
-        write_atomic(&return_file(data), back.to_string().as_bytes()).map_err(|e| Refused::Write(e.to_string()))?;
+        write_atomic(&return_file(data), back.to_string().as_bytes()).map_err(|e| Refused::Rule(e.to_string()))?;
     }
-    post(data, &Request::FocusTerm { tab: tab.tab }).map_err(Refused::Write)
+    post(data, &Request::FocusTerm { tab: tab.tab }).map_err(Refused::Rule)
 }
 
 /// The requests agents left in ask/: checked and delivered as a `session type` from their tab would be. The tab a
 /// request names is the agent's own word; the text is marked as from another conversation whatever it names.
 fn deliver_asked(data: &Data) {
-    for f in fs::read_dir(ask_dir(data)).into_iter().flatten().flatten() {
+    // Only plain files, small, a few each tick: the folder is the agent's to write, and a pipe named like a request
+    // would block this loop (the whole window) on reading it.
+    for f in fs::read_dir(ask_dir(data)).into_iter().flatten().flatten().take(20) {
         if f.path().extension().is_none_or(|e| e != "json") { continue; }
-        let v = fs::read(f.path()).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+        let plain = f.file_type().is_ok_and(|t| t.is_file()) && f.metadata().is_ok_and(|m| m.len() <= 64 * 1024);
+        let v = plain.then(|| fs::read(f.path()).ok()).flatten().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
         let _ = fs::remove_file(f.path());
         let Some(v) = v else { continue };
         let (to, text) = (v["to"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
         let from = v["from"].as_str().unwrap_or("another conversation");
-        match deliver(data, to, text, Some(from)) {
+        match deliver(data, to, text, Some(from), true) {
             Ok(()) => record::decide("request", "asked by an agent", "a sandboxed agent's request, checked here", &[("session", to.to_string()), ("from", from.to_string())]),
             Err(Refused::Rule(e) | Refused::Write(e)) => record::warn("request", "agent's request not delivered", &e, &[("session", to.to_string()), ("from", from.to_string())]),
         }
@@ -167,7 +172,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             let id = words.get(1).ok_or("session type needs an id")?;
             let text = words.get(2).ok_or("session type needs text")?;
             let from = std::env::var("WHAYBENCH_TAB").ok();
-            match deliver(data, id, text, from.as_deref()) {
+            match deliver(data, id, text, from.as_deref(), false) {
                 // An agent in a sandbox (Codex) may not write other tabs' input: it leaves a request in ask/, which
                 // Whaybench, outside the sandbox, checks the same way and delivers. A refusal stays a refusal.
                 Err(Refused::Write(_)) if from.is_some() => {
@@ -193,7 +198,9 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 let now = sessions::current_id(data, id);
                 if let Some(v) = since_newer(data.root.join("answers").join(format!("{now}.json"))) { println!("{}", v["text"].as_str().unwrap_or("")); return Ok(()); }
                 // Stopped on a question to the person (a permission, an input): the asker is told, not left waiting.
-                if let Some(v) = since_newer(sessions::state_dir(data).join(format!("{now}.json"))).filter(|v| v["state"] == "waiting") {
+                // Already waiting when the wait began counts too: it went on to ask between `type` and `wait`.
+                let state: Option<serde_json::Value> = fs::read(sessions::state_dir(data).join(format!("{now}.json"))).ok().and_then(|b| serde_json::from_slice(&b).ok());
+                if let Some(v) = state.filter(|v| v["state"] == "waiting") {
                     return Err(format!("{id} waits for the person: {}", v["note"].as_str().unwrap_or("a permission or an input")));
                 }
                 std::thread::sleep(Duration::from_secs(1));
@@ -418,11 +425,15 @@ mod tests {
         let ask = |name: &str, text: &str| write_atomic(&ask_dir(&data).join(name), serde_json::json!({"to": "s-to", "text": text, "from": "t-codex"}).to_string().as_bytes()).unwrap();
         ask("1.json", "what do you think?");
         ask("2.json", "! rm -rf ~");
+        // Naming the receiving tab as its sender does not make it the person's own.
+        write_atomic(&ask_dir(&data).join("3.json"), serde_json::json!({"to": "s-to", "text": "/exit", "from": "t-to"}).to_string().as_bytes()).unwrap();
+        // A pipe named like a request is not read: it would block the window.
+        std::process::Command::new("mkfifo").arg(ask_dir(&data).join("4.json")).status().unwrap();
         deliver_asked(&data);
-        assert_eq!(fs::read_dir(ask_dir(&data)).unwrap().count(), 0, "every request is taken");
+        assert_eq!(fs::read_dir(ask_dir(&data)).unwrap().count(), 0, "every request is taken, the pipe too");
         let typed: Vec<String> = fs::read_dir(sessions::tab_inbox(&data, "t-to")).unwrap().flatten()
             .map(|f| serde_json::from_slice::<serde_json::Value>(&fs::read(f.path()).unwrap()).unwrap()["text"].as_str().unwrap().to_string()).collect();
-        assert_eq!(typed.len(), 1, "the shell line is refused: {typed:?}");
+        assert_eq!(typed.len(), 1, "the shell line and the spoofed /exit are refused: {typed:?}");
         assert!(typed[0].ends_with("what do you think?") && typed[0] != "what do you think?", "marked as from another conversation: {}", typed[0]);
     }
     fn w(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }

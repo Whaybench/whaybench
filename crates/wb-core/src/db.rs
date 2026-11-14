@@ -94,6 +94,9 @@ fn open_once(data: &Path) -> Result<Connection> {
             tx.pragma_update(None, "user_version", VERSION)?;
         }
         tx.commit()?;
+        // The new tables into the file itself: a reader that can only read the file (an agent's sandbox) finds them.
+        // Passive: it waits for no one, and moving what is already in the file again changes nothing.
+        let _ = conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()));
         found = version(&conn)?;
     }
     if found > VERSION {
@@ -259,6 +262,16 @@ pub fn search(conn: &Connection, words: &[String], limit: usize) -> Result<Vec<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_tables_are_in_the_file_while_the_maker_still_holds_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let _held = open(dir.path()).unwrap();
+        let file = dir.path().join("memory/memory.db");
+        let reader = Connection::open_with_flags(format!("file:{}?immutable=1", file.display()), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI).unwrap();
+        let tables: i64 = reader.query_row("select count(*) from sqlite_master where type='table'", [], |r| r.get(0)).unwrap();
+        assert!(tables > 0, "a reader of the file alone sees the tables");
+    }
 
     fn node(nid: &str, label: &str, at: i64) -> Value {
         json!({"nid": nid, "memid": format!("m-{nid}"), "label": label, "opened": {"at": at, "turn": 1}})
