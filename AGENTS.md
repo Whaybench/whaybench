@@ -43,9 +43,11 @@ Versions follow Semantic Versioning:
 
 - Major (2.0.0): a change in how the program is built, such as a new way of
   connecting agents.
-- Minor (0.2.0): new features, or a change users have to follow (a data
-  format, a command).
-- Patch (0.1.1): fixes, and following a change in an external component.
+- Minor (0.2.0): a new way of working that users notice as new, or a change
+  users have to follow (a data format, a command). The bar rises as the
+  version does: without users, the version is not raised for small features.
+- Patch (0.1.1): fixes, small features and refinements, and following a change
+  in an external component.
 
 Every change worth telling goes into `CHANGELOG.md` under `[Unreleased]`.
 

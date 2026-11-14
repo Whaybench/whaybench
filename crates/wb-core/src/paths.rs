@@ -75,8 +75,12 @@ pub fn work_dir(data: &Data, home: &Path) -> PathBuf {
     let chosen = set.as_deref().map(|w| match w.strip_prefix("~/") { Some(rest) => home.join(rest), None => PathBuf::from(w) });
     // The folder an agent may write in (Codex's sandbox is the folder it starts in): never the home folder or one
     // holding Whaybench's data, where an agent could change its own settings and leave its sandbox.
+    // Compared as the folders really are: `..` and links resolved, so `~/work/..` or a link to home is home.
+    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let safe = |p: &Path| p.is_absolute() && !p.components().any(|c| c == std::path::Component::ParentDir)
+        && !real(home).starts_with(real(p)) && !real(&data.root).starts_with(real(p));
     match chosen {
-        Some(p) if p.is_absolute() && !home.starts_with(&p) && !data.root.starts_with(&p) => p,
+        Some(p) if safe(&p) => p,
         Some(p) => {
             crate::log::warn("session", "work folder not used", "it holds the home folder or Whaybench's data", &[("folder", p.display().to_string())]);
             home.join("work")
@@ -111,11 +115,12 @@ pub fn read_tail(path: &Path, max: u64) -> std::io::Result<String> {
 /// moved aside to `<name>.unreadable` and logged, so the write that follows does not replace what it held.
 /// Missing or empty is the default.
 pub fn read_kept<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
-    let Ok(text) = std::fs::read_to_string(path) else { return T::default() };
-    if text.trim().is_empty() { return T::default(); }
-    serde_json::from_str(&text).unwrap_or_else(|e| {
+    // Bytes, not text: a file that is not UTF-8 is unreadable too and is set aside, not taken for a missing one.
+    let Ok(bytes) = std::fs::read(path) else { return T::default() };
+    if bytes.iter().all(u8::is_ascii_whitespace) { return T::default(); }
+    serde_json::from_slice(&bytes).unwrap_or_else(|e| {
         // Replaced whole by a writer since it was read: that is the one to take, not to set aside.
-        if let Some(v) = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()) { return v; }
+        if let Some(v) = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()) { return v; }
         // Each one its own name: a second bad file does not replace the first one set aside.
         let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
         let aside = path.with_extension(format!("{}{ms}.unreadable", path.extension().map(|x| format!("{}.", x.to_string_lossy())).unwrap_or_default()));
@@ -200,7 +205,7 @@ mod tests {
         assert_eq!(work_dir(&data, home), Path::new("/srv/x"));
         std::fs::write(d.join("settings.json"), "{ broken").unwrap();
         assert_eq!(work_dir(&data, home), Path::new("/h/work"));
-        for unsafe_dir in [r#""~/""#, r#""/h""#, r#""/""#, r#""relative""#] {
+        for unsafe_dir in [r#""~/""#, r#""/h""#, r#""/""#, r#""relative""#, r#""~/work/..""#] {
             std::fs::write(d.join("settings.json"), format!(r#"{{"work_dir":{unsafe_dir}}}"#)).unwrap();
             assert_eq!(work_dir(&data, home), Path::new("/h/work"), "{unsafe_dir}: the home folder, above it, or not a full path");
         }
@@ -243,8 +248,11 @@ mod tests {
         assert_eq!(read_kept::<Vec<String>>(&file), vec!["x".to_string()]);
         std::fs::write(&file, "[\"x\", cut").unwrap();
         assert_eq!(read_kept::<Vec<String>>(&file), Vec::<String>::new());
-        let aside = std::fs::read_dir(&dir).unwrap().flatten().find(|e| e.file_name().to_string_lossy().ends_with(".unreadable")).unwrap();
-        assert!(aside.file_name().to_string_lossy().starts_with("a.json."));
+        let not_text = dir.join("b.json");
+        std::fs::write(&not_text, [0xff, 0xfe]).unwrap();
+        assert_eq!(read_kept::<Vec<String>>(&not_text), Vec::<String>::new());
+        assert!(!not_text.exists(), "not UTF-8: set aside too");
+        let aside = std::fs::read_dir(&dir).unwrap().flatten().find(|e| { let n = e.file_name().to_string_lossy().to_string(); n.starts_with("a.json.") && n.ends_with(".unreadable") }).unwrap();
         assert_eq!(std::fs::read_to_string(aside.path()).unwrap(), "[\"x\", cut", "kept beside");
         assert!(!file.exists());
         let _ = std::fs::remove_dir_all(&dir);

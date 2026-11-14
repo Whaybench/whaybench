@@ -78,8 +78,14 @@ chmod 0755 /usr/local/bin/whaybench-start
 
 say "Claude Code, Codex CLI and Whaybench"
 su - "$user" -c 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
-# Codex CLI for "New conversation · Codex"; it asks to sign in the first time a Codex tab opens.
-su - "$user" -c '[ -x "$HOME/.local/bin/codex" ] || command -v codex >/dev/null || curl -fsSL https://chatgpt.com/codex/install.sh | sh'
+# Codex CLI for "New conversation · Codex"; it asks to sign in the first time a Codex tab opens. Codex is a package
+# of programs (codex-code-mode-host beside codex): a codex copied alone fails to start, so it is put aside and the
+# official installer installs the whole package. Outside any Whaybench folder: CODEX_HOME is the person's own.
+su - "$user" -c 'c=$(command -v codex || true); r=${c:+$(readlink -f "$c")}
+if [ -z "$r" ] || [ ! -x "$(dirname "$r")/codex-code-mode-host" ]; then
+    if [ -f "$HOME/.local/bin/codex" ] && [ ! -L "$HOME/.local/bin/codex" ]; then mv "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.single-$(date +%s)"; fi
+    curl -fsSL https://chatgpt.com/codex/install.sh | env -u CODEX_HOME sh
+fi'
 # Not piped from the network: install.sh is checked against the release key first, and with minisign installed it
 # checks the package too.
 apt-get install -y -q minisign

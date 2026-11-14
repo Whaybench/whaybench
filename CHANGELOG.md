@@ -6,6 +6,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-14
+
+Steadier data and panels, a cleaner start for new conversations (Focus passes only the open part of a map, Codex
+takes the map in), Preferences, usage without setup, and basics: pinned CI actions, dependency and clippy checks,
+SECURITY.md.
+
 ### Changed
 - The map tool asks for where (path:line), what and the next step in the detail of a task or problem about files, so
   a later session can carry on without looking again.
@@ -34,6 +40,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Dialogs and settings windows take the size of their content, up to the room there is, instead of one fixed size.
 
 ### Fixed
+- Windows setup reinstalls Codex CLI when only its `codex` program was copied in, without the
+  `codex-code-mode-host` it needs beside it, so Codex tabs start.
 - A new Codex conversation from a map takes the map in: Codex makes its session only at its first prompt, so the tab
   starts it with the request to read the map (agent add-on key `prompt`).
 - The remaining state files (view lists and history, extra map panels, hidden files, usage, heartbeats, saved and

@@ -161,6 +161,16 @@ pub fn carried(style: Option<&Style>, nodes: &[Value], current: &str) -> Vec<Val
     for n in nodes.iter().filter(|n| wb_core::map::is_open(n)) {
         keep.extend(path_to(nodes, s(n, "id")).iter().map(|a| s(a, "id").to_string()));
     }
+    // What a kept node requires or assumes comes too, with its branch: the map is not valid without the nodes named.
+    let ids: HashSet<&str> = nodes.iter().map(|n| s(n, "id")).collect();
+    loop {
+        let named: Vec<String> = nodes.iter().filter(|n| keep.contains(s(n, "id")))
+            .flat_map(|n| [s(n, "requires"), s(n, "assumes")])
+            .flat_map(|e| e.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_')).filter(|w| ids.contains(w)).map(String::from).collect::<Vec<_>>())
+            .filter(|id| !keep.contains(id)).collect();
+        if named.is_empty() { break; }
+        for id in named { keep.extend(path_to(nodes, &id).iter().map(|a| s(a, "id").to_string())); }
+    }
     nodes.iter().filter(|n| keep.contains(s(n, "id"))).cloned().collect()
 }
 
@@ -273,6 +283,9 @@ mod tests {
         let ids = |v: Vec<Value>| v.iter().map(|x| s(x, "id").to_string()).collect::<Vec<_>>();
         assert_eq!(ids(carried(Some(&focus), &nodes, "b1")), ["a", "a2", "b", "b1", "c"], "way to b1, open a2 with its branch, open c; a1 stays");
         assert_eq!(carried(None, &nodes, "b1").len(), 6, "the tree takes all");
+        let mut needs = nodes.clone();
+        needs[5]["requires"] = json!("a1 ∧ ¬b");
+        assert_eq!(ids(carried(Some(&focus), &needs, "b1")), ["a", "a1", "a2", "b", "b1", "c"], "a closed node an open one requires comes along");
     }
     struct St { data: Data }
     fn scratch(name: &str) -> St {
