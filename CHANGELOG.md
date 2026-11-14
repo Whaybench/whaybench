@@ -15,6 +15,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
   minimum, at most half), not the dropped panel's size.
 - The colour emoji font is installed with the rest (the panels draw files and folders as emoji): by the Windows setup,
   and named in the Linux install commands.
+- The Windows setup installs fcitx5 without its recommends (its setting program, the GTK and Qt input modules,
+  im-config): Whaybench's apps type through the compositor and Whaybench has its own input settings.
 
 ### Fixed
 - The browser no longer says "Firefox is already running, but is not responding": a lock left in its profile by a
