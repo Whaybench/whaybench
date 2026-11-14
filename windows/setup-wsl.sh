@@ -37,8 +37,9 @@ printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' > /e
 say "packages"
 apt-get update -q
 # The input engine of the language is not chosen here: Whaybench offers it when it starts in a language that needs one
-# (language.json of the add-on). The fonts cover every script, so names in other scripts show too.
-apt-get install -y -q libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5 fonts-noto-core fonts-noto-cjk dbus-user-session
+# (language.json of the add-on). The fonts cover every script, so names in other scripts show too, and the emoji the
+# panels draw as icons (a file, a folder).
+apt-get install -y -q libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5 fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji dbus-user-session
 
 # Whaybench in the Windows display language: WSL's Ubuntu runs in C.UTF-8, which Whaybench would take for English.
 # A language Whaybench has no add-on for falls back to English by itself.

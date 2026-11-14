@@ -65,8 +65,9 @@ pub const FIRST_WINDOW: (f64, f64) = (1500.0, 900.0);
 /// What the pointer is doing, from press to release.
 pub enum Act {
     Idle,
-    /// The panel follows the pointer, stiffly; gx, gy is where it was picked up.
-    Hold { pid: u64, gx: f64, gy: f64 },
+    /// The panel follows the pointer, stiffly; gx, gy is where it was picked up. `dock`: held by the title bar's dot
+    /// (or a tab pulled out), so it can go onto a target circle of another panel; else it only moves.
+    Hold { pid: u64, gx: f64, gy: f64, dock: bool },
     Resize { pid: u64, edges: Edges, partners: Vec<(u64, Side)> },
     /// A tab pressed: it may be pulled out of the bar.
     TabPull { pid: u64, tab: usize, x: f64, y: f64 },
@@ -84,7 +85,6 @@ pub struct App {
     pub hover: Option<(u64, Edges, Vec<(u64, Side)>)>,
     pub guides: Vec<Guide>,
     pub zone: Option<Zone>,
-    pub band: (Option<(u64, Side)>, Instant),
     pub chrome: Chrome,
     /// The person's zoom of the title bars (Ctrl+wheel on one), over the theme's text size; in settings.json.
     pub title_zoom: f64,
@@ -194,7 +194,7 @@ impl App {
             shaders: None,
             grabbed_popups: Vec::new(),
             windows: HashMap::new(), unmapped: Vec::new(), next_tab: 1,
-            act: Act::Idle, pointer: (0.0, 0.0), hover: None, guides: Vec::new(), zone: None, band: (None, now),
+            act: Act::Idle, pointer: (0.0, 0.0), hover: None, guides: Vec::new(), zone: None,
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
             title_zoom,
             starting: HashMap::new(),
@@ -685,16 +685,16 @@ impl App {
         if self.save_due && matches!(self.act, Act::Idle) { self.save_layout(); }
     }
 
-    /// The preview of a drop can change without the pointer moving: the dwell in a band runs out.
+    /// Where the held panel goes: on a target circle when it is held by its dot, else it moves and snaps.
     pub fn update_hold(&mut self) {
-        let Act::Hold { pid, gx, gy } = self.act else { return };
+        let Act::Hold { pid, gx, gy, dock } = self.act else { return };
         let (x, y) = self.pointer;
         // A dialog or a settings window moves freely: it never joins the panels.
         let free = self.seat.get_keyboard().is_some_and(|k| k.modifier_state().alt) || self.surface.get(pid).is_some_and(|p| p.transient);
-        let band = self.surface.band_at(pid, x, y);
-        if band != self.band.0 { self.band = (band, Instant::now()); }
-        let dwell = if band.is_some() { self.band.1.elapsed() } else { Duration::ZERO };
-        self.zone = if free { None } else { self.surface.drop_zone(pid, x, y, dwell) };
+        // The dot is drawn where the title bar is now (the panel follows the pointer with a lag), and it is what goes
+        // onto a target: what shows and what counts are the same.
+        let dot = self.surface.get(pid).map(dot_at);
+        self.zone = match dot { Some((dx, dy)) if dock && !free => self.surface.drop_zone(pid, dx, dy, self.theme.dock_ring_size), _ => None };
         let (tx, ty, guides) = if free || self.zone.is_some() {
             (x - gx, y - gy, Vec::new())
         } else {
@@ -754,3 +754,6 @@ fn title_zoom(data: &Data) -> f64 {
     let all: serde_json::Map<String, serde_json::Value> = paths::read_kept(&data.root.join("settings.json"));
     all.get("title_zoom").and_then(serde_json::Value::as_f64).unwrap_or(1.0).clamp(0.7, 2.0)
 }
+
+/// Where the docking dot of a panel is: the middle of its title bar as drawn now.
+pub fn dot_at(p: &Panel) -> (f64, f64) { (p.rect.x + p.rect.w / 2.0, p.rect.y + layout::title() / 2.0) }

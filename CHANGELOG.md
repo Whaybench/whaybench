@@ -6,6 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Docking a panel: the middle of a title bar shows a dot; dragged by it, every other panel shows five soft target
+  circles (middle: into its tabs; at each edge: beside it), and the one the dot is in stands out. Dragged anywhere else
+  a panel only moves. This replaces dropping on a title bar and the bands at the edges with their wait. The dot and
+  the circles take their colour and size from the theme (`frame.dock_dot`, `dock_dot_size`, `dock_ring`,
+  `dock_ring_size`). A drop beside a panel takes two circles deep with its circle in the middle (at least a panel's
+  minimum, at most half), not the dropped panel's size.
+- The colour emoji font is installed with the rest (the panels draw files and folders as emoji): by the Windows setup,
+  and named in the Linux install commands.
+
 ### Fixed
 - The browser no longer says "Firefox is already running, but is not responding": a lock left in its profile by a
   Firefox that is gone (seen under WSL) is taken away before it starts, and a click on Panels → Browser while it is

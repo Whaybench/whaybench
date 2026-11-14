@@ -71,6 +71,12 @@ pub struct Theme {
     pub shared: Colour,
     pub wall: Colour,
     pub edge: Colour,
+    /// The dot in the middle of a title bar that docks the panel when dragged, and its diameter.
+    pub dock_dot: Colour,
+    pub dock_dot_size: f64,
+    /// The five targets shown on each panel while one is docked, soft circles of this diameter.
+    pub dock_ring: Colour,
+    pub dock_ring_size: f64,
     /// Empty space between the window's edge and a panel on a wall.
     pub outer: f64,
     /// Empty space between two panels that sit together.
@@ -116,6 +122,8 @@ pub const FIELDS: &[(&str, &str, &str, Kind)] = &[
     ("surface", "frame", "surface_top", Kind::Colour), ("surface", "frame", "surface_bottom", Kind::Colour),
     ("joint", "frame", "joint_show", Kind::Joint), ("joint", "frame", "joint_width", Kind::Number(0.0, 64.0)),
     ("joint", "frame", "shared", Kind::Colour), ("joint", "frame", "wall", Kind::Colour), ("joint", "frame", "edge", Kind::Colour),
+    ("dock", "frame", "dock_dot", Kind::Colour), ("dock", "frame", "dock_dot_size", Kind::Number(4.0, 32.0)),
+    ("dock", "frame", "dock_ring", Kind::Colour), ("dock", "frame", "dock_ring_size", Kind::Number(16.0, 64.0)),
 ];
 
 fn parse_hex(text: &str) -> Option<Colour> {
@@ -172,6 +180,10 @@ impl Theme {
             shared: colour("frame", "shared", "#fe640b"),
             wall: colour("frame", "wall", "#04a5e5"),
             edge: colour("frame", "edge", "#d20f39"),
+            dock_dot: colour("frame", "dock_dot", "#e64553"),
+            dock_dot_size: number("dock_dot_size", 10.0).max(4.0),
+            dock_ring: v.get("frame").and_then(|p| p.get("dock_ring")).and_then(Value::as_str).and_then(parse_hex).unwrap_or([accent[0], accent[1], accent[2], 0.5]),
+            dock_ring_size: number("dock_ring_size", 48.0).max(16.0),
             outer: number("outer", 0.0),
             gap: number("gap", 0.0),
             pad: number("pad", 0.0),
@@ -208,6 +220,7 @@ impl Theme {
             "front_top" => c(self.front_top), "front_bottom" => c(self.front_bottom), "tab_front" => c(self.tab_front),
             "border" => c(self.border), "front_border" => c(self.front_border), "surface_top" => c(self.surface_top),
             "surface_bottom" => c(self.surface_bottom), "shared" => c(self.shared), "wall" => c(self.wall), "edge" => c(self.edge),
+            "dock_dot" => c(self.dock_dot), "dock_dot_size" => self.dock_dot_size.into(), "dock_ring" => c(self.dock_ring), "dock_ring_size" => self.dock_ring_size.into(),
             _ => Value::Null,
         }
     }

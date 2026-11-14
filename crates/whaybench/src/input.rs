@@ -154,7 +154,8 @@ impl App {
                 if (y - sy).abs() > title() || (x - sx).abs() > 60.0 {
                     if let Some(new) = self.surface.tear_out(pid, tab, x, y) {
                         record::decide("screen", "tab pulled out", "a tab dragged out of the title bar", &[("panel", new.to_string())]);
-                        self.act = Act::Hold { pid: new, gx: 60.0, gy: 12.0 };
+                        // A tab pulled out is held as by its dot: it can go back into tabs or beside a panel.
+                        self.act = Act::Hold { pid: new, gx: 60.0, gy: 12.0, dock: true };
                         self.focus_panel(new);
                     } else {
                         self.act = Act::Swallow;
@@ -209,8 +210,8 @@ impl App {
                     return false;
                 }
                 Some(BarHit::Bar) => {
-                    let (gx, gy) = { let p = self.surface.get(top).unwrap(); (x - p.rect.x, y - p.rect.y) };
-                    self.act = Act::Hold { pid: top, gx, gy };
+                    let (gx, gy, dock) = { let p = self.surface.get(top).unwrap(); (x - p.rect.x, y - p.rect.y, crate::render::on_dot(&self.theme, p, x, y)) };
+                    self.act = Act::Hold { pid: top, gx, gy, dock };
                     self.focus_panel(top);
                     return false;
                 }
@@ -239,7 +240,6 @@ impl App {
             }
             Act::Resize { .. } | Act::TabPull { .. } | Act::Swallow | Act::Idle => {}
         }
-        self.band = (None, std::time::Instant::now());
         self.note_saved_soon();
     }
 }

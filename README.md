@@ -70,20 +70,20 @@ Whaybench installs on Windows and on Linux, both in a few steps.
 
 Fedora:
 
-    sudo dnf install webkitgtk6.0 wl-clipboard firefox fcitx5
+    sudo dnf install webkitgtk6.0 wl-clipboard firefox fcitx5 google-noto-color-emoji-fonts
 
 Ubuntu and Debian:
 
-    sudo apt install libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5
+    sudo apt install libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5 fonts-noto-color-emoji
 
 Arch:
 
-    sudo pacman -S webkitgtk-6.0 wl-clipboard firefox fcitx5
+    sudo pacman -S webkitgtk-6.0 wl-clipboard firefox fcitx5 noto-fonts-emoji
 
 AlmaLinux and Rocky Linux 10:
 
     sudo dnf install epel-release
-    sudo dnf install webkitgtk6.0 wl-clipboard firefox
+    sudo dnf install webkitgtk6.0 wl-clipboard firefox google-noto-color-emoji-fonts
     sudo dnf upgrade "gstreamer1*"   # webkitgtk6.0 from EPEL needs GStreamer 1.26
 
 fcitx5 is the input method inside Whaybench, the same on every desktop. Add the engine for your language, for

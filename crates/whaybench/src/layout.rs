@@ -1,6 +1,5 @@
 //! The free surface, without anything Wayland: panels as rectangles with tabs, how they
 //! move, stick, share borders, take each other in and are saved. Panels are in stacking order: last on top.
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -12,11 +11,6 @@ pub fn set_title(text: f64) { TITLE_BITS.store((text * 28.0 / 13.0).round().to_b
 pub const SNAP: f64 = 12.0;
 pub const GRIP: f64 = 7.0;
 pub const TOUCH: f64 = 2.0;
-/// Share of a panel that is the "give way" band on each side, at most SIDE_MAX pixels.
-pub const SIDE: f64 = 0.15;
-pub const SIDE_MAX: f64 = 40.0;
-/// How long the pointer must stay in a band before it counts: passing through changes nothing.
-pub const BAND_DWELL: Duration = Duration::from_millis(400);
 pub const MIN_W: f64 = 120.0;
 pub const MIN_H: f64 = 80.0;
 /// How stiffly a moving panel follows: this share of the gap per 1/60 s.
@@ -56,14 +50,29 @@ pub struct Panel {
     pub saved_at: Option<usize>,
 }
 
-/// Where on a panel another one held over it would go.
-enum Area { Bar, Band(Side) }
+/// The part of `r` that a panel dropped on its `side` target takes: two target circles deep (so the circle sits in
+/// its middle), at least a panel's minimum, at most half of `r`.
+pub fn side_rect(r: Rect, side: Side, ring: f64, gap: f64) -> Rect {
+    let w = (ring * 2.0).max(MIN_W).min((r.w - gap) / 2.0);
+    let h = (ring * 2.0).max(MIN_H).min((r.h - gap) / 2.0);
+    match side {
+        Side::Left => Rect::new(r.x, r.y, w, r.h),
+        Side::Right => Rect::new(r.right() - w, r.y, w, r.h),
+        Side::Top => Rect::new(r.x, r.y, r.w, h),
+        Side::Bottom => Rect::new(r.x, r.bottom() - h, r.w, h),
+    }
+}
 
-fn target_area(r: Rect, x: f64, y: f64) -> Option<Area> {
-    if y <= r.y + title() { return Some(Area::Bar); }
-    let (bw, bh) = ((SIDE * r.w).min(SIDE_MAX), (SIDE * (r.h - title())).min(SIDE_MAX));
-    [(Side::Left, x - r.x, bw), (Side::Right, r.right() - x, bw), (Side::Top, y - r.y - title(), bh), (Side::Bottom, r.bottom() - y, bh)]
-        .into_iter().filter(|s| s.1 <= s.2).min_by(|a, b| (a.1 / a.2).total_cmp(&(b.1 / b.2))).map(|s| Area::Band(s.0))
+/// The five places a panel held by its dot can go on another, as circle centres: the middle (into its tabs), and for
+/// each side the middle of what a drop there takes (`side_rect`), kept below the title bar and short of the middle.
+pub fn targets(r: Rect, ring: f64, gap: f64) -> [(How, f64, f64); 5] {
+    let top = r.y + title();
+    let (cx, cy) = (r.x + r.w / 2.0, top + (r.h - title()).max(0.0) / 2.0);
+    let mid = |side| { let a = side_rect(r, side, ring, gap); (a.x + a.w / 2.0, a.y + a.h / 2.0) };
+    let ((lx, _), (rx, _)) = (mid(Side::Left), mid(Side::Right));
+    let ((_, ty), (_, by)) = (mid(Side::Top), mid(Side::Bottom));
+    [(How::Tab, cx, cy), (How::Side(Side::Left), lx.min(cx), cy), (How::Side(Side::Right), rx.max(cx), cy),
+     (How::Side(Side::Top), cx, ty.max(top + ring / 2.0).min(cy)), (How::Side(Side::Bottom), cx, by.max(cy))]
 }
 
 impl Panel {
@@ -305,36 +314,14 @@ impl Surface {
         (nx, ny, guides)
     }
 
-    /// What dropping `held` here would do. The bands count only after the dwell; `in_band` says how long
-    /// the pointer has been in this one.
-    pub fn drop_zone(&self, held: u64, x: f64, y: f64, in_band: Duration) -> Option<Zone> {
-        let held_rect = self.get(held)?.rect;
-        let t = self.panels.iter().rev().find(|p| p.pid != held && !p.transient && p.rect.contains(x, y))?;
-        let r = t.rect;
-        // Tabs only over the title bar, giving way only in a narrow band at an edge; anywhere else the panel just moves.
-        let side = match target_area(r, x, y)? {
-            Area::Bar => return Some(Zone { target: t.pid, how: How::Tab, preview: r }),
-            Area::Band(side) => side,
-        };
-        if in_band < BAND_DWELL { return None; }
-        // As much as the dropped panel needs, but never more than half of the one giving way.
+    /// What dropping `held` here would do: the target circle under the pointer, of the top panel that has one there.
+    pub fn drop_zone(&self, held: u64, x: f64, y: f64, ring: f64) -> Option<Zone> {
         let gap = self.m.gap;
-        let (half_w, half_h) = ((r.w - gap) / 2.0, (r.h - gap) / 2.0);
-        let w = held_rect.w.min(half_w).max(MIN_W.min(half_w));
-        let h = held_rect.h.min(half_h).max(MIN_H.min(half_h));
-        let preview = match side {
-            Side::Left => Rect::new(r.x, r.y, w, r.h),
-            Side::Right => Rect::new(r.right() - w, r.y, w, r.h),
-            Side::Top => Rect::new(r.x, r.y, r.w, h),
-            Side::Bottom => Rect::new(r.x, r.bottom() - h, r.w, h),
-        };
-        Some(Zone { target: t.pid, how: How::Side(side), preview })
-    }
-
-    /// The band the pointer is in over the panel under it, for timing the dwell.
-    pub fn band_at(&self, held: u64, x: f64, y: f64) -> Option<(u64, Side)> {
-        let t = self.panels.iter().rev().find(|p| p.pid != held && !p.transient && p.rect.contains(x, y))?;
-        match target_area(t.rect, x, y)? { Area::Band(side) => Some((t.pid, side)), Area::Bar => None }
+        let (t, how) = self.panels.iter().rev().filter(|p| p.pid != held && !p.transient).find_map(|p| {
+            targets(p.rect, ring, gap).into_iter().find(|(_, tx, ty)| (x - tx).hypot(y - ty) <= ring / 2.0).map(|(how, _, _)| (p, how))
+        })?;
+        let preview = match how { How::Tab => t.rect, How::Side(side) => side_rect(t.rect, side, ring, gap) };
+        Some(Zone { target: t.pid, how, preview })
     }
 
     /// Carries out a drop: into tabs (dropped one in front), or the other panel gives way.
@@ -723,7 +710,14 @@ mod tests {
         assert!(!s.panels[1].fitted && s.panels[1].rect.w > 300.0, "its size is the person's now");
         assert_eq!(s.panels[0].rect.w, 700.0);
     }
-    const LONG: Duration = Duration::from_secs(1);
+    /// The targets' diameter in the tests, the theme's default.
+    const RING: f64 = 48.0;
+
+    /// Panel 1 held by its dot, its pointer on `target`'s circle for `how`.
+    fn aim(s: &Surface, target: u64, how: How) -> Option<Zone> {
+        let (_, x, y) = targets(s.get(target)?.rect, RING, s.m.gap).into_iter().find(|(h, _, _)| *h == how)?;
+        s.drop_zone(1, x, y, RING)
+    }
 
     #[test]
     fn motion_is_by_time_and_stops_on_target() {
@@ -753,24 +747,22 @@ mod tests {
     }
 
     #[test]
-    fn the_title_bar_makes_a_tab_a_narrow_band_gives_way_and_the_middle_does_nothing() {
+    fn the_middle_circle_makes_a_tab_an_edge_one_gives_way_and_between_them_nothing() {
         let s = surface(&[Rect::new(600.0, 0.0, 300.0, 300.0), Rect::new(0.0, 0.0, 400.0, 400.0)]);
-        let z = s.drop_zone(1, 200.0, 10.0, Duration::ZERO).unwrap();
-        assert_eq!(z.how, How::Tab);
-        assert_eq!(z.target, 2);
-        assert_eq!(s.drop_zone(1, 200.0, 200.0, LONG), None, "the middle only moves the panel");
-        // 40px from the left is the band's edge (15% would be 60): nothing before the dwell, a split after it.
-        assert_eq!(s.drop_zone(1, 40.0, 200.0, Duration::from_millis(100)), None);
-        assert_eq!(s.drop_zone(1, 40.0, 200.0, LONG).unwrap().how, How::Side(Side::Left));
-        assert_eq!(s.drop_zone(1, 50.0, 200.0, LONG), None, "past the band");
-        assert_eq!(s.drop_zone(1, 200.0, 390.0, LONG).unwrap().how, How::Side(Side::Bottom));
-        assert_eq!(s.drop_zone(1, 1000.0, 800.0, LONG), None, "empty surface");
+        let z = aim(&s, 2, How::Tab).unwrap();
+        assert_eq!((z.how, z.target), (How::Tab, 2));
+        for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] { assert_eq!(aim(&s, 2, How::Side(side)).unwrap().how, How::Side(side)); }
+        let (_, cx, cy) = targets(s.get(2).unwrap().rect, RING, s.m.gap)[0];
+        assert_eq!(s.drop_zone(1, cx - 80.0, cy, RING), None, "between two circles the panel only moves");
+        assert_eq!(s.drop_zone(1, cx + RING / 2.0 - 1.0, cy, RING).unwrap().how, How::Tab, "anywhere in the circle");
+        assert_eq!(s.drop_zone(1, 1000.0, 800.0, RING), None, "empty surface");
+        assert_eq!(s.drop_zone(2, 750.0, 150.0 + 14.0, RING).map(|z| z.target), Some(1), "the held one is not a target");
     }
 
     #[test]
     fn dropping_in_the_middle_makes_tabs_with_the_dropped_one_in_front() {
         let mut s = surface(&[Rect::new(600.0, 0.0, 300.0, 300.0), Rect::new(0.0, 0.0, 400.0, 400.0)]);
-        let z = s.drop_zone(1, 200.0, 10.0, LONG).unwrap();
+        let z = aim(&s, 2, How::Tab).unwrap();
         s.apply_drop(1, z);
         assert_eq!(s.panels.len(), 1);
         let p = &s.panels[0];
@@ -780,19 +772,22 @@ mod tests {
     }
 
     #[test]
-    fn giving_way_takes_the_dropped_size_but_at_most_half() {
-        let mut s = surface(&[Rect::new(900.0, 0.0, 100.0, 300.0), Rect::new(0.0, 0.0, 800.0, 400.0)]);
-        let z = s.drop_zone(1, 790.0, 200.0, LONG).unwrap();
-        assert_eq!(z.how, How::Side(Side::Right));
-        // Smaller than half of the other: minimum width applies, not half.
+    fn giving_way_takes_two_circles_deep_at_least_the_minimum_at_most_half() {
+        // Two 48px circles are 96px: less than the minimum width, so the minimum; whatever the dropped one's size.
+        let mut s = surface(&[Rect::new(900.0, 0.0, 600.0, 300.0), Rect::new(0.0, 0.0, 800.0, 400.0)]);
+        let z = aim(&s, 2, How::Side(Side::Right)).unwrap();
         assert_eq!(z.preview, Rect::new(680.0, 0.0, 120.0, 400.0));
+        let (_, rx, _) = targets(s.get(2).unwrap().rect, RING, s.m.gap)[2];
+        assert_eq!(rx, 740.0, "the circle in the middle of what the drop takes");
         s.apply_drop(1, z);
         assert_eq!(s.get(2).unwrap().rect, Rect::new(0.0, 0.0, 680.0, 400.0));
         let h = s.get(1).unwrap();
         assert_eq!((h.rect.w, h.rect.h, h.tx, h.ty), (120.0, 400.0, 680.0, 0.0));
 
-        let big = surface(&[Rect::new(900.0, 0.0, 600.0, 300.0), Rect::new(0.0, 0.0, 800.0, 400.0)]);
-        assert_eq!(big.drop_zone(1, 10.0, 200.0, LONG).unwrap().preview.w, 400.0, "never more than half");
+        let narrow = surface(&[Rect::new(900.0, 0.0, 600.0, 300.0), Rect::new(0.0, 0.0, 200.0, 400.0)]);
+        assert_eq!(aim(&narrow, 2, How::Side(Side::Left)).unwrap().preview.w, 100.0, "never more than half");
+        let tall = surface(&[Rect::new(900.0, 0.0, 600.0, 300.0), Rect::new(0.0, 0.0, 800.0, 400.0)]);
+        assert_eq!(aim(&tall, 2, How::Side(Side::Top)).unwrap().preview.h, 96.0, "two circles deep when that is more than the minimum");
     }
 
     #[test]
@@ -834,7 +829,7 @@ mod tests {
     #[test]
     fn a_tab_pulled_out_is_a_panel_and_a_single_tab_cannot_be() {
         let mut s = surface(&[Rect::new(600.0, 0.0, 300.0, 300.0), Rect::new(0.0, 0.0, 400.0, 400.0)]);
-        let z = s.drop_zone(1, 200.0, 10.0, LONG).unwrap();
+        let z = aim(&s, 2, How::Tab).unwrap();
         s.apply_drop(1, z);
         let new = s.tear_out(2, 0, 500.0, 500.0).unwrap();
         assert_eq!(s.panels.len(), 2);
@@ -846,7 +841,7 @@ mod tests {
     #[test]
     fn closing_the_last_tab_closes_the_panel() {
         let mut s = surface(&[Rect::new(600.0, 0.0, 300.0, 300.0), Rect::new(0.0, 0.0, 400.0, 400.0)]);
-        let z = s.drop_zone(1, 200.0, 10.0, LONG).unwrap();
+        let z = aim(&s, 2, How::Tab).unwrap();
         s.apply_drop(1, z);
         assert!(s.remove_tab(1));
         assert_eq!(s.panels.len(), 1);
@@ -898,11 +893,11 @@ mod tests {
     #[test]
     fn giving_way_leaves_the_gap() {
         let mut s = roomy(&[Rect::new(900.0, 14.0, 600.0, 300.0), Rect::new(14.0, 14.0, 810.0, 400.0)]);
-        let z = s.drop_zone(1, 20.0, 200.0, LONG).unwrap();
-        assert_eq!(z.preview.w, 400.0, "half of what remains after the gap");
+        let z = aim(&s, 2, How::Side(Side::Left)).unwrap();
+        assert_eq!(z.preview.w, 120.0);
         s.apply_drop(1, z);
         let t = s.get(2).unwrap().rect;
-        assert_eq!((t.x, t.w), (424.0, 400.0));
+        assert_eq!((t.x, t.w), (144.0, 680.0), "the gap between them stays");
     }
 
     #[test]

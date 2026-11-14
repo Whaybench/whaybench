@@ -24,9 +24,9 @@ use smithay::{
     wayland::dmabuf::{DmabufFeedbackBuilder, DmabufState},
     utils::{Buffer, Logical, Physical, Rectangle, Scale, Size, Transform},
 };
-use wb_core::{log as record, theme::premultiplied};
+use wb_core::{log as record, theme::{Theme, premultiplied}};
 
-use crate::{App, ctl, layout::{Guide, How, Line, Panel, Rect, Side, title}, state::{Act, FIRST_WINDOW}, };
+use crate::{App, ctl, layout::{Guide, How, Line, Panel, Rect, Side, targets, title}, state::{Act, FIRST_WINDOW}, };
 
 render_elements! {
     pub PanelElement<=GlesRenderer>;
@@ -108,7 +108,26 @@ uniform vec4 bottom;
 void main() { gl_FragColor = mix(top, bottom, v_coords.y) * alpha; }
 "#;
 
-pub struct Shaders { card: GlesPixelProgram, back: GlesPixelProgram }
+/// A disc: a solid dot with a smooth edge, or a soft target that fades out from its middle with a faint rim.
+const DISC: &str = r#"
+precision highp float;
+varying vec2 v_coords;
+uniform vec2 size;
+uniform float alpha;
+#if defined(DEBUG_FLAGS)
+uniform float tint;
+#endif
+uniform vec4 colour;
+uniform float hard;
+void main() {
+    float d = length(v_coords - vec2(0.5)) * 2.0;
+    float edge = 1.0 - smoothstep(1.0 - 2.0 / size.x, 1.0, d);
+    float soft = (1.0 - smoothstep(0.0, 1.0, d)) * 0.6 + (smoothstep(0.7, 0.82, d) - smoothstep(0.88, 1.0, d)) * 0.4;
+    gl_FragColor = colour * (hard > 0.5 ? edge : soft) * alpha;
+}
+"#;
+
+pub struct Shaders { card: GlesPixelProgram, back: GlesPixelProgram, disc: GlesPixelProgram }
 
 fn compile(renderer: &mut GlesRenderer) -> Result<Shaders, String> {
     let n = |s: &'static str, t| UniformName::new(s, t);
@@ -117,7 +136,8 @@ fn compile(renderer: &mut GlesRenderer) -> Result<Shaders, String> {
         n("fill", UniformType::_4f), n("bar_top", UniformType::_4f), n("bar_bottom", UniformType::_4f), n("line", UniformType::_4f), n("shadow", UniformType::_4f),
     ]).map_err(|e| format!("{e:?}"))?;
     let back = renderer.compile_custom_pixel_shader(BACK, &[n("top", UniformType::_4f), n("bottom", UniformType::_4f)]).map_err(|e| format!("{e:?}"))?;
-    Ok(Shaders { card, back })
+    let disc = renderer.compile_custom_pixel_shader(DISC, &[n("colour", UniformType::_4f), n("hard", UniformType::_1f)]).map_err(|e| format!("{e:?}"))?;
+    Ok(Shaders { card, back, disc })
 }
 
 fn four(name: &'static str, c: [f32; 4]) -> Uniform<'static> { Uniform::new(name, (c[0], c[1], c[2], c[3])) }
@@ -148,6 +168,14 @@ fn tab_rects(state: &mut App, p: &Panel) -> Vec<Rect> {
         x += w + 4.0;
     }
     out
+}
+
+/// Whether the pointer is on the docking dot of this panel's title bar: in the middle of a bar with one tab (with
+/// several, tabs are there), within reach of the dot. A dialog has none: it never joins the panels.
+pub fn on_dot(t: &Theme, p: &Panel, x: f64, y: f64) -> bool {
+    let reach = (title() * 0.8).max(t.dock_dot_size);
+    let (dx, dy) = crate::state::dot_at(p);
+    !p.transient && p.tabs.len() == 1 && p.rect.bar().contains(x, y) && (x - dx).hypot(y - dy) <= reach / 2.0 + 4.0
 }
 
 pub fn bar_hit(state: &mut App, pid: u64, x: f64, y: f64) -> Option<BarHit> {
@@ -189,6 +217,14 @@ impl Frame<'_> {
         else if self.kept[self.k].0 != look { self.kept[self.k] = (look, make()); }
         self.out.push(self.kept[self.k].1.clone().into());
         self.k += 1;
+    }
+    /// A disc of diameter `d` around (cx, cy), in a colour as drawing wants it. Without shaders, a square.
+    fn disc(&mut self, shaders: Option<&Shaders>, cx: f64, cy: f64, d: f64, colour: [f32; 4], hard: bool) {
+        let r = Rect::new(cx - d / 2.0, cy - d / 2.0, d, d);
+        let Some(sh) = shaders else { return self.solid(r, colour) };
+        let p = phys(r);
+        let area = Rectangle::new((p.loc.x, p.loc.y).into(), (p.size.w, p.size.h).into());
+        self.shaded(&sh.disc, area, vec![four("colour", colour), Uniform::new("hard", if hard { 1.0f32 } else { 0.0 })], format!("disc {p:?} {colour:?} {hard}"));
     }
     /// A rounded box. Without shaders (they failed to compile), a plain rectangle.
     fn card(&mut self, shaders: Option<&Shaders>, r: Rect, c: Card) {
@@ -298,7 +334,29 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     let top_modal = modal.first().map(|p| p.pid);
     for p in &modal { draw_panel(state, renderer, &mut f, shaders.as_ref(), p, Some(p.pid) == top_modal, &[], true); }
 
-    // Above everything: the drop preview and the guides.
+    // Above everything: the docking dot, the targets, the drop preview and the guides.
+    let (dot, ring) = (premultiplied(t.dock_dot), t.dock_ring);
+    let (px, py) = state.pointer;
+    match state.act {
+        Act::Hold { pid, dock: true, .. } if let Some(held) = state.surface.get(pid).filter(|p| !p.transient).cloned() => {
+            let (dx, dy) = crate::state::dot_at(&held);
+            f.disc(shaders.as_ref(), dx, dy, t.dock_dot_size, dot, true);
+            let lit = |target: u64, how: How| state.zone.is_some_and(|z| z.target == target && z.how == how);
+            let panels: Vec<Panel> = state.surface.panels.iter().filter(|p| p.pid != pid && !p.transient).cloned().collect();
+            for p in &panels {
+                for (how, cx, cy) in targets(p.rect, t.dock_ring_size, state.surface.m.gap) {
+                    // The one the dot is in stands out; the others stay soft over what is behind them.
+                    let c = if lit(p.pid, how) { [ring[0], ring[1], ring[2], (ring[3] * 1.8).min(1.0)] } else { ring };
+                    f.disc(shaders.as_ref(), cx, cy, t.dock_ring_size, premultiplied(c), false);
+                }
+            }
+        }
+        Act::Idle => if let Some(p) = state.surface.top_at(px, py).cloned() && on_dot(&t, &p, px, py) {
+            let (dx, dy) = crate::state::dot_at(&p);
+            f.disc(shaders.as_ref(), dx, dy, t.dock_dot_size, dot, true);
+        },
+        _ => {}
+    }
     if let Some(z) = state.zone {
         let name = state.surface.get(z.target).map(|p| p.tab().name.clone()).unwrap_or_default();
         let label = if z.how == How::Tab { wb_core::i18n::f("as-a-tab-of", &[("name", (name).to_string())]) } else { wb_core::i18n::f("beside", &[("name", (name).to_string())]) };

@@ -80,6 +80,8 @@ In screen pixels, from 0 to 64.
 | `border_width` | Panel border width | 0 |
 | `shadow_size` | Panel shadow size | 0 |
 | `joint_width` | Width of joint lines | 2 |
+| `dock_dot_size` | Diameter of the dot in the middle of a title bar that docks a panel | 10 |
+| `dock_ring_size` | Diameter of the five targets on each panel while one is docked | 48 |
 
 ## `frame`: when joint lines show
 
@@ -107,6 +109,8 @@ In screen pixels, from 0 to 64.
 | `shared` | Line where panels join | `#fe640b` |
 | `wall` | Line along the window's edge | `#04a5e5` |
 | `edge` | The border about to be dragged | `#d20f39` |
+| `dock_dot` | The docking dot | `#e64553` |
+| `dock_ring` | The docking targets: soft circles, see-through toward their edge | `base.accent` at half |
 
 ## `settings.json`
 
