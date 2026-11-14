@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-11-15
+
 ### Changed
 - The Windows setup no longer picks an input engine per language: Whaybench offers the language's engine when it
   starts in it. It installs the Noto fonts for every script (CJK included) whatever the language, and leaves fcitx5's
