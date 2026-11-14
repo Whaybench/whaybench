@@ -350,6 +350,7 @@ inputset-key-press = 키 입력 대기
 inputset-engine = 설정 · { $name }
 inputset-open-tool = 열기
 inputset-not-installed = 미설치
+inputset-package = { $package } (미설치)
 inputset-none = fcitx5 미실행 · 입력 설정 불가
 prefs-open = 환경 설정…
 prefs-title = 환경 설정

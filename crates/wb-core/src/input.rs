@@ -188,6 +188,61 @@ pub fn install_commands(package: &str) -> Option<Vec<Command>> {
     Some(vec![run(&["refresh"]), run(&["install", "-y", "--", package])])
 }
 
+/// Installs the package: its commands in order, stopping at the first that fails; Err says why (pkcon writes it on
+/// its output, apt-get on its errors).
+pub fn install(package: &str) -> Result<(), String> {
+    let steps = install_commands(package).ok_or("no PackageKit and not WSL")?;
+    for mut c in steps {
+        let o = c.output().map_err(|e| e.to_string())?;
+        if !o.status.success() {
+            return Err([&o.stderr, &o.stdout].iter().find_map(|b| String::from_utf8_lossy(b).lines().rfind(|l| !l.trim().is_empty()).map(String::from)).unwrap_or_default());
+        }
+    }
+    Ok(())
+}
+
+/// The fcitx5 engine packages the distribution has and this system has not installed, by name. Asked of the package
+/// manager each time, so there is no list to keep: apt-cache under WSL, PackageKit on a desktop.
+pub fn installable() -> Vec<String> {
+    let out = |c: &mut Command| c.env("LANG", "C").output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
+    let mut names: Vec<String> = if Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists() {
+        let installed = out(Command::new("dpkg-query").args(["-W", "-f", "${Package}\n", "fcitx5-*"]));
+        out(Command::new("apt-cache").args(["search", "--names-only", "^fcitx5-"])).lines()
+            .filter_map(|l| l.split(" - ").next()).filter(|n| !installed.lines().any(|i| i == *n)).map(String::from).collect()
+    } else if let Some(pkcon) = which("pkcon") {
+        // "Available   fcitx5-anthy-5.1.10-1.fc44.x86_64 (fedora)": the name is before the version and release. Another
+        // version of an installed package is listed as available too, so the installed names are taken out.
+        let text = out(Command::new(pkcon).args(["-p", "search", "name", "fcitx5"]));
+        let names = |state: &str| -> Vec<String> { text.lines().filter(|l| l.starts_with(state)).filter_map(|l| l.split_whitespace().nth(1)).filter_map(|id| id.rsplitn(3, '-').nth(2)).map(String::from).collect() };
+        let installed = names("Installed");
+        names("Available").into_iter().filter(|n| !installed.contains(n)).collect()
+    } else { Vec::new() };
+    names.retain(|n| engine_package(n) && valid_package(n));
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Whether a package named fcitx5-... brings an input method, not a part of fcitx5 itself.
+// shortcut: by the names distributions use today (Fedora, Debian, Arch); a new kind of part shows until listed here.
+fn engine_package(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("fcitx5-") else { return false };
+    const PARTS: [&str; 14] = ["data", "libs", "devel", "dev", "bin", "gui", "common", "config-qt", "configtool", "autostart", "migrator", "modules", "material-color", "solarized"];
+    const KINDS: [&str; 6] = ["frontend-", "module-", "qt", "gtk", "skin-", "lua"];
+    !PARTS.iter().any(|p| rest == *p || rest.ends_with(&format!("-{p}"))) && !KINDS.iter().any(|k| rest.starts_with(k))
+}
+
+/// After an install: loads what fcitx5 does not know yet and gives the input methods that came with it.
+pub fn load_new(before: &[String]) -> Result<Vec<String>, String> {
+    busctl(&["Refresh"])?;
+    let started = std::time::Instant::now();
+    loop {
+        let new: Vec<String> = available()?.into_iter().map(|m| m.name).filter(|n| !before.contains(n) && !n.starts_with("keyboard-")).collect();
+        if !new.is_empty() || started.elapsed() > std::time::Duration::from_secs(10) { return Ok(new); }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+}
+
 fn which(name: &str) -> Option<PathBuf> {
     std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(name)).find(|f| f.is_file()))
 }
@@ -237,5 +292,12 @@ mod tests {
         for bad in ["-oDPkg::Pre-Invoke::=id", "", "Fcitx5", "a b", "x;id", "../x"] { assert!(!valid_package(bad), "{bad}"); }
         let about = serde_json::json!({"input": {"engines": [{"name": "x", "package": "--allow-unauthenticated"}]}});
         assert_eq!(missing_in(&about, &[]), None, "a bad name is never offered");
+    }
+    #[test]
+    fn only_engine_packages_are_offered() {
+        for yes in ["fcitx5-anthy", "fcitx5-mozc", "fcitx5-table-cangjie5", "fcitx5-chinese-addons", "fcitx5-m17n"] { assert!(engine_package(yes), "{yes}"); }
+        for no in ["fcitx5", "fcitx5-data", "fcitx5-zhuyin-data", "fcitx5-chinese-addons-bin", "fcitx5-frontend-gtk4", "fcitx5-module-lua-dev",
+                   "fcitx5-qt6", "fcitx5-gtk3", "fcitx5-config-qt", "fcitx5-pinyin-gui", "fcitx5-skin-nord", "kcm-fcitx5"] { assert!(!engine_package(no), "{no}"); }
+        assert_eq!("fcitx5-anthy-5.1.10-1.fc44.x86_64".rsplitn(3, '-').nth(2), Some("fcitx5-anthy"));
     }
 }

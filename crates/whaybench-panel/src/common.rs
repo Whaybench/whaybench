@@ -280,3 +280,29 @@ pub fn keep_scroll(inside: &impl IsA<gtk::Widget>, rebuild: impl FnOnce()) {
     rebuild();
     if let Some(a) = adj { a.set_value(top); glib::idle_add_local_once(move || a.set_value(top)); }
 }
+
+/// Asks to install language support (`note` under the question), then installs it in the background, said on the
+/// status line and in the record. `then` runs on that thread once it is installed.
+pub fn install_engine(win: &gtk::ApplicationWindow, d: &Data, package: String, note: Vec<String>, then: impl FnOnce() + Send + 'static) {
+    let ask = wb_core::i18n::f("input-install-ask", &[("package", package.clone())]);
+    let (d, then) = (d.clone(), RefCell::new(Some(then)));
+    confirm(win, &ask, &note, wb_core::i18n::t("input-install"), move || {
+        let Some(then) = then.borrow_mut().take() else { return };
+        let (d, package) = (d.clone(), package.clone());
+        if wb_core::input::install_commands(&package).is_none() {
+            wb_core::log::warn("input", "engine not installed", "no PackageKit and not WSL", &[("package", package.clone())]);
+            wb_core::status::say(&d, &wb_core::i18n::f("input-install-by-hand", &[("package", package)]), 20);
+            return;
+        }
+        wb_core::status::say(&d, &wb_core::i18n::f("input-installing", &[("package", package.clone())]), 120);
+        std::thread::spawn(move || {
+            let done = wb_core::input::install(&package);
+            match &done {
+                Ok(()) => wb_core::log::decide("input", "engine installed", "the person agreed", &[("package", package.clone())]),
+                Err(why) => wb_core::log::warn("input", "engine not installed", why, &[("package", package.clone())]),
+            }
+            wb_core::status::say(&d, &wb_core::i18n::f(if done.is_ok() { "input-installed" } else { "input-install-failed" }, &[("package", package)]), 12);
+            if done.is_ok() { then(); }
+        });
+    });
+}

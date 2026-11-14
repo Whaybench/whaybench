@@ -7,6 +7,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- The Windows setup no longer picks an input engine per language: Whaybench offers the language's engine when it
+  starts in it. It installs the Noto fonts for every script (CJK included) whatever the language, and leaves fcitx5's
+  switch keys at their defaults.
 - Ctrl+wheel on a title bar makes all title bars larger or smaller (kept in settings.json `title_zoom`); the bar's
   height follows its text. The default title text is 14 px (was 13).
 - Dialogs and settings windows open at their content's size and can be resized; once resized they keep that size.
@@ -18,6 +21,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ### Added
 - Settings → Input…: the input methods of fcitx5's current group (move up, remove, add), the switch keys, and each
   method's own settings, drawn from the form fcitx5 describes for it.
+- Input settings list the engines the distribution has and this system has not installed (asked of apt-cache or
+  PackageKit each time); one picked is installed and added to the group.
 - A language add-on can say what it types with: `input` in `language.json` gives the keyboard layout and the
   fcitx5 engines with their packages (`addons/languages/README.md`). The Korean add-on declares `hangul`.
 - Choosing a language whose input engine is not installed offers to install it (PackageKit on a desktop, `wsl.exe` as

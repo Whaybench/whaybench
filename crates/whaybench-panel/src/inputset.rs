@@ -11,7 +11,7 @@ fn t(key: &str) -> &'static str { wb_core::i18n::t(key) }
 
 const GLOBAL: &str = "fcitx://config/global";
 
-struct Ui { d: Data, methods: gtk::Box, adds: gtk::Box, detail: gtk::Box, err: gtk::Label }
+struct Ui { d: Data, win: gtk::ApplicationWindow, methods: gtk::Box, adds: gtk::Box, more: gtk::Box, detail: gtk::Box, err: gtk::Label }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -23,11 +23,12 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         page.append(&gtk::Label::new(Some(t("inputset-none"))));
         return;
     }
-    let ui = Rc::new(Ui { d, methods: gtk::Box::new(gtk::Orientation::Vertical, 4), adds: gtk::Box::new(gtk::Orientation::Horizontal, 6), detail: gtk::Box::new(gtk::Orientation::Vertical, 6), err: gtk::Label::new(None) });
+    let ui = Rc::new(Ui { d, win: win.clone(), more: gtk::Box::new(gtk::Orientation::Horizontal, 6), methods: gtk::Box::new(gtk::Orientation::Vertical, 4), adds: gtk::Box::new(gtk::Orientation::Horizontal, 6), detail: gtk::Box::new(gtk::Orientation::Vertical, 6), err: gtk::Label::new(None) });
     ui.err.add_css_class("dim"); ui.err.set_wrap(true); ui.err.set_halign(gtk::Align::Start);
     page.append(&heading(t("inputset-methods")));
     page.append(&ui.methods);
     page.append(&ui.adds);
+    page.append(&ui.more);
     page.append(&heading(t("inputset-trigger")));
     match input::config(GLOBAL) {
         Ok(form) => {
@@ -40,6 +41,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     page.append(&ui.detail);
     page.append(&ui.err);
     fill(&ui);
+    offer_packages(&ui);
 }
 
 fn heading(text: &str) -> gtk::Label {
@@ -120,6 +122,49 @@ fn fill(ui: &Rc<Ui>) {
     }
     ui.adds.append(&pick);
     ui.adds.append(&b);
+}
+
+/// Engines the system has not installed, asked of the package manager in the background (it takes a few seconds):
+/// one picked is installed, then added to the group.
+fn offer_packages(ui: &Rc<Ui>) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || { let _ = tx.send(input::installable()); });
+    let ui = ui.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
+        let packages = match rx.try_recv() { Ok(p) => p, Err(std::sync::mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue, Err(_) => return glib::ControlFlow::Break };
+        while let Some(c) = ui.more.first_child() { ui.more.remove(&c); }
+        if packages.is_empty() { return glib::ControlFlow::Break; }
+        let shown: Vec<String> = packages.iter().map(|p| wb_core::i18n::f("inputset-package", &[("package", p.clone())])).collect();
+        let pick = gtk::DropDown::from_strings(&shown.iter().map(String::as_str).collect::<Vec<_>>());
+        pick.set_hexpand(true);
+        let b = gtk::Button::with_label(t("input-install"));
+        let (ui2, pick2) = (ui.clone(), pick.clone());
+        b.connect_clicked(move |_| {
+            let Some(package) = packages.get(pick2.selected() as usize).cloned() else { return };
+            let before: Vec<String> = input::available().map(|a| a.into_iter().map(|m| m.name).collect()).unwrap_or_default();
+            let (tx, rx) = std::sync::mpsc::channel();
+            crate::common::install_engine(&ui2.win, &ui2.d, package, Vec::new(), move || {
+                // What came with the package goes to the end of the group.
+                let added = input::load_new(&before).and_then(|new| {
+                    let (group, layout, mut items) = input::group()?;
+                    items.extend(new.into_iter().map(|n| (n, String::new())));
+                    input::set_group(&group, &layout, &items)
+                });
+                if let Err(e) = &added { wb_core::log::warn("input", "engine not added to the group", e, &[]); }
+                let _ = tx.send(());
+            });
+            // The lists again once it is in; given up when the install did not get there.
+            let ui3 = ui2.clone();
+            glib::timeout_add_local(std::time::Duration::from_millis(300), move || match rx.try_recv() {
+                Ok(()) => { fill(&ui3); offer_packages(&ui3); glib::ControlFlow::Break }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(_) => glib::ControlFlow::Break,
+            });
+        });
+        ui.more.append(&pick);
+        ui.more.append(&b);
+        glib::ControlFlow::Break
+    });
 }
 
 /// The keyboard layouts the language add-ons name, and `us`.

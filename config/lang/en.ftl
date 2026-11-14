@@ -350,6 +350,7 @@ inputset-key-press = Press a key…
 inputset-engine = Settings · { $name }
 inputset-open-tool = Open
 inputset-not-installed = Not installed
+inputset-package = { $package } (not installed)
 inputset-none = fcitx5 not running · Input settings unavailable
 prefs-open = Preferences…
 prefs-title = Preferences

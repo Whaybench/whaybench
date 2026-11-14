@@ -269,33 +269,10 @@ fn settings_menu(d: &Data, k: &Maker) -> gio::Menu {
 
 /// The language chosen types with an engine that is not installed: asks, then installs it in the background.
 fn offer_input(win: &gtk::ApplicationWindow, d: &Data, lang: &str, package: String) {
-    let ask = wb_core::i18n::f("input-install-ask", &[("package", package.clone())]);
     // A language add-on the program did not bring (or one changed since) asks in its own name: said under the question.
     let note: Vec<String> = (!wb_core::addons::bundled_as_is(d, &format!("languages/{lang}"))).then(|| wb_core::i18n::t("input-install-not-ours").to_string()).into_iter().collect();
-    let (d, lang) = (d.clone(), lang.to_string());
-    crate::common::confirm(win, &ask, &note, wb_core::i18n::t("input-install"), move || {
-        let (d, lang, package) = (d.clone(), lang.clone(), package.clone());
-        let Some(steps) = wb_core::input::install_commands(&package) else {
-            wb_core::log::warn("input", "engine not installed", "no PackageKit and not WSL", &[("package", package.clone())]);
-            status::say(&d, &wb_core::i18n::f("input-install-by-hand", &[("package", package)]), 20);
-            return;
-        };
-        status::say(&d, &wb_core::i18n::f("input-installing", &[("package", package.clone())]), 120);
-        std::thread::spawn(move || {
-            // In order, stopping at the first that fails.
-            let mut why = String::new();
-            let ok = steps.into_iter().all(|mut c| match c.output() {
-                Ok(o) if o.status.success() => true,
-                // pkcon says why on its output, apt-get on its errors.
-                Ok(o) => { why = [&o.stderr, &o.stdout].iter().find_map(|b| String::from_utf8_lossy(b).lines().rfind(|l| !l.trim().is_empty()).map(String::from)).unwrap_or_default(); false }
-                Err(e) => { why = e.to_string(); false }
-            });
-            if ok { wb_core::log::decide("input", "engine installed", "the person agreed", &[("package", package.clone())]); }
-            else { wb_core::log::warn("input", "engine not installed", &why, &[("package", package.clone())]); }
-            status::say(&d, &wb_core::i18n::f(if ok { "input-installed" } else { "input-install-failed" }, &[("package", package)]), 12);
-            if ok { type_with(&d, &lang); }
-        });
-    });
+    let (d2, lang) = (d.clone(), lang.to_string());
+    crate::common::install_engine(win, d, package, note, move || type_with(&d2, &lang));
 }
 
 /// Puts the language's engine into the input method group, so it types at once; said in the record either way.
@@ -333,6 +310,11 @@ fn menu_open(w: &gtk::Widget) -> bool {
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
+    // Started in a language whose input engine is not installed (the Windows setup leaves it to this): asked once now.
+    if let Some(package) = wb_core::input::missing(&d, wb_core::i18n::lang()) {
+        let (w, d2) = (win.clone(), d.clone());
+        glib::idle_add_local_once(move || offer_input(&w, &d2, wb_core::i18n::lang(), package));
+    }
     let (model, group) = make(win, &d);
     let bar = gtk::PopoverMenuBar::from_model(Some(&model));
     win.insert_action_group("m", Some(&group));
