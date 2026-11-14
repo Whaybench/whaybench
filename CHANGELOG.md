@@ -6,6 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-11-14
+
+Under WSL, 0.6.4 made a window flash and keys repeat while reading the Windows clipboard; this fixes it.
+
+### Fixed
+- Under WSL a window flashed up and keys repeated: reading the Windows clipboard with wl-paste showed a window of its
+  own for a moment (WSLg has no data-control), which took the keyboard and gave it back, and each return read again.
+  Under WSL the clipboard is now read from Windows through PowerShell; elsewhere the one-shot read waits 3 seconds
+  before it may run again.
+
 ## [0.6.4] - 2026-11-14
 
 Agents ask each other across conversations, Codex included, and Korean input and the Windows clipboard work under

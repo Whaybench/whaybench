@@ -28,6 +28,8 @@ pub struct Bridge {
     /// Where `wl-paste --watch` leaves each new desktop text.
     inbox: PathBuf,
     watcher: Option<Child>,
+    /// When the desktop's text was last read once (where it cannot be watched).
+    read_at: Mutex<Option<std::time::Instant>>,
 }
 
 impl Bridge {
@@ -39,7 +41,7 @@ impl Bridge {
             .arg(&inbox).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
             .map_err(|e| record::warn("clipboard", "desktop not reached", "install wl-clipboard", &[("error", e.to_string())]))
             .ok();
-        Bridge { last: Arc::default(), offered: None, pending: None, inbox, watcher }
+        Bridge { last: Arc::default(), offered: None, pending: None, inbox, watcher, read_at: Mutex::default() }
     }
 
     /// A new desktop text, if one came since the last look; one this side sent out is not taken back.
@@ -64,13 +66,20 @@ impl Bridge {
     /// arrives like a watched one, on the next tick.
     pub fn read_once(&self) {
         if self.watcher.is_some() { return; }
+        // Not again within seconds: a wl-paste without data-control shows a small window of its own to read, which
+        // takes the keyboard from this one and gives it back, and that return must not start the next read.
+        {
+            let mut at = self.read_at.lock().unwrap();
+            if at.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(3)) { return; }
+            *at = Some(std::time::Instant::now());
+        }
         let inbox = self.inbox.clone();
         std::thread::spawn(move || {
-            let Ok(out) = Command::new("wl-paste").args(["--no-newline", "--type", "text"]).stdin(Stdio::null()).stderr(Stdio::null()).output() else { return };
-            if !out.status.success() || out.stdout.is_empty() || out.stdout.len() as u64 > LIMIT { return; }
+            let Some(text) = desktop_text() else { return };
+            if text.is_empty() || text.len() as u64 > LIMIT { return; }
             // Its own name: a read on focus and one when the watch ends may run at once.
             let tmp = inbox.with_extension(format!("once.{:?}", std::thread::current().id()).replace(['(', ')'], ""));
-            if fs::write(&tmp, &out.stdout).is_ok() { let _ = fs::rename(tmp, inbox); }
+            if fs::write(&tmp, &text).is_ok() { let _ = fs::rename(tmp, inbox); }
         });
     }
 
@@ -106,6 +115,24 @@ impl Drop for Bridge {
     }
 }
 
+/// The desktop's text now. Under WSL, from Windows itself through PowerShell: a wl-paste there would show a window
+/// for a moment (WSLg has no data-control), take the keyboard and make keys repeat.
+fn desktop_text() -> Option<Vec<u8>> {
+    let wsl = std::path::Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists() || std::env::var_os("WSL_DISTRO_NAME").is_some();
+    let out = if wsl {
+        Command::new("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -Raw"])
+            .stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?
+    } else {
+        Command::new("wl-paste").args(["--no-newline", "--type", "text"]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?
+    };
+    if !out.status.success() { return None; }
+    if !wsl { return Some(out.stdout); }
+    // Windows ends lines with CR LF and Get-Clipboard adds one at the end.
+    let text = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+    Some(text.strip_suffix('\n').unwrap_or(&text).as_bytes().to_vec())
+}
+
 /// The text type to ask an app for, among the ones it offers.
 pub fn text_type(offered: &[String]) -> Option<String> {
     TEXT_TYPES.iter().find(|t| offered.iter().any(|o| o == *t)).map(|t| t.to_string())
@@ -128,7 +155,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let data = Data::new(dir.path().to_path_buf());
         fs::create_dir_all(data.cache()).unwrap();
-        let mut b = Bridge { last: Arc::default(), offered: None, pending: None, inbox: data.cache().join("c.txt"), watcher: None };
+        let mut b = Bridge { last: Arc::default(), offered: None, pending: None, inbox: data.cache().join("c.txt"), watcher: None, read_at: Mutex::default() };
         fs::write(&b.inbox, "desktop text").unwrap();
         assert!(b.from_desktop().is_some());
         assert_eq!(b.offered.as_deref(), Some("desktop text"));
