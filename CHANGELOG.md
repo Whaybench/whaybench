@@ -6,6 +6,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `whaybench ctl session wait ID [SECONDS]`: after `session type`, waits for that session's next answer and prints
+  it, so an agent asking another can wait in the background instead of looking again and again.
+- Agents are told at the start how to ask another conversation (`session type`) and wait for its answer
+  (`session wait`), for when the person asks them to involve it.
+
 ## [0.6.3] - 2026-11-14
 
 The map panel stops growing with every map change, and Codex is kept from overwriting what the person changed.

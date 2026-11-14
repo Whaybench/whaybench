@@ -143,6 +143,22 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             }
             post(data, &Request::FocusTerm { tab: tab.tab })
         }
+        // After `type`: waits for the session's next answer and prints it, so the asking agent can run this in the
+        // background and be told when the answer is there instead of looking again and again.
+        Some("wait") => {
+            let id = words.get(1).ok_or("session wait needs an id")?;
+            let limit = words.get(2).map(|s| s.parse::<u64>().map_err(|_| "session wait: SECONDS is a number")).transpose()?.unwrap_or(900);
+            let since = now_ms();
+            let answer = |id: &str| -> Option<serde_json::Value> {
+                let v: serde_json::Value = serde_json::from_slice(&fs::read(data.root.join("answers").join(format!("{}.json", sessions::current_id(data, id)))).ok()?).ok()?;
+                (v["at"].as_i64()? >= since).then_some(v)
+            };
+            for _ in 0..limit {
+                if let Some(v) = answer(id) { println!("{}", v["text"].as_str().unwrap_or("")); return Ok(()); }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            Err(format!("no answer from {id} within {limit} seconds"))
+        }
         Some("end") => {
             // A background session is stopped, one the tab runs gets /exit; then the tab goes.
             let id = words.get(1).ok_or("session end needs an id")?;

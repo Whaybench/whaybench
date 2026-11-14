@@ -81,6 +81,8 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
             parts.push(i18n::ai("map-note").to_string());
         }
         if a.inside { parts.push(i18n::ai(if name == "SessionStart" { "view-note" } else { "view-short" }).to_string()); }
+        // How to ask another conversation, told once: an agent knows of it only from here.
+        if a.inside && name == "SessionStart" { parts.push(i18n::ai("sessions-note").to_string()); }
         if let Some(c) = carried { parts.push(c); }
         // The relay saw /rewind typed: the map did not roll back with the conversation.
         if name == "UserPromptSubmit" && fs::remove_file(state_file(data, "rewound", sid)).is_ok() { parts.push(i18n::ai("rewind-note").to_string()); }

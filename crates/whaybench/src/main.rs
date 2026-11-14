@@ -25,7 +25,7 @@ whaybench record [--data-dir DIR] SESSION touch|state|alive|off|answer|moved|car
 whaybench hook [--data-dir DIR] claude|ID < EVENT.json    run by the agent's hooks
 whaybench mcp [--data-dir DIR]    the conversation map tool over MCP (stdio), for an agent in a Whaybench tab
 whaybench statusline [--data-dir DIR] < STATUS.json    a Claude Code status line: context and plan usage, kept for the notifications panel
-whaybench ctl [--data-dir DIR] session new [MAP-FROM] | show ID | type ID TEXT | end ID
+whaybench ctl [--data-dir DIR] session new [MAP-FROM] | show ID | type ID TEXT | wait ID [SECONDS] | end ID
 whaybench ctl [--data-dir DIR] quit
 whaybench ctl [--data-dir DIR] shot --out FILE.png [--panel N]    N: panel number, default the whole surface
 whaybench ctl [--data-dir DIR] theme NAME    default or a theme in addons/themes of the data directory
