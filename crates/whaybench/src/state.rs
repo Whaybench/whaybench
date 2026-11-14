@@ -26,7 +26,7 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
     },
 };
-use wb_core::{log as record, paths::Data, theme::{self, Theme}};
+use wb_core::{log as record, paths::{self, Data}, theme::{self, Theme}};
 
 use crate::{chrome::{Chrome, cut_name}, layout::{self, Edges, Guide, Metrics, Panel, Rect, SavedLayout, Side, Surface, Tab, Zone}, };
 
@@ -55,7 +55,7 @@ pub fn slot_of(app: &str) -> Option<&'static str> {
 }
 
 /// Apps whose window is a settings window, not a panel.
-const MODAL_APPS: [&str; 3] = ["dev.whaybench.theme", "dev.whaybench.mapstyle", "dev.whaybench.prefs"];
+const MODAL_APPS: [&str; 4] = ["dev.whaybench.theme", "dev.whaybench.mapstyle", "dev.whaybench.prefs", "dev.whaybench.inputset"];
 
 fn front_of_group(key: &str) -> bool { key.starts_with("dev.whaybench.sessions#") || key.starts_with("dev.whaybench.view#") }
 
@@ -86,6 +86,8 @@ pub struct App {
     pub zone: Option<Zone>,
     pub band: (Option<(u64, Side)>, Instant),
     pub chrome: Chrome,
+    /// The person's zoom of the title bars (Ctrl+wheel on one), over the theme's text size; in settings.json.
+    pub title_zoom: f64,
     pub solid_ids: Vec<(smithay::backend::renderer::element::Id, [f32; 4])>,
     /// The shaded boxes of the last frame, with how each looked (render::Frame).
     /// An app asked to the front before its window appeared, and when.
@@ -176,7 +178,9 @@ impl App {
         let mut surface = Surface::new(FIRST_WINDOW.0, FIRST_WINDOW.1);
         surface.m = Metrics { outer: theme.outer, gap: theme.gap, pad: theme.pad };
         record::decide("screen", "theme", "the chosen theme", &[("theme", theme.name.clone())]);
-        let chrome = Chrome::new(theme.title_size);
+        let title_zoom = title_zoom(&data);
+        layout::set_title(theme.title_size * title_zoom);
+        let chrome = Chrome::new(theme.title_size * title_zoom);
         Self {
             surface,
             theme,
@@ -189,6 +193,7 @@ impl App {
             windows: HashMap::new(), unmapped: Vec::new(), next_tab: 1,
             act: Act::Idle, pointer: (0.0, 0.0), hover: None, guides: Vec::new(), zone: None, band: (None, now),
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
+            title_zoom,
             shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
             compositor_state, xdg_shell_state, shm_state, dmabuf: None, gpu: None, output_manager_state, seat_state, data_device_state, clip,
@@ -424,18 +429,21 @@ impl App {
         let parent_panel = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i)).and_then(|i| self.surface.holding_tab(i)).map(|p| p.rect);
         let parent_modal = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i))
             .and_then(|i| self.surface.holding_tab(i)).is_some_and(|p| p.modal);
-        let pid = if modal {
+        // A dialog of a window that is not a panel (the menu bar, the status line) goes where a settings window goes.
+        let pid = if modal || (parent.is_some() && parent_panel.is_none()) {
             let pid = self.surface.new_pid();
             let (w, h) = ((self.surface.w - 80.0).clamp(layout::MIN_W, 760.0), (self.surface.h - 80.0).max(layout::MIN_H));
             let mut p = Panel::new(pid, tab, Rect::new(((self.surface.w - w) / 2.0).max(0.0), 40.0_f64.min(self.surface.h / 10.0), w, h));
             p.transient = true;
-            p.modal = true;
+            p.fitted = true;
+            p.modal = modal;
             self.surface.panels.push(p);
             pid
         } else if let Some(over) = parent_panel {
             let pid = self.surface.new_pid();
             let mut p = Panel::new(pid, tab, Rect::new(over.x + 40.0, over.y + 40.0, (over.w - 80.0).max(layout::MIN_W), (over.h - 80.0).max(layout::MIN_H)));
             p.transient = true;
+            p.fitted = true;
             // A dialog of a settings window is in front of it and takes the input until it closes.
             p.modal = parent_modal;
             self.surface.panels.push(p);
@@ -473,12 +481,12 @@ impl App {
                 }
             }
         };
-        let transient = parent_panel.is_some() || modal;
-        let r = self.surface.app_of(self.surface.get(pid).unwrap().rect);
+        let (fitted, rect) = self.surface.get(pid).map(|p| (p.fitted, p.rect)).unwrap();
+        let r = self.surface.app_of(rect);
         surface.with_pending_state(|s| {
             // A dialog or settings window takes the size its content wants, up to its place (the bounds: what is wider
             // would be cut off, buttons and all); a panel takes its place.
-            if transient { s.bounds = Some((r.w as i32, r.h as i32).into()); } else { s.size = Some((r.w as i32, r.h as i32).into()); }
+            if fitted { s.bounds = Some((r.w as i32, r.h as i32).into()); } else { s.size = Some((r.w as i32, r.h as i32).into()); }
             s.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
             // Tiled: apps leave out their own shadows and rounded corners.
             for t in [xdg_toplevel::State::TiledLeft, xdg_toplevel::State::TiledRight, xdg_toplevel::State::TiledTop, xdg_toplevel::State::TiledBottom] { s.states.set(t); }
@@ -489,7 +497,7 @@ impl App {
         let asked = self.focus_when_open.take_if(|(prefix, at)| key.starts_with(prefix.as_str()) && at.elapsed() < std::time::Duration::from_secs(30));
         if asked.is_some()
             && let Some(p) = self.surface.get_mut(pid) && let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; }
-        record::decide("screen", "panel opened", if transient { "a dialog with a parent" } else { "a new app" }, &[("panel", pid.to_string()), ("app", key)]);
+        record::decide("screen", "panel opened", if fitted { "a dialog or settings window, at its content's size" } else { "a new app" }, &[("panel", pid.to_string()), ("app", key)]);
         self.focus_panel(pid);
         self.save_due = true;
     }
@@ -564,14 +572,35 @@ impl App {
     pub fn note_saved_soon(&mut self) { self.save_due = true; }
 
     /// Takes a theme at once: panels keep their places and what they hold on to.
+    /// The title bars' text and height: the theme's size times the person's zoom.
+    fn apply_title(&mut self) {
+        let size = self.theme.title_size * self.title_zoom;
+        self.chrome.set_size(size);
+        layout::set_title(size);
+    }
+
+    /// Ctrl+wheel on a title bar: a tenth larger or smaller per notch, kept in settings.json.
+    pub fn zoom_title(&mut self, notches: f64) {
+        let z = ((self.title_zoom + notches * 0.1) * 10.0).round() / 10.0;
+        let z = z.clamp(0.7, 2.0);
+        if z == self.title_zoom { return; }
+        self.title_zoom = z;
+        self.apply_title();
+        let file = self.data.root.join("settings.json");
+        let mut all: serde_json::Map<String, serde_json::Value> = paths::read_kept(&file);
+        if z == 1.0 { all.remove("title_zoom"); } else { all.insert("title_zoom".into(), z.into()); }
+        if let Err(e) = paths::write_atomic(&file, serde_json::to_string_pretty(&serde_json::Value::Object(all)).unwrap_or_default()) { record::warn("screen", "title zoom not saved", &e.to_string(), &[]); }
+        self.save_due = true;
+    }
+
     pub fn set_theme(&mut self, name: &str) {
         let Some(t) = Theme::load(&self.data, name) else {
             record::warn("screen", "no theme", "no theme of that name", &[("theme", name.to_string())]);
             return;
         };
         self.surface.set_metrics(Metrics { outer: t.outer, gap: t.gap, pad: t.pad });
-        self.chrome.set_size(t.title_size);
         self.theme = t;
+        self.apply_title();
         if let Err(e) = theme::save_active(&self.data, name) { record::warn("screen", "theme not saved", &e.to_string(), &[]); }
         record::decide("screen", "theme", "requested", &[("theme", name.to_string())]);
         let _ = theme::write_terminal_config(&self.data);
@@ -588,8 +617,8 @@ impl App {
             // Open terminals read their settings file again when it changes.
             let _ = theme::write_terminal_config(&self.data);
             self.surface.set_metrics(Metrics { outer: now.outer, gap: now.gap, pad: now.pad });
-            self.chrome.set_size(now.title_size);
             self.theme = now;
+            self.apply_title();
             self.save_due = true;
         }
     }
@@ -602,7 +631,7 @@ impl App {
         self.update_hold();
         let pad = self.surface.m.pad;
         for p in &mut self.surface.panels {
-            if !p.transient { continue; }
+            if !p.fitted { continue; }
             if let Some(w) = self.windows.get(&p.tab().id) {
                 let g = w.geometry().size;
                 if g.w > 0 && g.h > 0 {
@@ -611,7 +640,7 @@ impl App {
                     // screen, it stays there at the size its content gives it, and where the person moved it, there.
                     if p.modal && (w - p.rect.w).abs() > 0.5 { p.rect.x = (p.rect.x + (p.rect.w - w) / 2.0).max(0.0); }
                     p.rect.w = w;
-                    p.rect.h = g.h as f64 + layout::TITLE + pad;
+                    p.rect.h = g.h as f64 + layout::title() + pad;
                 }
             }
         }
@@ -620,7 +649,7 @@ impl App {
             for t in &p.tabs {
                 let Some(w) = self.windows.get(&t.id) else { continue };
                 self.space.map_element(w.clone(), (a.x as i32, a.y as i32), false);
-                if !p.transient {
+                if !p.fitted {
                     let top = w.toplevel().unwrap();
                     top.with_pending_state(|s| s.size = Some((a.w as i32, a.h as i32).into()));
                     top.send_pending_configure();
@@ -710,4 +739,10 @@ impl TextInputActivation for App {}
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}
+
+/// The person's title bar zoom from settings.json, 1 when none.
+fn title_zoom(data: &Data) -> f64 {
+    let all: serde_json::Map<String, serde_json::Value> = paths::read_kept(&data.root.join("settings.json"));
+    all.get("title_zoom").and_then(serde_json::Value::as_f64).unwrap_or(1.0).clamp(0.7, 2.0)
 }

@@ -18,13 +18,17 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let sig = format!("{}{}", board, view.borrow().trash_open);
     if !force && view.borrow().shown == sig { return; }
     view.borrow_mut().shown = sig;
+    crate::common::keep_scroll(list, || rows(list, &board, &view.borrow()));
+}
+
+fn rows(list: &gtk::ListBox, board: &Value, view: &View) {
     // Rows only: an open right-click menu is the list's child too, and removing it loops forever.
     while let Some(r) = list.row_at_index(0) { list.remove(&r); }
     for (key, title) in SECTIONS {
         let items = board[key].as_array().cloned().unwrap_or_default();
         // An empty section is left out; with all of them empty one line says so.
         if items.is_empty() { continue; }
-        let closed = key == "trash" && !view.borrow().trash_open;
+        let closed = key == "trash" && !view.trash_open;
         let head = gtk::Label::new(Some(&format!("{}{} ({})", if key == "trash" { if closed { "▸ " } else { "▾ " } } else { "" }, t(title), items.len())));
         head.set_xalign(0.0);
         head.add_css_class("head");
@@ -274,31 +278,31 @@ fn history_tab(win: &gtk::ApplicationWindow, d: &Data) -> (gtk::Box, Rc<dyn Fn()
     page.append(&more);
     struct Hist { sig: String, rows: Vec<crate::history::Row>, shown: usize }
     let hist = Rc::new(RefCell::new(Hist { sig: String::new(), rows: Vec::new(), shown: HISTORY_STEP }));
-    let draw = { let (list, more, scroll, hist) = (list.clone(), more.clone(), scroll.clone(), hist.clone()); move || {
+    let draw = { let (list, more, hist) = (list.clone(), more.clone(), hist.clone()); move || {
         let h = hist.borrow();
-        let top = scroll.vadjustment().value();
-        while let Some(r) = list.row_at_index(0) { list.remove(&r); }
-        let mut day = "";
-        let add = |text: &str, class: Option<&str>, tip: &str, node: &str| {
-            let label = gtk::Label::new(Some(text));
-            // The row's node and its name, for the right-click menu.
-            label.set_widget_name(node);
-            label.set_xalign(0.0);
-            label.set_wrap(true);
-            label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            if let Some(c) = class { label.add_css_class(c); }
-            if !tip.is_empty() { label.set_tooltip_text(Some(tip)); }
-            list.append(&label);
-        };
-        if h.rows.is_empty() { add(t("notify-none"), Some("dim"), "", ""); }
-        for r in h.rows.iter().take(h.shown) {
-            if r.day != day { day = &r.day; add(day, Some("head"), "", ""); }
-            add(&r.line, None, &r.tip, &format!("{}\t{}", r.nid, r.label));
-        }
-        let left = h.rows.len().saturating_sub(h.shown);
-        more.set_visible(left > 0);
-        more.set_label(&wb_core::i18n::f("history-more", &[("n", left.min(HISTORY_STEP).to_string())]));
-        scroll.vadjustment().set_value(top);
+        crate::common::keep_scroll(&list, || {
+            while let Some(r) = list.row_at_index(0) { list.remove(&r); }
+            let mut day = "";
+            let add = |text: &str, class: Option<&str>, tip: &str, node: &str| {
+                let label = gtk::Label::new(Some(text));
+                // The row's node and its name, for the right-click menu.
+                label.set_widget_name(node);
+                label.set_xalign(0.0);
+                label.set_wrap(true);
+                label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+                if let Some(c) = class { label.add_css_class(c); }
+                if !tip.is_empty() { label.set_tooltip_text(Some(tip)); }
+                list.append(&label);
+            };
+            if h.rows.is_empty() { add(t("notify-none"), Some("dim"), "", ""); }
+            for r in h.rows.iter().take(h.shown) {
+                if r.day != day { day = &r.day; add(day, Some("head"), "", ""); }
+                add(&r.line, None, &r.tip, &format!("{}\t{}", r.nid, r.label));
+            }
+            let left = h.rows.len().saturating_sub(h.shown);
+            more.set_visible(left > 0);
+            more.set_label(&wb_core::i18n::f("history-more", &[("n", left.min(HISTORY_STEP).to_string())]));
+        });
     } };
     let draw: Rc<dyn Fn()> = Rc::new(draw);
     {

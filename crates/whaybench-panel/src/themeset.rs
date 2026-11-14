@@ -111,7 +111,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
 
     let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
     page.append(&holder);
-    let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_width(true).propagate_natural_height(true).max_content_height(640).child(&page).build();
+    let scroll = crate::common::page_scroll(&page);
     win.set_child(Some(&scroll));
 
     let shown: Rc<RefCell<(String, Vec<String>)>> = Rc::default();

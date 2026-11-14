@@ -7,15 +7,24 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Ctrl+wheel on a title bar makes all title bars larger or smaller (kept in settings.json `title_zoom`); the bar's
+  height follows its text. The default title text is 14 px (was 13).
+- Dialogs and settings windows open at their content's size and can be resized; once resized they keep that size.
+  A dialog opened from the menu bar (installing language support) now opens as a dialog, not as a big panel.
 - The install commands no longer name GTK 4 (`gtk4`, `libgtk-4-1`): WebKitGTK depends on it, so it comes along.
 - README: the install section names Windows and Linux side by side. The Windows section no longer says an agent
   cannot become root (programs in WSL can start Windows programs); it quotes the agents' own security guidance.
 
 ### Added
+- Settings → Input…: the input methods of fcitx5's current group (move up, remove, add), the switch keys, and each
+  method's own settings, drawn from the form fcitx5 describes for it.
 - A language add-on can say what it types with: `input` in `language.json` gives the keyboard layout and the
   fcitx5 engines with their packages (`addons/languages/README.md`). The Korean add-on declares `hangul`.
 - Choosing a language whose input engine is not installed offers to install it (PackageKit on a desktop, `wsl.exe` as
   root under WSL), then adds the engine to fcitx5's input method group so the language types at once.
+
+### Fixed
+- The notifications panel keeps its scroll place when its list changes: deleting a node jumped to the top.
 
 ## [0.6.5] - 2026-11-14
 

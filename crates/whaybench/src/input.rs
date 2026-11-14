@@ -11,7 +11,7 @@ use smithay::{
 };
 use wb_core::log as record;
 
-use crate::{layout::{How, TITLE}, render::{BarHit, bar_hit}, state::{Act, App}};
+use crate::{layout::{How, title}, render::{BarHit, bar_hit}, state::{Act, App}};
 
 
 /// The left mouse button: only it picks up panels.
@@ -61,6 +61,14 @@ impl App {
             }
             InputEvent::PointerAxis { event, .. } => {
                 let source = event.source();
+                // Ctrl+wheel on a title bar zooms the title bars, as Ctrl+wheel zooms a panel's content.
+                let (x, y) = self.pointer;
+                let ctrl = self.seat.get_keyboard().is_some_and(|k| k.modifier_state().ctrl);
+                if ctrl && self.surface.top_at(x, y).is_some_and(|p| p.rect.bar().contains(x, y)) {
+                    let v = event.amount_v120(Axis::Vertical).map(|v| v / 120.0).or_else(|| event.amount(Axis::Vertical).map(|v| v / 15.0)).unwrap_or(0.0);
+                    if v != 0.0 { self.zoom_title(-v.signum()); }
+                    return;
+                }
 
                 let horizontal_amount = event
                     .amount(Axis::Horizontal)
@@ -143,7 +151,7 @@ impl App {
             }
             Act::TabPull { pid, tab, x: sx, y: sy } => {
                 let (pid, tab, sx, sy) = (*pid, *tab, *sx, *sy);
-                if (y - sy).abs() > TITLE || (x - sx).abs() > 60.0 {
+                if (y - sy).abs() > title() || (x - sx).abs() > 60.0 {
                     if let Some(new) = self.surface.tear_out(pid, tab, x, y) {
                         record::decide("screen", "tab pulled out", "a tab dragged out of the title bar", &[("panel", new.to_string())]);
                         self.act = Act::Hold { pid: new, gx: 60.0, gy: 12.0 };

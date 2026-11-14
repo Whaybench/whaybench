@@ -11,6 +11,7 @@ mod mapfill;
 mod mapimport;
 mod mapstyles;
 mod mapstyleset;
+mod inputset;
 mod prefs;
 mod menu;
 mod notify;
@@ -46,6 +47,7 @@ fn main() -> glib::ExitCode {
         "theme" => ("dev.whaybench.theme", wb_core::i18n::t("themeset-title")),
         "mapstyle" => ("dev.whaybench.mapstyle", wb_core::i18n::t("mapstyleset-title")),
         "prefs" => ("dev.whaybench.prefs", wb_core::i18n::t("prefs-title")),
+        "inputset" => ("dev.whaybench.inputset", wb_core::i18n::t("inputset-title")),
         other => { eprintln!("whaybench-panel: unknown panel '{other}': map, sessions, input, answer, files, notify, view, status"); return glib::ExitCode::FAILURE; }
     };
     let title = title.to_string();
@@ -77,6 +79,7 @@ fn main() -> glib::ExitCode {
             "theme" => themeset::build(&win, data),
             "mapstyle" => mapstyleset::build(&win, data),
             "prefs" => prefs::build(&win, data),
+            "inputset" => inputset::build(&win, data),
             "view" => view::build(&win, data, args.get(1).cloned().unwrap_or_else(|| wb_core::view::FIRST_VIEW.to_string())),
             _ => status::build(&win, data),
         }

@@ -223,6 +223,13 @@ fn settings_menu(d: &Data, k: &Maker) -> gio::Menu {
             else { let _ = status::post(&d2, &json!({"cmd": "togglepanel", "key": "dev.whaybench.prefs", "command": panel_command("prefs")})); }
         });
     }
+    {
+        let d2 = d.clone();
+        k.add(&m, wb_core::i18n::t("inputset-open"), move || {
+            if open_keys(&d2).iter().any(|t| t.starts_with("dev.whaybench.inputset")) { status::focus_app(&d2, "dev.whaybench.inputset"); }
+            else { let _ = status::post(&d2, &json!({"cmd": "togglepanel", "key": "dev.whaybench.inputset", "command": panel_command("inputset")})); }
+        });
+    }
     // Under the theme: which language. The program's texts are read once, so a change applies after a restart.
     let languages = gio::Menu::new();
     let now = wb_core::i18n::lang().to_string();

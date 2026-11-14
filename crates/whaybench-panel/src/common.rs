@@ -251,11 +251,7 @@ pub fn confirm(win: &gtk::ApplicationWindow, text: &str, lines: &[String], ok: &
             line.set_xalign(0.0); line.set_wrap(true); line.set_wrap_mode(gtk::pango::WrapMode::WordChar); line.add_css_class("dim");
             list.append(&line);
         }
-        // As tall as its lines, up to a limit; the dialog takes the size of what it holds.
-        let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).max_content_height(400).build();
-        scroll.set_child(Some(&list));
-        scroll.set_vexpand(true);
-        body.append(&scroll);
+        body.append(&page_scroll(&list));
     }
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     row.set_halign(gtk::Align::End);
@@ -267,4 +263,20 @@ pub fn confirm(win: &gtk::ApplicationWindow, text: &str, lines: &[String], ok: &
     let w = dlg.clone();
     ok.connect_clicked(move |_| { w.close(); then(); });
     dlg.present();
+}
+
+/// What a dialog or settings window holds: as big as its content, up to a limit, then scrolled. The window opens
+/// at that size; when the person resizes it, the content takes the room it is given.
+pub fn page_scroll(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
+    gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_width(true).propagate_natural_height(true)
+        .max_content_height(640).vexpand(true).hexpand(true).child(child).build()
+}
+
+/// Rebuilds a scrolled list where the person had scrolled to. Left alone, GTK goes back to the top (the focused row
+/// goes with the old rows), so the place is set again now and once more when the new rows are laid out.
+pub fn keep_scroll(inside: &impl IsA<gtk::Widget>, rebuild: impl FnOnce()) {
+    let adj = inside.ancestor(gtk::ScrolledWindow::static_type()).and_downcast::<gtk::ScrolledWindow>().map(|s| s.vadjustment());
+    let top = adj.as_ref().map_or(0.0, |a| a.value());
+    rebuild();
+    if let Some(a) = adj { a.set_value(top); glib::idle_add_local_once(move || a.set_value(top)); }
 }

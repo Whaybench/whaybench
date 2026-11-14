@@ -4,7 +4,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-pub const TITLE: f64 = 28.0;
+/// The title bar's height, from its text size (`set_title`): 28 px for 13 px text. Read everywhere a panel is laid
+/// out, set by the compositor when the theme or the person's title zoom changes.
+static TITLE_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x403C_0000_0000_0000);
+pub fn title() -> f64 { f64::from_bits(TITLE_BITS.load(std::sync::atomic::Ordering::Relaxed)) }
+pub fn set_title(text: f64) { TITLE_BITS.store((text * 28.0 / 13.0).round().to_bits(), std::sync::atomic::Ordering::Relaxed); }
 pub const SNAP: f64 = 12.0;
 pub const GRIP: f64 = 7.0;
 pub const TOUCH: f64 = 2.0;
@@ -27,7 +31,7 @@ impl Rect {
     pub fn right(&self) -> f64 { self.x + self.w }
     pub fn bottom(&self) -> f64 { self.y + self.h }
     pub fn contains(&self, x: f64, y: f64) -> bool { x >= self.x && x < self.right() && y >= self.y && y < self.bottom() }
-    pub fn bar(&self) -> Rect { Rect::new(self.x, self.y, self.w, TITLE) }
+    pub fn bar(&self) -> Rect { Rect::new(self.x, self.y, self.w, title()) }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -41,8 +45,10 @@ pub struct Panel {
     pub rect: Rect,
     pub tx: f64,
     pub ty: f64,
-    /// A dialog: keeps the size its app wants and is not saved.
+    /// A dialog: floats over the panels and is not saved.
     pub transient: bool,
+    /// Takes the size its app wants (a dialog until the person resizes it); else it is given its rect.
+    pub fitted: bool,
     /// A settings window: in front of everything, the joint lines included, and the only one that takes input
     /// while it is open (implies transient).
     pub modal: bool,
@@ -54,15 +60,15 @@ pub struct Panel {
 enum Area { Bar, Band(Side) }
 
 fn target_area(r: Rect, x: f64, y: f64) -> Option<Area> {
-    if y <= r.y + TITLE { return Some(Area::Bar); }
-    let (bw, bh) = ((SIDE * r.w).min(SIDE_MAX), (SIDE * (r.h - TITLE)).min(SIDE_MAX));
-    [(Side::Left, x - r.x, bw), (Side::Right, r.right() - x, bw), (Side::Top, y - r.y - TITLE, bh), (Side::Bottom, r.bottom() - y, bh)]
+    if y <= r.y + title() { return Some(Area::Bar); }
+    let (bw, bh) = ((SIDE * r.w).min(SIDE_MAX), (SIDE * (r.h - title())).min(SIDE_MAX));
+    [(Side::Left, x - r.x, bw), (Side::Right, r.right() - x, bw), (Side::Top, y - r.y - title(), bh), (Side::Bottom, r.bottom() - y, bh)]
         .into_iter().filter(|s| s.1 <= s.2).min_by(|a, b| (a.1 / a.2).total_cmp(&(b.1 / b.2))).map(|s| Area::Band(s.0))
 }
 
 impl Panel {
     pub fn new(pid: u64, tab: Tab, rect: Rect) -> Self {
-        Panel { pid, tabs: vec![tab], active: 0, rect, tx: rect.x, ty: rect.y, transient: false, modal: false, saved_at: None }
+        Panel { pid, tabs: vec![tab], active: 0, rect, tx: rect.x, ty: rect.y, transient: false, fitted: false, modal: false, saved_at: None }
     }
     pub fn tab(&self) -> &Tab { &self.tabs[self.active.min(self.tabs.len() - 1)] }
     pub fn set_rect(&mut self, r: Rect) { self.rect = r; self.tx = r.x; self.ty = r.y; }
@@ -122,7 +128,7 @@ impl Surface {
     /// Where the app is in a panel: below the title bar, inside the frame.
     pub fn app_of(&self, r: Rect) -> Rect {
         let pad = self.m.pad;
-        Rect::new(r.x + pad, r.y + TITLE, (r.w - 2.0 * pad).max(1.0), (r.h - TITLE - pad).max(1.0))
+        Rect::new(r.x + pad, r.y + title(), (r.w - 2.0 * pad).max(1.0), (r.h - title() - pad).max(1.0))
     }
     pub fn new_pid(&mut self) -> u64 { let p = self.next_pid; self.next_pid += 1; p }
     pub fn index(&self, pid: u64) -> Option<usize> { self.panels.iter().position(|p| p.pid == pid) }
@@ -215,8 +221,6 @@ impl Surface {
     /// What the top panel at this point would resize: the 7px band inside its edges.
     pub fn edges_at(&self, x: f64, y: f64) -> Option<(u64, Edges)> {
         let p = self.top_at(x, y)?;
-        // A dialog or a settings window keeps the size its app wants.
-        if p.transient { return None; }
         let r = p.rect;
         let e = Edges {
             left: x - r.x <= GRIP, right: r.right() - x <= GRIP,
@@ -227,10 +231,11 @@ impl Surface {
 
     /// Panels whose border touches these edges: they move along.
     pub fn partners(&self, pid: u64, edges: Edges) -> Vec<(u64, Side)> {
-        let Some(r) = self.get(pid).map(|p| p.rect) else { return Vec::new() };
+        // A dialog resizes alone, and nothing moves it along.
+        let Some(r) = self.get(pid).filter(|p| !p.transient).map(|p| p.rect) else { return Vec::new() };
         let gap = self.m.gap;
         let mut found = Vec::new();
-        for o in self.panels.iter().filter(|o| o.pid != pid) {
+        for o in self.panels.iter().filter(|o| o.pid != pid && !o.transient) {
             let q = o.rect;
             let along_y = r.bottom().min(q.bottom()) - r.y.max(q.y) > 0.0;
             let along_x = r.right().min(q.right()) - r.x.max(q.x) > 0.0;
@@ -246,6 +251,8 @@ impl Surface {
     pub fn resize(&mut self, pid: u64, edges: Edges, partners: &[(u64, Side)], x: f64, y: f64) {
         let gap = self.m.gap;
         let Some(p) = self.get_mut(pid) else { return };
+        // Resized by the person: from now on it keeps this size, not its app's.
+        p.fitted = false;
         let mut r = p.rect;
         if edges.right { r.w = (x - r.x).max(MIN_W); }
         if edges.left { let right = r.right(); r.x = x.min(right - MIN_W); r.w = right - r.x; }
@@ -522,7 +529,7 @@ impl Surface {
         let (w, h) = (self.w, self.h);
         if let Some(p) = self.get_mut(pid) {
             p.tx = p.tx.clamp(40.0 - p.rect.w, (w - 40.0).max(40.0 - p.rect.w));
-            p.ty = p.ty.clamp(0.0, (h - TITLE).max(0.0));
+            p.ty = p.ty.clamp(0.0, (h - title()).max(0.0));
         }
     }
 
@@ -702,6 +709,19 @@ mod tests {
         assert_eq!(order, [2, 1, 3], "held, then free, then the settings window");
         s.raise(s.panels[0].pid);
         assert_eq!(s.panels.iter().map(|p| p.tabs[0].id).collect::<Vec<_>>(), [2, 1, 3], "raising a held panel keeps it under the free one");
+    }
+    #[test]
+    fn a_dialog_resized_by_the_person_keeps_its_size_and_moves_no_neighbour() {
+        // A panel, and a dialog over it whose left edge touches the panel's right edge.
+        let mut s = surface(&[Rect::new(0.0, 0.0, 700.0, 900.0), Rect::new(708.0, 100.0, 300.0, 200.0)]);
+        (s.panels[1].transient, s.panels[1].fitted) = (true, true);
+        let pid = s.panels[1].pid;
+        let edges = s.edges_at(1007.0, 150.0).map(|(p, e)| (p, e.right)).unwrap();
+        assert_eq!(edges, (pid, true), "a dialog's edge can be taken");
+        assert!(s.partners(pid, Edges { left: true, ..Default::default() }).is_empty(), "nothing moves with a dialog");
+        s.resize(pid, Edges { right: true, ..Default::default() }, &[], 1200.0, 150.0);
+        assert!(!s.panels[1].fitted && s.panels[1].rect.w > 300.0, "its size is the person's now");
+        assert_eq!(s.panels[0].rect.w, 700.0);
     }
     const LONG: Duration = Duration::from_secs(1);
 

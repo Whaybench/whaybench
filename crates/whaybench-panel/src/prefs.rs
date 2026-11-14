@@ -59,7 +59,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     { let d = d.clone(); input.connect_selected_notify(move |b| save(&d, "input_method", (b.selected() == 1).then(|| json!("host")))); }
     add(t("prefs-input"), t("prefs-input-hint"), input.upcast());
 
-    let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_width(true).propagate_natural_height(true).max_content_height(640).child(&grid).build();
+    let scroll = crate::common::page_scroll(&grid);
     win.set_child(Some(&scroll));
 }
 

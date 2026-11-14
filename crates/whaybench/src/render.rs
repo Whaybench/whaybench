@@ -26,7 +26,7 @@ use smithay::{
 };
 use wb_core::{log as record, theme::premultiplied};
 
-use crate::{App, ctl, layout::{Guide, How, Line, Panel, Rect, Side, TITLE}, state::{Act, FIRST_WINDOW}, };
+use crate::{App, ctl, layout::{Guide, How, Line, Panel, Rect, Side, title}, state::{Act, FIRST_WINDOW}, };
 
 render_elements! {
     pub PanelElement<=GlesRenderer>;
@@ -144,7 +144,7 @@ fn tab_rects(state: &mut App, p: &Panel) -> Vec<Rect> {
         let w = state.chrome.width(&t.name) + 22.0 + TAB_CLOSE;
         let w = w.min(limit - x);
         if w < 24.0 { break; }
-        out.push(Rect::new(x, p.rect.y + 3.0, w, TITLE - 6.0));
+        out.push(Rect::new(x, p.rect.y + 3.0, w, title() - 6.0));
         x += w + 4.0;
     }
     out
@@ -243,7 +243,7 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
     let app = state.surface.app_of(p.rect);
     if carried.contains(&p.pid) { f.card(shaders, p.rect, Card::plain(radius, CARRIED)); }
     if p.tabs.len() == 1 {
-        add_text(state, renderer, &mut f.out, "×", t.ink, Rect::new(p.rect.right() - CLOSE, p.rect.y, CLOSE, TITLE));
+        add_text(state, renderer, &mut f.out, "×", t.ink, Rect::new(p.rect.right() - CLOSE, p.rect.y, CLOSE, title()));
     }
     if p.tabs.len() > 1 {
         let rects = tab_rects(state, p);
@@ -257,13 +257,13 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
         // The name at the bar's left; its width only as far as the close button.
         let wide = state.chrome.width(&p.tab().name) + 2.0;
         let left = 8.0 + (radius / 2.0).max(0.0);
-        let area = Rect::new(p.rect.x + left, p.rect.y, wide.min((p.rect.w - CLOSE - left - 6.0).max(1.0)), TITLE);
+        let area = Rect::new(p.rect.x + left, p.rect.y, wide.min((p.rect.w - CLOSE - left - 6.0).max(1.0)), title());
         add_text(state, renderer, &mut f.out, &p.tab().name.clone(), if front { t.ink } else { t.ink_soft }, area);
     }
     f.out.extend(app_elements(state, p, renderer, app));
     f.solid(app, premultiplied(t.panel));
     f.card(shaders, p.rect, Card {
-        radius, border: t.border_width, bar: TITLE, margin: if own_shadow { t.shadow_size } else { 0.0 },
+        radius, border: t.border_width, bar: title(), margin: if own_shadow { t.shadow_size } else { 0.0 },
         fill: premultiplied(t.panel),
         top: premultiplied(if front { t.front_top } else { t.bar_top }),
         bottom: premultiplied(if front { t.front_bottom } else { t.bar_bottom }),
