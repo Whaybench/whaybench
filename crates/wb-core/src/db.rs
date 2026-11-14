@@ -61,6 +61,17 @@ pub fn open(data: &Path) -> Result<Connection> {
                 && e.downcast_ref::<rusqlite::Error>().is_some_and(|e| e.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)) => {
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
+            // An agent's sandbox (Codex) lets it read the data folder but not make files there: SQLite cannot make the
+            // files it reads WAL with, and refuses even to read. Read as it is on disk then, read only; what was written
+            // in the last moments and not yet moved into the file may be missing, and writes are refused.
+            Err(e) if e.downcast_ref::<rusqlite::Error>().is_some_and(|e| e.sqlite_error_code() == Some(rusqlite::ErrorCode::CannotOpen)) => {
+                let path = data.join("memory").join("memory.db");
+                if !path.exists() { return Err(e); }
+                // A URI: the characters it gives a meaning to are escaped in the path.
+                let escaped = path.display().to_string().replace('%', "%25").replace('?', "%3f").replace('#', "%23");
+                let uri = format!("file:{escaped}?immutable=1");
+                return Ok(Connection::open_with_flags(uri, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI)?);
+            }
             other => return other,
         }
     }

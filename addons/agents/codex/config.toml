@@ -11,7 +11,8 @@ env_vars = ["WHAYBENCH_TAB"]
 approval_mode = "approve"
 
 # Whaybench's commands write their requests in these folders of the data folder: whaybench-view in view and show,
-# whaybench-project in projects, whaybench-files in node-files. Only these: the rest (Codex's own settings, the
+# whaybench-project in projects, whaybench-files in node-files, whaybench ctl session type in ask (Whaybench checks and
+# delivers it: the tabs' input itself stays out of reach). Only these: the rest (Codex's own settings, the
 # add-ons, the other tabs' input) stays out of reach, or Codex could undo its own sandbox.
 [sandbox_workspace_write]
-writable_roots = ["{data}/view", "{data}/show", "{data}/projects", "{data}/node-files"]
+writable_roots = ["{data}/view", "{data}/show", "{data}/projects", "{data}/node-files", "{data}/ask"]

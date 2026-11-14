@@ -8,11 +8,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 - `whaybench ctl session wait ID [SECONDS]`: after `session type`, waits for that session's next answer and prints
-  it, so an agent asking another can wait in the background instead of looking again and again.
+  it, so an agent asking another can wait in the background instead of looking again and again. It ends early when
+  that session stops to ask the person (a permission or an input), and says so.
+- Codex can ask another conversation too: from inside its sandbox, `session type` leaves a request in the data
+  folder's `ask/`, and Whaybench, outside the sandbox, checks it (marked as from another conversation, no / command or
+  ! line) and types it in. The other tabs' input stays out of Codex's reach.
+- Agents are asked to keep an exchange between conversations to a few rounds and to come back to the person when it
+  is answered or the way on is unclear.
 - Agents are told at the start how to ask another conversation (`session type`) and wait for its answer
   (`session wait`), for when the person asks them to involve it.
 
 ### Fixed
+- `whaybench memory show` and the other memory commands work inside Codex's sandbox: SQLite could not make the
+  files it reads a WAL database with in the read-only data folder ("unable to open database file"); it now reads the
+  file as it is on disk, read only.
 - Text copied in Windows pastes into the input panel and every other panel, not only the terminal: WSLg cannot be
   watched for clipboard changes (no data-control), so the desktop's text is read when the Whaybench window gets the
   keyboard back.
