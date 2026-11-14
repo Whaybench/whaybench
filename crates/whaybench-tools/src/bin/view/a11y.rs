@@ -103,11 +103,10 @@ pub fn read_text(d: &Data, all: bool) -> Result<Value, String> {
     collect(&bus, &doc, 0, &mut f);
     let title = bus.prop(&doc, ACC, "Name").and_then(|v| v.str().map(String::from)).unwrap_or_default();
     let mut out = json!({"url": url, "title": title, "selected": f.selected, "text": f.texts.iter().filter(|(_, shown)| *shown).map(|(t, _)| t).collect::<Vec<_>>()});
-    if pdf {
-        if let Some(page) = f.entries.first() {
+    if pdf
+        && let Some(page) = f.entries.first() {
             out["page"] = json!(page);
             out["pages"] = json!(f.texts.iter().find(|(t, _)| t.starts_with("/ ") || t.starts_with("of ")).and_then(|(t, _)| t.trim_start_matches(['/', ' ']).split_whitespace().last()).unwrap_or(""));
         }
-    }
     Ok(out)
 }

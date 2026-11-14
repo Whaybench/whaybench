@@ -1,5 +1,5 @@
 //! Project documents: read, check out, put back, and the before and after of a recorded change.
-use std::{fs, path::PathBuf};
+use std::{fs, path::{Path, PathBuf}};
 
 use serde_json::{Value, json};
 
@@ -15,7 +15,7 @@ impl Store {
         self.pdir(pid).join("work").join(if session.is_empty() { "user" } else { session }).join(format!("{did}.md"))
     }
 
-    fn base_path(work: &PathBuf) -> PathBuf {
+    fn base_path(work: &Path) -> PathBuf {
         let mut o = work.as_os_str().to_os_string();
         o.push(".base");
         o.into()

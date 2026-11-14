@@ -10,6 +10,13 @@ license = "Apache-2.0"
 repository = "https://github.com/whaybench/whaybench"
 description = "A desktop workspace for working with a coding agent: conversation map, sessions, answers and views as panels on one surface"
 
+[workspace.lints.clippy]
+# Style the code keeps on purpose: tuples and closures named where they are used, and wide drawing functions.
+type_complexity = "allow"
+too_many_arguments = "allow"
+# `from_desktop` takes what the desktop's clipboard holds into this one; it is not a constructor.
+wrong_self_convention = "allow"
+
 [workspace.dependencies]
 wb-core = { path = "crates/wb-core" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

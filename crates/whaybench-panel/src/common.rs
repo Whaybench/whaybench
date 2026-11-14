@@ -136,9 +136,8 @@ pub fn follow_theme(d: &Data) {
             let want = if dark { "dark" } else { "light" };
             if let Some(class) = s.find_property(SCHEME).and_then(|p| glib::EnumClass::with_type(p.value_type())) {
                 let now = s.property_value(SCHEME);
-                if glib::EnumValue::from_value(&now).map(|(_, v)| v.nick()) != Some(want) {
-                    if let Some(v) = class.to_value_by_nick(want) { s.set_property_from_value(SCHEME, &v); }
-                }
+                if glib::EnumValue::from_value(&now).map(|(_, v)| v.nick()) != Some(want)
+                    && let Some(v) = class.to_value_by_nick(want) { s.set_property_from_value(SCHEME, &v); }
             }
             // The desktop's settings.ini may still ask for the dark look the old way; both have to agree, or GTK's own
             // parts (a menu now and then) come out dark.
@@ -205,18 +204,6 @@ pub fn every(ms: u64, mut f: impl FnMut() + 'static) {
     glib::timeout_add_local(Duration::from_millis(ms), move || { f(); glib::ControlFlow::Continue });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn pipes_in_code_stay_in_their_cell() {
-        assert_eq!(table_pipes("| `a [b | c]` | d |"), "| `a [b \\| c]` | d |");
-        assert_eq!(table_pipes("| a | b |"), "| a | b |");
-        assert_eq!(table_pipes("text `a | b`"), "text `a | b`", "only in a table");
-        assert_eq!(table_pipes("| `a \\| b` |"), "| `a \\| b` |", "already escaped");
-    }
-}
-
 /// WebKit's own right-click menu in the program's language: its Korean leaves Back, Forward and Stop in English.
 pub fn web_menu_in_language(web: &webkit6::WebView) {
     use webkit6::{ContextMenuAction as A, ContextMenuItem, prelude::*};
@@ -234,4 +221,16 @@ pub fn web_menu_in_language(web: &webkit6::WebView) {
         }
         false
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn pipes_in_code_stay_in_their_cell() {
+        assert_eq!(table_pipes("| `a [b | c]` | d |"), "| `a [b \\| c]` | d |");
+        assert_eq!(table_pipes("| a | b |"), "| a | b |");
+        assert_eq!(table_pipes("text `a | b`"), "text `a | b`", "only in a table");
+        assert_eq!(table_pipes("| `a \\| b` |"), "| `a \\| b` |", "already escaped");
+    }
 }

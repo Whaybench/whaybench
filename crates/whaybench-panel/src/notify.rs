@@ -155,7 +155,7 @@ fn confirm_purge(win: &gtk::ApplicationWindow, d: &Data, nid: &str, then: impl F
     confirm(win, &wb_core::i18n::f("purge-confirm", &[("a1", label), ("n", n.to_string())]), &lines, move || {
         // A node not deleted yet is deleted first (alone: what is under it moves up), then it goes for good.
         let deleted = memory::show(&d2.root, &n2)["nodes"][0]["state"] == "removed";
-        if !deleted { if let Err(e) = wb_core::map::trash(&d2.root, &n2, false) { say_error(&d2, e); } }
+        if !deleted && let Err(e) = wb_core::map::trash(&d2.root, &n2, false) { say_error(&d2, e); }
         purge(&d2, std::slice::from_ref(&n2));
         then();
     });

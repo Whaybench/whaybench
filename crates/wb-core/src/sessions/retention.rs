@@ -46,9 +46,8 @@ pub fn prune(d: &Data) -> usize {
     // shortcut: `keep_mb` counts conversation records only; count the store's events in it if they grow large.
     if days > 0 && d.root.join("memory").join("memory.db").exists() {
         let before = (chrono::Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
-        if let Ok(n) = crate::db::open(&d.root).and_then(|c| crate::db::events_drop_before(&c, &before)) {
-            if n > 0 { record::decide("memory", "old events dropped", "over the keeping limit", &[("events", n.to_string())]); }
-        }
+        if let Ok(n) = crate::db::open(&d.root).and_then(|c| crate::db::events_drop_before(&c, &before))
+            && n > 0 { record::decide("memory", "old events dropped", "over the keeping limit", &[("events", n.to_string())]); }
     }
     let all = all(d);
     // Each conversation is its last number with the numbers that moved on into it; most recently active first.
@@ -116,7 +115,7 @@ pub fn save_lost_maps(d: &Data) -> usize {
             saved += 1;
         }
     }
-    if saved > 0 { let _ = write_atomic(&file, &Value::from(done).to_string()); }
+    if saved > 0 { let _ = write_atomic(&file, Value::from(done).to_string()); }
     saved
 }
 

@@ -46,7 +46,7 @@ pub fn diff_objs(kind: &str, old: &Map<String, Value>, new: &Map<String, Value>)
     let mut out = Vec::new();
     for k in old.keys().chain(new.keys().filter(|k| !old.contains_key(*k))) {
         let (a, b) = (old.get(k), new.get(k));
-        if let (Some(x), Some(y)) = (a, b) { if plain(x) == plain(y) { continue; } }
+        if let (Some(x), Some(y)) = (a, b) && plain(x) == plain(y) { continue; }
         let op = if a.is_none() { "add" } else if b.is_none() { "remove" } else { "update" };
         out.push(json!({"kind": kind, "id": k, "op": op, "before": a, "after": b}));
     }

@@ -9,10 +9,10 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # The packages' .deb files are kept in GitHub's cache (saved only when the job succeeds), so a slow or broken
       # Ubuntu mirror costs one download, not every run. One list for CI and Release: a tag finds what main stored.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/apt-debs
           key: apt-debs-${{ hashFiles('.github/apt-packages.txt') }}
@@ -22,7 +22,22 @@ jobs:
           get() { sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=3 -o Dir::Cache::Archives="$HOME/apt-debs" $(cat .github/apt-packages.txt); }
           get || { sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|' /etc/apt/apt-mirrors.txt; get; }
           sudo chown -R "$USER" ~/apt-debs
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy
       - run: tools/fetch-smithay.sh
-      - uses: Swatinem/rust-cache@v2.9.3
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --workspace --locked
+      # A warning fails the run; the style kept on purpose is allowed in Cargo.toml ([workspace.lints.clippy]).
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # Known vulnerabilities, licences and sources of the dependencies (deny.toml).
+  deny:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # The workspace names smithay by path: its manifest must be there for the dependency graph.
+      - run: tools/fetch-smithay.sh
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check

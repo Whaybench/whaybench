@@ -269,9 +269,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         std::thread::spawn(move || {
             let look = |at_start: bool| {
                 wb_core::update::check(&d2, at_start);
-                if let Some(v) = wb_core::update::newer(&d2).filter(|_| wb_core::update::automatic(&d2)) {
-                    if let Err(e) = wb_core::update::fetch(&d2, &v) { wb_core::log::warn("update", "not fetched", &e, &[]); }
-                }
+                if let Some(v) = wb_core::update::newer(&d2).filter(|_| wb_core::update::automatic(&d2))
+                    && let Err(e) = wb_core::update::fetch(&d2, &v) { wb_core::log::warn("update", "not fetched", &e, &[]); }
             };
             look(true);
             loop { std::thread::sleep(std::time::Duration::from_secs(3600)); look(false); }

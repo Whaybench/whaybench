@@ -235,9 +235,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                         save(&d, &p.history);
                         p.related = None;
                     }
-                    if p.related.is_none() {
-                        if let Some(i) = p.history.iter().position(|r| same(r, at, sid)) { p.pos = i; }
-                    }
+                    if p.related.is_none()
+                        && let Some(i) = p.history.iter().position(|r| same(r, at, sid)) { p.pos = i; }
                     changed = true;
                 }
             }

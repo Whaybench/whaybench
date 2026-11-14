@@ -12,7 +12,7 @@ pub fn status_file(d: &Data) -> PathBuf { d.cache().join("status.json") }
 
 /// A system message in the status line for `seconds`.
 pub fn say(d: &Data, text: &str, seconds: u64) {
-    let _ = write(&status_file(d), &json!({"text": text, "until": now_ms() + seconds as u128 * 1000}).to_string());
+    let _ = write(&status_file(d), json!({"text": text, "until": now_ms() + seconds as u128 * 1000}).to_string());
 }
 
 /// The message to show now, if any.
@@ -26,7 +26,7 @@ pub fn post(d: &Data, request: &serde_json::Value) -> std::io::Result<()> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static N: AtomicU32 = AtomicU32::new(0);
     let name = format!("{}-{}-{}.json", now_ms(), std::process::id(), N.fetch_add(1, Ordering::Relaxed));
-    write(&d.ctl().join(name), &request.to_string())
+    write(&d.ctl().join(name), request.to_string())
 }
 
 /// Asks the compositor to bring the panel of this app to the front.
@@ -44,7 +44,7 @@ pub fn new_version_waiting(d: &Data) -> bool {
 fn is_replaced(exe: &str) -> bool { exe.ends_with(" (deleted)") }
 
 /// A message from one panel to another: the file holds the latest; the receiver takes it and removes it.
-pub fn send(d: &Data, to: &str, v: serde_json::Value) { let _ = write(&d.cache().join("panels").join(format!("{to}.json")), &v.to_string()); }
+pub fn send(d: &Data, to: &str, v: serde_json::Value) { let _ = write(&d.cache().join("panels").join(format!("{to}.json")), v.to_string()); }
 
 pub fn take(d: &Data, me: &str) -> Option<serde_json::Value> {
     let p = d.cache().join("panels").join(format!("{me}.json"));

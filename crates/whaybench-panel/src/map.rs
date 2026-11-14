@@ -632,7 +632,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
     let tidy = gtk::Button::with_label(wb_core::i18n::t("tidy"));
     tidy.set_tooltip_text(Some(&wb_core::i18n::f("rebuild-the-map-from-the-whole", &[("a1", (if scope.is_some() { wb_core::i18n::t("branch-only") } else { "" }).to_string())])));
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    for m in [4] { bar.set_margin_start(m); bar.set_margin_end(m); bar.set_margin_top(m); bar.set_margin_bottom(2); }
+    {
+    let m = 4; bar.set_margin_start(m); bar.set_margin_end(m); bar.set_margin_top(m); bar.set_margin_bottom(2); }
     bar.append(&extra);
     bar.append(&tidy);
     if imported_of(scope.as_ref()).is_some() {

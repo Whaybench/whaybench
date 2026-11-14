@@ -38,7 +38,7 @@ pub fn touch(data: &Path, sid: &str, t: Touch) -> Result<Value> {
     }
     if let Some(a) = t.agent { r["agent"] = json!(a); }
     for k in ["agent", "movedTo", "lastCompletedTurn"] {
-        if r.get(k).is_none() { if let Some(v) = keep(k) { r[k] = v; } }
+        if r.get(k).is_none() && let Some(v) = keep(k) { r[k] = v; }
     }
     // A record that says it moved to itself is hidden from its own tab and every list: an active session has not moved.
     if r["movedTo"] == sid { r.as_object_mut().unwrap().shift_remove("movedTo"); }

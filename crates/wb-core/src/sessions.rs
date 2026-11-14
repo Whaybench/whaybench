@@ -174,18 +174,16 @@ pub fn adopt(d: &Data, old: &str, new: &str) {
     let Some(mut from) = record_of(d, old) else { return };
     let mut to = record_of(d, new).unwrap_or_else(|| serde_json::json!({"id": new}));
     for key in ["cwd", "firstPrompt", "lastPrompt", "tab"] {
-        if to.get(key).and_then(Value::as_str).is_none_or(str::is_empty) {
-            if let Some(v) = from.get(key) { to[key] = v.clone(); }
-        }
+        if to.get(key).and_then(Value::as_str).is_none_or(str::is_empty)
+            && let Some(v) = from.get(key) { to[key] = v.clone(); }
     }
-    if to.get("lastActive").and_then(Value::as_i64).unwrap_or(0) == 0 {
-        if let Some(v) = from.get("lastActive") { to["lastActive"] = v.clone(); }
-    }
-    let _ = write_atomic(&sessions_dir(d).join(format!("{new}.json")), &to.to_string());
+    if to.get("lastActive").and_then(Value::as_i64).unwrap_or(0) == 0
+        && let Some(v) = from.get("lastActive") { to["lastActive"] = v.clone(); }
+    let _ = write_atomic(&sessions_dir(d).join(format!("{new}.json")), to.to_string());
     let (map_old, map_new) = (d.root.join(format!("{old}.json")), d.root.join(format!("{new}.json")));
     if map_old.exists() && !map_new.exists() { let _ = fs::copy(map_old, map_new); }
     from["movedTo"] = Value::String(new.to_string());
-    let _ = write_atomic(&sessions_dir(d).join(format!("{old}.json")), &from.to_string());
+    let _ = write_atomic(&sessions_dir(d).join(format!("{old}.json")), from.to_string());
     mark_off(d, old);
     record::decide("session", "number change seen", "the old transcript's continuedInSessionId points to it and that session runs", &[("old", old.to_string()), ("new", new.to_string()), ("source", "continuedIn".into())]);
 }
@@ -212,7 +210,7 @@ pub fn locate(d: &Data, id: &str) -> String {
 pub fn moved_back(d: &Data, id: &str) {
     let Some(mut r) = record_of(d, id) else { return };
     if r.as_object_mut().and_then(|o| o.remove("movedTo")).is_some() {
-        let _ = write_atomic(&sessions_dir(d).join(format!("{id}.json")), &r.to_string());
+        let _ = write_atomic(&sessions_dir(d).join(format!("{id}.json")), r.to_string());
     }
 }
 
@@ -252,9 +250,8 @@ fn fresh(at: SystemTime) -> bool { SystemTime::now().duration_since(at).is_ok_an
 pub fn agents() -> Vec<Value> {
     if crate::agents::other() { return Vec::new(); }
     let mut g = AGENTS.lock().unwrap();
-    if let Some((at, list)) = g.as_ref() {
-        if at.elapsed() < Duration::from_secs(3) { return list.clone(); }
-    }
+    if let Some((at, list)) = g.as_ref()
+        && at.elapsed() < Duration::from_secs(3) { return list.clone(); }
     let shared = shared_agents();
     let kept = shared.as_ref().filter(|f| fs::metadata(f).and_then(|m| m.modified()).is_ok_and(fresh))
         .and_then(|f| serde_json::from_str::<Vec<Value>>(&fs::read_to_string(f).ok()?).ok());
@@ -309,10 +306,10 @@ pub fn mark_ended(d: &Data, id: &str) {
     let p = sessions_dir(d).join(format!("{id}.json"));
     if let Some(mut r) = read_json(&p) {
         r["ended"] = Value::Bool(true);
-        let _ = write_atomic(&p, &r.to_string());
+        let _ = write_atomic(&p, r.to_string());
     }
     let at = SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_millis() as u64).unwrap_or(0);
-    let _ = write_atomic(&state_dir(d).join(format!("{id}.json")), &serde_json::json!({"state":"done","note":"ended","at":at}).to_string());
+    let _ = write_atomic(&state_dir(d).join(format!("{id}.json")), serde_json::json!({"state":"done","note":"ended","at":at}).to_string());
 }
 
 pub fn stop(id: &str) {
@@ -335,7 +332,7 @@ pub fn unend(d: &Data, id: &str) {
     let p = sessions_dir(d).join(format!("{id}.json"));
     if let Some(mut r) = read_json(&p) {
         r["ended"] = Value::Bool(false);
-        let _ = write_atomic(&p, &r.to_string());
+        let _ = write_atomic(&p, r.to_string());
     }
 }
 
@@ -351,7 +348,7 @@ pub fn latest(d: &Data) -> Option<String> { Some(current_id(d, read_json(&latest
 pub fn set_focus_empty(d: &Data, who: &str) {
     if read_json(&focus_file(d)).is_some_and(|v| v["sessionId"].is_null()) { return; }
     record::decide("session", "session chosen", "a tab without a session in front", &[("session", String::new()), ("by", who.to_string())]);
-    let _ = write_atomic(&focus_file(d), &serde_json::json!({"sessionId": null}).to_string());
+    let _ = write_atomic(&focus_file(d), serde_json::json!({"sessionId": null}).to_string());
 }
 
 /// Whether the tab in front has no session yet (set_focus_empty).
@@ -361,7 +358,7 @@ pub fn set_focus(d: &Data, id: &str, who: &str) {
     let before = read_json(&focus_file(d)).and_then(|v| v.get("sessionId").and_then(Value::as_str).map(String::from)).unwrap_or_default();
     if before == id { return; }
     record::decide("session", "session chosen", "the session of the tab in front", &[("session", id.to_string()), ("by", who.to_string()), ("before", before)]);
-    let _ = write_atomic(&focus_file(d), &serde_json::json!({"sessionId": id}).to_string());
+    let _ = write_atomic(&focus_file(d), serde_json::json!({"sessionId": id}).to_string());
 }
 
 pub fn latest_map(d: &Data) -> PathBuf { d.root.join("latest.json") }

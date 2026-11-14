@@ -21,9 +21,8 @@ fn link_commands() {
         if !target.exists() { continue; }
         let ours = std::fs::symlink_metadata(&link).is_ok_and(|m| m.file_type().is_symlink());
         if ours { let _ = std::fs::remove_file(&link); }
-        if ours || !link.exists() {
-            if let Err(e) = std::os::unix::fs::symlink(&target, &link) { record::warn("run", "command not linked", &e.to_string(), &[("command", name.to_string())]); }
-        }
+        if (ours || !link.exists())
+            && let Err(e) = std::os::unix::fs::symlink(&target, &link) { record::warn("run", "command not linked", &e.to_string(), &[("command", name.to_string())]); }
     }
 }
 
@@ -185,7 +184,7 @@ pub fn reap_apps() {
                 }
             } else {
                 record::error("screen", "panel left closed", &fields);
-                wb_core::status::say(&p.data, &wb_core::i18n::t("panel-left-closed"), 10);
+                wb_core::status::say(&p.data, wb_core::i18n::t("panel-left-closed"), 10);
             }
             false
         }

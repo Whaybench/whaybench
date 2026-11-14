@@ -19,3 +19,6 @@ path = "src/bin/view.rs"
 [[bin]]
 name = "whaybench-files"
 path = "src/bin/files.rs"
+
+[lints]
+workspace = true

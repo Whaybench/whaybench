@@ -45,7 +45,7 @@ pub fn clean_answer(text: &str, need: &[(String, Vec<String>)]) -> Option<Vec<Va
     Some(items.into_iter().filter(|i| wanted.iter().any(|w| w.as_str() == s(i, "id"))).map(|i| {
         let mut out = json!({"id": s(&i, "id")});
         for (f, ids) in need {
-            if ids.iter().any(|x| x == s(&i, "id")) { if let Some(v) = i.get(f) { out[f] = v.clone(); } }
+            if ids.iter().any(|x| x == s(&i, "id")) && let Some(v) = i.get(f) { out[f] = v.clone(); }
         }
         out
     }).collect())

@@ -1,0 +1,28 @@
+# cargo deny check: known vulnerabilities, licences and where dependencies come from. Run in CI.
+
+[graph]
+# The platforms Whaybench is built for; dependencies only another platform pulls in are not checked.
+targets = ["x86_64-unknown-linux-gnu"]
+
+[advisories]
+# Every RustSec advisory fails the check; a crate no longer maintained is reported too.
+ignore = [
+    # ttf-parser (title bar fonts, through ab_glyph) is no longer maintained: no known flaw, and no maintained
+    # version of ab_glyph without it yet. Look again when ab_glyph moves off it.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained only, no safe upgrade yet" },
+]
+
+[licenses]
+# Licences that may be shipped with an Apache-2.0 program.
+allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "MPL-2.0", "CC0-1.0", "0BSD", "BSL-1.0", "Apache-2.0 WITH LLVM-exception", "Unlicense"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+# The only wildcards are the workspace's own crates, which name each other by path without a version.
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = []

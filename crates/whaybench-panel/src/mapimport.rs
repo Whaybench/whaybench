@@ -56,7 +56,7 @@ fn below(nodes: &[Value], root: &str) -> Vec<Value> {
     }
     nodes.iter().filter(|n| keep.iter().any(|k| k == s(n, "id"))).cloned().map(|mut n| {
         // The root of what is taken has no parent here.
-        if s(&n, "id") == root { if let Some(o) = n.as_object_mut() { o.remove("parent"); } }
+        if s(&n, "id") == root && let Some(o) = n.as_object_mut() { o.remove("parent"); }
         n
     }).collect()
 }

@@ -321,8 +321,8 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     }
     // The border about to be dragged, then the lines that always show which panels hold together.
     let active = match &state.act { Act::Resize { pid, edges, partners } => Some((*pid, *edges, partners.clone())), _ => state.hover.clone() };
-    if let Some((pid, edges, _)) = &active {
-        if let Some(r) = state.surface.get(*pid).map(|p| p.rect) {
+    if let Some((pid, edges, _)) = &active
+        && let Some(r) = state.surface.get(*pid).map(|p| p.rect) {
             for s in edges.sides() {
                 let l = match s {
                     Side::Left => Line { x0: r.x, y0: r.y, x1: r.x, y1: r.bottom() },
@@ -333,7 +333,6 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
                 f.line(l, 2.0, premultiplied(t.edge));
             }
         }
-    }
     // Panels that hold on to nothing lie over the joint lines; the others under them.
     let carried: Vec<u64> = active.as_ref().map(|(_, _, ps)| ps.iter().map(|(p, _)| *p).collect()).unwrap_or_default();
     let top = state.surface.front();
@@ -361,13 +360,12 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
         }
     }
     // The surface itself, under everything.
-    if let Some(sh2) = &shaders {
-        if t.surface_top != t.surface_bottom {
+    if let Some(sh2) = &shaders
+        && t.surface_top != t.surface_bottom {
             let area: Rectangle<i32, Logical> = Rectangle::new((0, 0).into(), (sw.round() as i32, sh.round() as i32).into());
             let (top, bottom) = (premultiplied(t.surface_top), premultiplied(t.surface_bottom));
             f.shaded(&sh2.back, area, vec![four("top", top), four("bottom", bottom)], format!("back {area:?} {top:?} {bottom:?}"));
         }
-    }
     let used = f.k;
     let out = f.out;
     kept.truncate(used);
@@ -410,7 +408,7 @@ pub fn write_png(out: &std::path::Path, w: u32, h: u32, rgba: &[u8]) -> Result<(
         e.set_color(png::ColorType::Rgb);
         e.set_depth(png::BitDepth::Eight);
         let mut writer = e.write_header().map_err(|x| x.to_string())?;
-        let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+        let rgb: Vec<u8> = rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
         writer.write_image_data(&rgb).map_err(|x| x.to_string())?;
     }
     ctl::write_atomic(out, &bytes).map_err(|x| x.to_string())

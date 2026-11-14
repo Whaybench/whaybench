@@ -59,12 +59,11 @@ pub fn handle_commit(state: &mut App, surface: &WlSurface) {
         top.send_configure();
     }
     state.popups.commit(surface);
-    if let Some(PopupKind::Xdg(xdg)) = state.popups.find_popup(surface) {
-        if !xdg.is_initial_configure_sent() {
+    if let Some(PopupKind::Xdg(xdg)) = state.popups.find_popup(surface)
+        && !xdg.is_initial_configure_sent() {
             // NOTE: This should never fail as the initial configure is always allowed.
             xdg.send_configure().expect("initial configure failed");
         }
-    }
 }
 
 impl App {

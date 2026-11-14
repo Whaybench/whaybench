@@ -374,9 +374,8 @@ pub fn open_for_session(d: &Data, session: &str, target: &str, page: Option<u32>
 pub fn open_in_view(d: &Data, name: &str, target: &str, page: Option<u32>) -> std::io::Result<()> { open_to(d, &for_view(name), target, page) }
 
 fn open_to(d: &Data, to: &str, target: &str, page: Option<u32>) -> std::io::Result<()> {
-    if !is_web(target) {
-        if let Some(argv) = system_viewer(Path::new(target)) { return terminal(d, &argv); }
-    }
+    if !is_web(target)
+        && let Some(argv) = system_viewer(Path::new(target)) { return terminal(d, &argv); }
     ask(d, to, &json!({"do": "show", "path": target, "page": page}))
 }
 

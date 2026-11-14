@@ -165,9 +165,8 @@ impl App {
         let (x, y) = self.pointer;
         self.close_popups_unless_at((x, y).into());
         // While a settings window is open, a press elsewhere does nothing.
-        if let Some(m) = self.surface.modal().map(|m| (m.pid, m.rect)) {
-            if !m.1.contains(x, y) { self.focus_panel(m.0); self.act = Act::Swallow; return false; }
-        }
+        if let Some(m) = self.surface.modal().map(|m| (m.pid, m.rect))
+            && !m.1.contains(x, y) { self.focus_panel(m.0); self.act = Act::Swallow; return false; }
         if self.menu_under((x, y).into()).is_some() { return true; }
         // A press on an open menu is the menu's alone: raising the panel under it would take the keyboard from the
         // menu, and GTK then drops the menu before the item is chosen.

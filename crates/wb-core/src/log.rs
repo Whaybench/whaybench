@@ -89,12 +89,11 @@ pub fn header(text: &str) {
 
 fn write(l: &mut Log, text: &str) {
     let done = OpenOptions::new().create(true).append(true).open(&l.path).and_then(|mut f| f.write_all(text.as_bytes()));
-    if let Err(e) = done {
-        if !l.told {
+    if let Err(e) = done
+        && !l.told {
             l.told = true;
             eprintln!("whaybench: cannot write the debug log ({}): {e}", l.path.display());
         }
-    }
 }
 
 /// One field value: session ids cut to 8, spaces quoted, newlines flattened.
@@ -179,12 +178,11 @@ pub fn install_panic_hook() {
             .or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
         error("run", "crashed", &[("place", place), ("error", message.chars().take(300).collect())]);
         let trace = std::backtrace::Backtrace::force_capture().to_string();
-        if let Ok(mut g) = LOG.try_lock() {
-            if let Some(l) = g.as_mut() {
+        if let Ok(mut g) = LOG.try_lock()
+            && let Some(l) = g.as_mut() {
                 let t: String = trace.lines().map(|x| format!("    {x}\n")).collect();
                 write(l, &t);
             }
-        }
         previous(info);
     }));
 }

@@ -236,7 +236,7 @@ pub fn decisions_for(data: &Path, sid: &str, path: &str) -> Vec<String> {
             if patterns.as_array().into_iter().flatten().filter_map(Value::as_str).any(|p| glob(p, path)) { nodes_of.insert(node.clone()); }
         }
         for t in read_json(&files_dir(data).join(format!("{id}.json")), json!([])).unwrap_or(json!([])).as_array().into_iter().flatten() {
-            if t["path"] == path { if let Some(n) = t["node"].as_str() { nodes_of.insert(n.to_string()); } }
+            if t["path"] == path && let Some(n) = t["node"].as_str() { nodes_of.insert(n.to_string()); }
         }
     }
     let nodes = map::command(data, sid, None).ok().and_then(|m| m["nodes"].as_array().cloned()).unwrap_or_default();
@@ -336,6 +336,131 @@ fn held_back(data: &Path, sid: &str, a: &Agent, tool: &str, input: &Value) -> Op
     warned.push(key);
     let _ = write_json(&file, &json!(warned));
     Some(i18n::ai_f("edit-in-vim", &[("path", path.to_string()), ("pid", pid.to_string()), ("dirty", (if dirty { "with unsaved changes" } else { "no unsaved changes" }).to_string())]))
+}
+
+/// The map in short for a session that took it over: none of the conversation behind it comes along.
+pub fn carried_summary(m: &Value, from: &str) -> String {
+    let nodes: Vec<&Value> = m["nodes"].as_array().into_iter().flatten().collect();
+    let by: HashMap<&str, &Value> = nodes.iter().filter_map(|n| Some((n["id"].as_str()?, *n))).collect();
+    let mut path = Vec::new();
+    let mut at = m["current"].as_str().and_then(|c| by.get(c));
+    while let Some(n) = at { if path.len() > 50 { break; } path.insert(0, n["label"].as_str().unwrap_or("").to_string()); at = n["parent"].as_str().and_then(|p| by.get(p)); }
+    let pick = |f: &dyn Fn(&Value) -> bool, cap: usize| { let v: Vec<&&Value> = nodes.iter().filter(|n| f(n)).collect(); let skip = v.len().saturating_sub(cap); v[skip..].iter().map(|n| {
+        let why = n["detail"].as_str().or(n["reason"].as_str()).map(|r| format!(" (reason: {})", r.split(['.', '\n']).next().unwrap_or("").trim())).unwrap_or_default();
+        format!("- {}{why}", n["label"].as_str().unwrap_or("")) }).collect::<Vec<_>>().join("\n") };
+    let state = |n: &Value| n["state"].as_str().unwrap_or("").to_string();
+    let parts = [
+        i18n::ai_f("carried-head", &[("from", from.to_string())]),
+        if path.is_empty() { String::new() } else { i18n::ai_f("carried-position", &[("path", path.join(" › "))]) },
+        Some(pick(&|n| map::is_open(n) && state(n) != "plan" && state(n) != "doing", 20)).filter(|l| !l.is_empty()).map(|l| i18n::ai_f("carried-open", &[("lines", l)])).unwrap_or_default(),
+        Some(pick(&|n| map::is_open(n) && state(n) == "plan", 10)).filter(|l| !l.is_empty()).map(|l| i18n::ai_f("carried-later", &[("lines", l)])).unwrap_or_default(),
+        Some(pick(&|n| !map::is_open(n) && n["kind"] == "conclusion", 20)).filter(|l| !l.is_empty()).map(|l| i18n::ai_f("carried-decided", &[("lines", l)])).unwrap_or_default(),
+    ];
+    parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join("\n\n")
+}
+
+fn map_is_empty(data: &Path, sid: &str) -> bool {
+    map::command(data, sid, None).ok().and_then(|m| m["nodes"].as_array().map(Vec::is_empty)).unwrap_or(true)
+}
+
+/// A tab started from another map (`WHAYBENCH_MAP_FROM`: a saved map's file, or a session id): it becomes this
+/// session's map. The program's first prompt (`WHAYBENCH_MAP_PROMPT`) goes to the tab with the summary, for the
+/// relay to type; without one the summary is told at the start.
+fn carry_in(data: &Path, sid: &str) -> Option<String> {
+    let from = std::env::var("WHAYBENCH_MAP_FROM").ok().filter(|f| !f.is_empty())?;
+    if !map_is_empty(data, sid) { return None; }
+    let label = if from.starts_with('/') {
+        let body = map::view_file(data, Path::new(&from)).ok()?;
+        if body["nodes"].as_array().is_none_or(Vec::is_empty) { return None; }
+        // A part of a session's map passed on in a display style keeps where that conversation was.
+        if body.get("style").is_some() {
+            map::take_over(data, sid, &body).ok()?;
+            let _ = crate::paths::write_atomic(&crate::memory::part_carried(data, sid), body["style"].as_str().unwrap_or(""));
+        } else { map::start_from(data, sid, &body).ok()?; }
+        format!("imported map '{}'", body["title"].as_str().unwrap_or(&from))
+    } else {
+        let source = read_json(&data.join(format!("{}.json", safe_id(&from).ok()?)), Value::Null).ok()?;
+        source.get("nodes")?;
+        crate::map_tool::call(data, sid, &json!({"inherit": from})).ok()?;
+        i18n::ai_f("carried-session", &[("id", from.chars().take(8).collect())])
+    };
+    let summary = carried_summary(&map::command(data, sid, None).ok()?, &label);
+    match std::env::var("WHAYBENCH_MAP_PROMPT").ok().filter(|p| !p.is_empty()) {
+        // No tab to type it in yet: the summary is told at the start instead.
+        Some(asked) if crate::sessions::queue_prompt(&crate::paths::Data::new(data.to_path_buf()), sid, &format!("{asked}\n\n{summary}")) => None,
+        _ => Some(summary),
+    }
+}
+
+fn fork_note(data: &Path) -> std::path::PathBuf { data.join("cache").join("forks").join("pending.json") }
+
+/// The relay saw /background: the conversation goes on in a new session, which takes this map over when it starts.
+pub fn note_fork(data: &Path, from: &str) {
+    let cwd = read_json(&data.join("sessions").join(format!("{from}.json")), Value::Null).ok().and_then(|r| r["cwd"].as_str().map(String::from)).unwrap_or_default();
+    let _ = write_json(&fork_note(data), &json!({"from": from, "cwd": cwd, "at": now_ms()}));
+}
+
+/// The relay saw /rewind: the next prompt asks the agent to set the map straight.
+pub fn note_rewind(data: &Path, sid: &str) { let _ = write_json(&state_file(data, "rewound", sid), &json!(now_ms())); }
+
+/// A session started within a minute of a /background in the same folder, with a conversation of its own, carries
+/// that session on: its map and record. Claude Code's spare processes start with an id but no conversation.
+fn adopt_fork(data: &Path, sid: &str, a: &Agent, event: &Value) -> Option<String> {
+    if a.name != "claude" { return None; }
+    let note = read_json(&fork_note(data), Value::Null).ok()?;
+    let from = note["from"].as_str()?.to_string();
+    let cwd = event["cwd"].as_str().unwrap_or("");
+    let near = |x: &str, y: &str| x == y || x.starts_with(&format!("{}/", y.trim_end_matches('/'))) || y.starts_with(&format!("{}/", x.trim_end_matches('/')));
+    if from == sid || now_ms().saturating_sub(note["at"].as_u64().unwrap_or(0)) > 60_000 || !near(note["cwd"].as_str().unwrap_or(""), cwd) { return None; }
+    let talked = event["transcript_path"].as_str().and_then(|p| fs::metadata(p).ok()).is_some_and(|m| m.len() > 0);
+    if !talked { return None; }
+    let _ = write_json(&fork_note(data), &json!({}));
+    crate::map_tool::call(data, sid, &json!({"inherit": from})).ok()?;
+    crate::session_record::carry_from(data, sid, &from).ok()?;
+    // The carried record has no tab; this session is in the tab it started in.
+    crate::session_record::touch(data, sid, crate::session_record::Touch { prompt: None, tab: a.tab, cwd: None, agent: None }).ok()?;
+    None
+}
+
+/// One process: its name, parent and start time (`/proc/<pid>/stat`).
+fn proc_stat(pid: u32) -> Option<(String, u32, u64)> {
+    let text = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let (open, close) = (text.find('(')?, text.rfind(')')?);
+    let rest: Vec<&str> = text[close + 1..].split_whitespace().collect();
+    Some((text[open + 1..close].to_string(), rest.get(1)?.parse().ok()?, rest.get(19)?.parse().ok()?))
+}
+
+/// The agent this program runs under: the nearest process above it that is not a shell. A hook runs through a
+/// shell, the MCP server straight from the agent, so both arrive at the same process. Its id and start time
+/// (an id can be used again later).
+pub fn agent_process() -> Option<(u32, u64)> {
+    const SHELLS: [&str; 6] = ["sh", "bash", "dash", "zsh", "env", "timeout"];
+    let mut pid = std::os::unix::process::parent_id();
+    for _ in 0..8 {
+        let (comm, parent, start) = proc_stat(pid)?;
+        if !SHELLS.contains(&comm.as_str()) { return Some((pid, start)); }
+        pid = parent;
+    }
+    None
+}
+
+fn agent_file(data: &Path, pid: u32) -> std::path::PathBuf { data.join("cache").join("agent-process").join(format!("{pid}.json")) }
+
+fn note_agent_process(data: &Path, sid: &str) {
+    let Some((pid, start)) = agent_process() else { return };
+    let _ = write_json(&agent_file(data, pid), &json!({"session": sid, "start": start}));
+    // A note outlives its process; a week on, nothing asks for it.
+    let week = std::time::Duration::from_secs(7 * 86_400);
+    for f in fs::read_dir(data.join("cache").join("agent-process")).into_iter().flatten().flatten() {
+        if f.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > week) { let _ = fs::remove_file(f.path()); }
+    }
+}
+
+/// The session of the agent this program runs under, as its hooks last noted it.
+pub fn session_of_agent(data: &Path) -> Option<String> {
+    let (pid, start) = agent_process()?;
+    let noted = read_json(&agent_file(data, pid), Value::Null).ok()?;
+    (noted["start"].as_u64() == Some(start)).then(|| noted["session"].as_str().map(String::from)).flatten()
 }
 
 #[cfg(test)]
@@ -463,129 +588,4 @@ mod tests {
         assert_eq!(touched("apply_patch", &patch), vec![("src/a.rs".to_string(), "edit"), ("b.md".to_string(), "edit")]);
         assert!(glob("/w/src/**", "/w/src/a/b.rs") && glob("/w/*.rs", "/w/a.rs") && !glob("/w/*.rs", "/w/a/b.rs") && glob("a?c", "abc"));
     }
-}
-
-/// The map in short for a session that took it over: none of the conversation behind it comes along.
-pub fn carried_summary(m: &Value, from: &str) -> String {
-    let nodes: Vec<&Value> = m["nodes"].as_array().into_iter().flatten().collect();
-    let by: HashMap<&str, &Value> = nodes.iter().filter_map(|n| Some((n["id"].as_str()?, *n))).collect();
-    let mut path = Vec::new();
-    let mut at = m["current"].as_str().and_then(|c| by.get(c));
-    while let Some(n) = at { if path.len() > 50 { break; } path.insert(0, n["label"].as_str().unwrap_or("").to_string()); at = n["parent"].as_str().and_then(|p| by.get(p)); }
-    let pick = |f: &dyn Fn(&Value) -> bool, cap: usize| { let v: Vec<&&Value> = nodes.iter().filter(|n| f(n)).collect(); let skip = v.len().saturating_sub(cap); v[skip..].iter().map(|n| {
-        let why = n["detail"].as_str().or(n["reason"].as_str()).map(|r| format!(" (reason: {})", r.split(['.', '\n']).next().unwrap_or("").trim())).unwrap_or_default();
-        format!("- {}{why}", n["label"].as_str().unwrap_or("")) }).collect::<Vec<_>>().join("\n") };
-    let state = |n: &Value| n["state"].as_str().unwrap_or("").to_string();
-    let parts = [
-        i18n::ai_f("carried-head", &[("from", from.to_string())]),
-        if path.is_empty() { String::new() } else { i18n::ai_f("carried-position", &[("path", path.join(" › "))]) },
-        Some(pick(&|n| map::is_open(n) && state(n) != "plan" && state(n) != "doing", 20)).filter(|l| !l.is_empty()).map(|l| i18n::ai_f("carried-open", &[("lines", l)])).unwrap_or_default(),
-        Some(pick(&|n| map::is_open(n) && state(n) == "plan", 10)).filter(|l| !l.is_empty()).map(|l| i18n::ai_f("carried-later", &[("lines", l)])).unwrap_or_default(),
-        Some(pick(&|n| !map::is_open(n) && n["kind"] == "conclusion", 20)).filter(|l| !l.is_empty()).map(|l| i18n::ai_f("carried-decided", &[("lines", l)])).unwrap_or_default(),
-    ];
-    parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join("\n\n")
-}
-
-fn map_is_empty(data: &Path, sid: &str) -> bool {
-    map::command(data, sid, None).ok().and_then(|m| m["nodes"].as_array().map(Vec::is_empty)).unwrap_or(true)
-}
-
-/// A tab started from another map (`WHAYBENCH_MAP_FROM`: a saved map's file, or a session id): it becomes this
-/// session's map. The program's first prompt (`WHAYBENCH_MAP_PROMPT`) goes to the tab with the summary, for the
-/// relay to type; without one the summary is told at the start.
-fn carry_in(data: &Path, sid: &str) -> Option<String> {
-    let from = std::env::var("WHAYBENCH_MAP_FROM").ok().filter(|f| !f.is_empty())?;
-    if !map_is_empty(data, sid) { return None; }
-    let label = if from.starts_with('/') {
-        let body = map::view_file(data, Path::new(&from)).ok()?;
-        if body["nodes"].as_array().is_none_or(Vec::is_empty) { return None; }
-        // A part of a session's map passed on in a display style keeps where that conversation was.
-        if body.get("style").is_some() {
-            map::take_over(data, sid, &body).ok()?;
-            let _ = crate::paths::write_atomic(&crate::memory::part_carried(data, sid), body["style"].as_str().unwrap_or(""));
-        } else { map::start_from(data, sid, &body).ok()?; }
-        format!("imported map '{}'", body["title"].as_str().unwrap_or(&from))
-    } else {
-        let source = read_json(&data.join(format!("{}.json", safe_id(&from).ok()?)), Value::Null).ok()?;
-        source.get("nodes")?;
-        crate::map_tool::call(data, sid, &json!({"inherit": from})).ok()?;
-        i18n::ai_f("carried-session", &[("id", from.chars().take(8).collect())])
-    };
-    let summary = carried_summary(&map::command(data, sid, None).ok()?, &label);
-    match std::env::var("WHAYBENCH_MAP_PROMPT").ok().filter(|p| !p.is_empty()) {
-        // No tab to type it in yet: the summary is told at the start instead.
-        Some(asked) if crate::sessions::queue_prompt(&crate::paths::Data::new(data.to_path_buf()), sid, &format!("{asked}\n\n{summary}")) => None,
-        _ => Some(summary),
-    }
-}
-
-fn fork_note(data: &Path) -> std::path::PathBuf { data.join("cache").join("forks").join("pending.json") }
-
-/// The relay saw /background: the conversation goes on in a new session, which takes this map over when it starts.
-pub fn note_fork(data: &Path, from: &str) {
-    let cwd = read_json(&data.join("sessions").join(format!("{from}.json")), Value::Null).ok().and_then(|r| r["cwd"].as_str().map(String::from)).unwrap_or_default();
-    let _ = write_json(&fork_note(data), &json!({"from": from, "cwd": cwd, "at": now_ms()}));
-}
-
-/// The relay saw /rewind: the next prompt asks the agent to set the map straight.
-pub fn note_rewind(data: &Path, sid: &str) { let _ = write_json(&state_file(data, "rewound", sid), &json!(now_ms())); }
-
-/// A session started within a minute of a /background in the same folder, with a conversation of its own, carries
-/// that session on: its map and record. Claude Code's spare processes start with an id but no conversation.
-fn adopt_fork(data: &Path, sid: &str, a: &Agent, event: &Value) -> Option<String> {
-    if a.name != "claude" { return None; }
-    let note = read_json(&fork_note(data), Value::Null).ok()?;
-    let from = note["from"].as_str()?.to_string();
-    let cwd = event["cwd"].as_str().unwrap_or("");
-    let near = |x: &str, y: &str| x == y || x.starts_with(&format!("{}/", y.trim_end_matches('/'))) || y.starts_with(&format!("{}/", x.trim_end_matches('/')));
-    if from == sid || now_ms().saturating_sub(note["at"].as_u64().unwrap_or(0)) > 60_000 || !near(note["cwd"].as_str().unwrap_or(""), cwd) { return None; }
-    let talked = event["transcript_path"].as_str().and_then(|p| fs::metadata(p).ok()).is_some_and(|m| m.len() > 0);
-    if !talked { return None; }
-    let _ = write_json(&fork_note(data), &json!({}));
-    crate::map_tool::call(data, sid, &json!({"inherit": from})).ok()?;
-    crate::session_record::carry_from(data, sid, &from).ok()?;
-    // The carried record has no tab; this session is in the tab it started in.
-    crate::session_record::touch(data, sid, crate::session_record::Touch { prompt: None, tab: a.tab, cwd: None, agent: None }).ok()?;
-    None
-}
-
-/// One process: its name, parent and start time (`/proc/<pid>/stat`).
-fn proc_stat(pid: u32) -> Option<(String, u32, u64)> {
-    let text = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let (open, close) = (text.find('(')?, text.rfind(')')?);
-    let rest: Vec<&str> = text[close + 1..].split_whitespace().collect();
-    Some((text[open + 1..close].to_string(), rest.get(1)?.parse().ok()?, rest.get(19)?.parse().ok()?))
-}
-
-/// The agent this program runs under: the nearest process above it that is not a shell. A hook runs through a
-/// shell, the MCP server straight from the agent, so both arrive at the same process. Its id and start time
-/// (an id can be used again later).
-pub fn agent_process() -> Option<(u32, u64)> {
-    const SHELLS: [&str; 6] = ["sh", "bash", "dash", "zsh", "env", "timeout"];
-    let mut pid = std::os::unix::process::parent_id();
-    for _ in 0..8 {
-        let (comm, parent, start) = proc_stat(pid)?;
-        if !SHELLS.contains(&comm.as_str()) { return Some((pid, start)); }
-        pid = parent;
-    }
-    None
-}
-
-fn agent_file(data: &Path, pid: u32) -> std::path::PathBuf { data.join("cache").join("agent-process").join(format!("{pid}.json")) }
-
-fn note_agent_process(data: &Path, sid: &str) {
-    let Some((pid, start)) = agent_process() else { return };
-    let _ = write_json(&agent_file(data, pid), &json!({"session": sid, "start": start}));
-    // A note outlives its process; a week on, nothing asks for it.
-    let week = std::time::Duration::from_secs(7 * 86_400);
-    for f in fs::read_dir(data.join("cache").join("agent-process")).into_iter().flatten().flatten() {
-        if f.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > week) { let _ = fs::remove_file(f.path()); }
-    }
-}
-
-/// The session of the agent this program runs under, as its hooks last noted it.
-pub fn session_of_agent(data: &Path) -> Option<String> {
-    let (pid, start) = agent_process()?;
-    let noted = read_json(&agent_file(data, pid), Value::Null).ok()?;
-    (noted["start"].as_u64() == Some(start)).then(|| noted["session"].as_str().map(String::from)).flatten()
 }

@@ -12,7 +12,7 @@ jobs:
   windows-setup:
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Inno Setup and the build
         shell: pwsh
         run: |
@@ -25,7 +25,7 @@ jobs:
         env:
           INNO: 6.7.4
           INNO_SHA256: A549929319F9120716677C685535CA4671E4B937B5FDC87E2585F32D8EB30E8C
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-setup
           path: windows/Output/WhaybenchSetup.exe
@@ -35,10 +35,10 @@ jobs:
     needs: windows-setup
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # The packages' .deb files are kept in GitHub's cache (saved only when the job succeeds), so a slow or broken
       # Ubuntu mirror costs one download, not every run. One list for CI and Release: a tag finds what main stored.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/apt-debs
           key: apt-debs-${{ hashFiles('.github/apt-packages.txt') }}
@@ -48,7 +48,7 @@ jobs:
           get() { sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=3 -o Dir::Cache::Archives="$HOME/apt-debs" $(cat .github/apt-packages.txt); }
           get || { sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|' /etc/apt/apt-mirrors.txt; get; }
           sudo chown -R "$USER" ~/apt-debs
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - run: tools/fetch-smithay.sh
       - run: cargo build --release --locked
       # Alacritty, for the terminal tabs: not every distribution packages it, so the release brings it.
@@ -78,7 +78,7 @@ jobs:
           cp alacritty-src/LICENSE-MIT "$dir"/ALACRITTY-LICENSE-MIT
           tar czf "$dir.tar.gz" "$dir"
           sha256sum "$dir.tar.gz" > "$dir.tar.gz.sha256"
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-setup
       # What Whaybench Setup's install.ps1 fetches when it runs on its own.

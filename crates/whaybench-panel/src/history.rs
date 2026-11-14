@@ -55,7 +55,7 @@ pub fn rows(events: &[Value], mut name: impl FnMut(&str) -> String, mut label: i
         let nid = e["nid"].as_str().unwrap_or("").to_string();
         let data = &e["data"];
         if let Some(l) = data["label"].as_str().or_else(|| data["label"][1].as_str()) { labels.insert(nid.clone(), l.to_string()); }
-        let mut named = |nid: &str| { if !labels.contains_key(nid) { if let Some(l) = label(nid) { labels.insert(nid.to_string(), l); } } labels.get(nid).cloned() };
+        let mut named = |nid: &str| { if !labels.contains_key(nid) && let Some(l) = label(nid) { labels.insert(nid.to_string(), l); } labels.get(nid).cloned() };
         let (what, tip) = match kind {
             "node.added" => (t("history-added").to_string(), data["detail"].as_str().unwrap_or("").to_string()),
             "node.changed" => { let (s, tip) = changed(data); (s.join(", "), tip.join("\n")) }

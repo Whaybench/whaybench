@@ -103,23 +103,20 @@ pub fn validate(map: &Value) -> Result<()> {
         let id = safe_id(text(node, "id")?)?;
         text(node, "label")?;
         if node.get("isOpen").is_some_and(|v| !v.is_boolean()) { return Err("isOpen must be a boolean".into()); }
-        if let Some(sg) = node.get("suggest").filter(|v| !v.is_null()) {
-            if !["done", "dropped"].contains(&sg["state"].as_str().unwrap_or("")) { return Err("suggest.state must be done or dropped".into()); }
-        }
+        if let Some(sg) = node.get("suggest").filter(|v| !v.is_null())
+            && !["done", "dropped"].contains(&sg["state"].as_str().unwrap_or("")) { return Err("suggest.state must be done or dropped".into()); }
         if !ids.insert(id) { return Err("duplicate node id".into()); }
     }
     for node in nodes {
         for key in ["requires", "assumes"] {
-            if let Some(expr) = node.get(key).and_then(Value::as_str) {
-                if let Some(missing) = condition_ids(expr)?.into_iter().find(|i| !ids.contains(i.as_str())) {
+            if let Some(expr) = node.get(key).and_then(Value::as_str)
+                && let Some(missing) = condition_ids(expr)?.into_iter().find(|i| !ids.contains(i.as_str())) {
                     return Err(format!("{key} names a node that is not in the map: {missing}").into());
                 }
-            }
         }
     }
-    if let Some(current) = map.get("current").filter(|v| !v.is_null()) {
-        if !current.as_str().is_some_and(|id| ids.contains(id)) { return Err("current must refer to a node".into()); }
-    }
+    if let Some(current) = map.get("current").filter(|v| !v.is_null())
+        && !current.as_str().is_some_and(|id| ids.contains(id)) { return Err("current must refer to a node".into()); }
     for node in nodes {
         let mut cursor = node;
         let mut seen = HashSet::new();
@@ -425,9 +422,8 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
     validate(&map)?;
     let before = map["nodes"].as_array().cloned().unwrap_or_default();
     // A change by node number is to nodes that exist: one that is gone (deleted for good meanwhile) is not made anew.
-    if let Scope::Nodes(nids) = &scope {
-        if let Some(gone) = nids.iter().find(|n| !before.iter().any(|b| &b["id"] == *n)) { return Err(format!("no such node: {gone}").into()); }
-    }
+    if let Scope::Nodes(nids) = &scope
+        && let Some(gone) = nids.iter().find(|n| !before.iter().any(|b| &b["id"] == *n)) { return Err(format!("no such node: {gone}").into()); }
     let stamp = json!({"at":now_ms(),"turn":map.get("turn").and_then(Value::as_u64).unwrap_or(0)});
     let mut nodes = if let Some(replacement) = input.get("nodes") {
         validate(&json!({"nodes":replacement}))?;
@@ -438,9 +434,8 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
         for n in &mut nodes {
             let Some(old) = before.iter().find(|o| o["id"] == n["id"]) else { continue };
             for key in ["nid", "origin", "mark"] { if let Some(v) = old.get(key) { n[key] = v.clone(); } }
-            if replacement.as_array().into_iter().flatten().find(|r| r["id"] == n["id"]).is_some_and(|r| r.get("memid").is_none()) {
-                if let Some(m) = old.get("memid") { n["memid"] = m.clone(); }
-            }
+            if replacement.as_array().into_iter().flatten().find(|r| r["id"] == n["id"]).is_some_and(|r| r.get("memid").is_none())
+                && let Some(m) = old.get("memid") { n["memid"] = m.clone(); }
         }
         // A deleted node is the person's: a regrouping that leaves it out does not take it off the map.
         let kept: Vec<Value> = before.iter().filter(|o| o["state"] == "removed" && !nodes.iter().any(|n| n["id"] == o["id"])).cloned().collect();
@@ -616,7 +611,7 @@ pub fn restore(data: &Path, action: &str) -> Result<Vec<String>> {
         if since || !fields.iter().all(|(k, v)| now.get(k).unwrap_or(&Value::Null) == &v[1]) { kept.push(nid.to_string()); continue; }
         let mut up = json!({"id": nid});
         for (k, v) in fields {
-            if k == "parent" { if let Some(p) = v[0].as_str() { scope.push(p.to_string()); } }
+            if k == "parent" && let Some(p) = v[0].as_str() { scope.push(p.to_string()); }
             up[k] = if v[0].is_null() { json!("") } else { v[0].clone() };
         }
         scope.push(nid.to_string());

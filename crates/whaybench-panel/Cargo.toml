@@ -15,3 +15,6 @@ webkit6 = "0.6"
 regex = "1"
 chrono.workspace = true
 similar = "2"
+
+[lints]
+workspace = true

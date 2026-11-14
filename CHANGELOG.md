@@ -9,6 +9,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 - The map tool asks for where (path:line), what and the next step in the detail of a task or problem about files, so
   a later session can carry on without looking again.
+- CI and release workflows use their actions by commit, not by a tag that can be moved.
+- CI checks the dependencies for known vulnerabilities, licences and sources (cargo-deny, `deny.toml`).
+- SECURITY.md: how to report a vulnerability privately and how to check a release's signature.
+- CI runs clippy and fails on a warning; the code was cleaned of its warnings (no change in behaviour).
 
 ### Added
 - Conversation map → Carried to a new conversation: the display style a new conversation from the map is given in.

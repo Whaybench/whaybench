@@ -85,9 +85,8 @@ static TITLES: Mutex<Option<(Instant, PathBuf, std::collections::HashMap<String,
 /// each session's name in turn.
 fn titles_kept(d: &Data) -> std::collections::HashMap<String, String> {
     let mut g = TITLES.lock().unwrap();
-    if let Some((at, root, titles)) = g.as_ref() {
-        if at.elapsed() < Duration::from_secs(1) && *root == d.root { return titles.clone(); }
-    }
+    if let Some((at, root, titles)) = g.as_ref()
+        && at.elapsed() < Duration::from_secs(1) && *root == d.root { return titles.clone(); }
     let titles = map_titles(d);
     *g = Some((Instant::now(), d.root.clone(), titles.clone()));
     titles
@@ -101,7 +100,7 @@ pub fn session_name(d: &Data, id: &str) -> String {
     let running = strip_count(agent(id).as_ref().and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or(""));
     if !running.is_empty() && names.get(id).and_then(Value::as_str) != Some(&running) {
         names[id] = Value::String(running.clone());
-        let _ = write_atomic(&file, &names.to_string());
+        let _ = write_atomic(&file, names.to_string());
     }
     if let Some(n) = titles_kept(d).get(id) { return n.clone(); }
     if !running.is_empty() { return running; }

@@ -151,14 +151,13 @@ fn frame_columns(nodes: &[Value], current: &str, style: &Style) -> String {
         match cols.iter_mut().find(|c| c.0 == col) { Some(c) => c.1.push(n), None => cols.push((col, vec![n])) }
     }
     let recent = style.raw.get("recent_done").and_then(Value::as_u64).unwrap_or(0) as usize;
-    if recent > 0 && by == "state" {
-        if let Some(c) = cols.iter_mut().find(|c| c.0 == "done") {
+    if recent > 0 && by == "state"
+        && let Some(c) = cols.iter_mut().find(|c| c.0 == "done") {
             let stamp = |n: &Value| n.get("closed").or_else(|| n.get("changed")).and_then(|x| x.get("turn")).and_then(Value::as_i64).unwrap_or(-1);
             c.1.sort_by_key(|n| stamp(n));
             let extra = c.1.len().saturating_sub(recent);
             c.1.drain(..extra);
         }
-    }
     let body: String = cols.iter().map(|(name, cards)| {
         let rows: String = cards.iter().map(|n| {
             let path = t.by.get(s(n, "parent")).map_or(wb_core::i18n::t("top-level").to_string(), |p| format!("{} ›", e(&cut(s(p, "label"), 28))));
@@ -180,7 +179,7 @@ fn frame_route(nodes: &[Value], current: &str, steps: &[Step]) -> String {
         let last = stops.last().map(|x| x.0.as_str());
         if last == Some(id.as_str()) { continue; }
         let parent = s(n, "parent");
-        if let Some(prev) = last { if t.by.contains_key(parent) && parent != prev && stops.iter().any(|x| x.0 == parent) { stops.push((parent.to_string(), true)); } }
+        if let Some(prev) = last && t.by.contains_key(parent) && parent != prev && stops.iter().any(|x| x.0 == parent) { stops.push((parent.to_string(), true)); }
         stops.push((id.clone(), false));
     }
     let mut note = String::new();

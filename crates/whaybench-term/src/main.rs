@@ -77,7 +77,7 @@ impl Relay {
     /// right before the program starts, or Claude Code's input line stays one line high.
     fn start(&mut self, args: &[String]) -> Result<(), String> {
         self.started = Instant::now();
-        let mut size = size_of(0);
+        let size = size_of(0);
         let agent = wb_core::agents::active().map(|id| wb_core::agents::load(&self.data.root, &id)).transpose().map_err(|e| e.to_string())?;
         let addon = agent.is_some();
         let program = if let Some(a) = &agent {
@@ -128,7 +128,7 @@ impl Relay {
 
         let umask = wb_core::paths::user_umask();
         let mut master = -1;
-        let pid = unsafe { libc::forkpty(&mut master, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) };
+        let pid = unsafe { libc::forkpty(&mut master, std::ptr::null_mut(), std::ptr::null_mut(), &size) };
         if pid < 0 { return Err(std::io::Error::last_os_error().to_string()); }
         if pid == 0 {
             unsafe {
@@ -163,12 +163,11 @@ impl Relay {
     /// What the person typed reached the Enter key.
     fn input(&mut self, bytes: &[u8]) {
         if !self.running { return; }
-        if bytes == b"\r" {
-            if let Some(name) = typed_command(&self.cursor_line()) {
+        if bytes == b"\r"
+            && let Some(name) = typed_command(&self.cursor_line()) {
                 self.slash(name);
                 return;
             }
-        }
         write_all(self.master, bytes);
     }
 
@@ -194,9 +193,8 @@ impl Relay {
             return;
         }
         let in_background = self.session.as_deref().is_some_and(sessions::background);
-        if !in_background && (name == "background" || name == "bg") {
-            if let Some(s) = &self.session { wb_core::hook::note_fork(&self.data.root, s); }
-        }
+        if !in_background && (name == "background" || name == "bg")
+            && let Some(s) = &self.session { wb_core::hook::note_fork(&self.data.root, s); }
         record::decide("session", "typed command", if in_background { "a background session" } else { "this tab's session" }, &[("tab", self.tab.clone()), ("command", name.to_string())]);
         if !in_background {
             write_all(self.master, b"\r");
@@ -233,12 +231,11 @@ impl Relay {
             self.leave_at = Some(Instant::now() + AFTER_BACKGROUND);
         } else {
             // A tab attached to a session nobody spoke in (an empty tab given /background): no tab will ever show it again.
-            if self.attached {
-                if let Some(s) = self.session.clone().filter(|s| sessions::background(s) && !sessions::has_conversation(&self.data, s)) {
+            if self.attached
+                && let Some(s) = self.session.clone().filter(|s| sessions::background(s) && !sessions::has_conversation(&self.data, s)) {
                     record::decide("session", "empty session ended", "the tab of a background session with no conversation closed", &[("session", s.clone())]);
                     sessions::stop(&s);
                 }
-            }
             self.leave_at = Some(Instant::now());
         }
     }
@@ -255,38 +252,34 @@ impl Relay {
         record::decide("session", "program ended", "this tab's agent ended", &[("tab", self.tab.clone())]);
         if self.closing { self.leave_at = Some(Instant::now()); return; }
         // Attaching ended at once: nothing runs under that name any more. The conversation is on disk: open it from there.
-        if self.attached && self.started.elapsed() < ATTACH_FAILS_WITHIN {
-            if let Some(s) = self.session.clone() {
+        if self.attached && self.started.elapsed() < ATTACH_FAILS_WITHIN
+            && let Some(s) = self.session.clone() {
                 record::warn("session", "attach failed", "that session is not in the background; reopened from the record", &[("tab", self.tab.clone()), ("session", s.clone())]);
                 self.attached = false;
                 self.save_tab();
                 write_all(1, b"\x1b[2J\x1b[H");
                 if self.start(&["--resume".into(), s]).is_ok() { return; }
             }
-        }
         self.set_title(wb_core::i18n::t("ended"));
-        if let Some(s) = self.session.clone() {
-            if !self.attached && !sessions::background(&s) { sessions::mark_off(&self.data, &s); }
-        }
+        if let Some(s) = self.session.clone()
+            && !self.attached && !sessions::background(&s) { sessions::mark_off(&self.data, &s); }
     }
 
     /// Every 2 seconds: which session this tab holds, its name, and whether it carried on under a new id.
     fn tick(&mut self) {
         if self.closing { return; }
-        if let Some(found) = sessions::session_of_tab(&self.data, &self.tab) {
-            if self.session.as_deref() != Some(&found) && !self.session.as_deref().is_some_and(|s| sessions::current_id(&self.data, s) != s) {
+        if let Some(found) = sessions::session_of_tab(&self.data, &self.tab)
+            && self.session.as_deref() != Some(&found) && !self.session.as_deref().is_some_and(|s| sessions::current_id(&self.data, s) != s) {
                 record::decide("session", "tab session found", "a session record names this tab", &[("tab", self.tab.clone()), ("old", self.session.clone().unwrap_or_default()), ("new", found.clone())]);
                 self.session = Some(found);
                 self.save_tab();
             }
-        }
         if wb_core::agents::other() {
-            if self.running {
-                if let Some(s) = &self.session {
+            if self.running
+                && let Some(s) = &self.session {
                     let _ = fs::create_dir_all(sessions::alive_dir(&self.data));
                     let _ = paths::write_atomic(&sessions::alive_dir(&self.data).join(s), self.child.to_string());
                 }
-            }
         } else {
             self.resumed_somewhere();
             self.follow_move();
@@ -376,14 +369,12 @@ impl Relay {
             if !self.running { continue; }
             let text = v.get("text").and_then(|t| t.as_str()).unwrap_or_default().to_string();
             // Sent from outside, the same commands get the same decision as when typed.
-            if v.get("enter").and_then(|e| e.as_bool()).unwrap_or(false) {
-                if let Some(name) = typed_command(&format!("> {text}")) {
-                    if self.session.as_deref().is_some_and(sessions::background) {
+            if v.get("enter").and_then(|e| e.as_bool()).unwrap_or(false)
+                && let Some(name) = typed_command(&format!("> {text}"))
+                    && self.session.as_deref().is_some_and(sessions::background) {
                         self.slash(name);
                         continue;
                     }
-                }
-            }
             // As a paste, so a request of several lines arrives whole instead of each line being sent.
             write_all(self.master, b"\x1b[200~");
             write_all(self.master, text.as_bytes());
@@ -444,9 +435,8 @@ impl Relay {
     }
 
     fn finish(&mut self) {
-        if wb_core::agents::other() {
-            if let Some(s) = &self.session { sessions::mark_off(&self.data, s); }
-        }
+        if wb_core::agents::other()
+            && let Some(s) = &self.session { sessions::mark_off(&self.data, s); }
         if self.running {
             unsafe { libc::kill(self.child, libc::SIGHUP); }
         }
@@ -557,12 +547,11 @@ fn main() {
         _ => new_id.map(|id| vec!["--session-id".into(), id]).unwrap_or_default(),
     };
     // An add-on agent runs a program as the person: one not as the program brings it is shown and asked first.
-    if let Some(agent) = wb_core::agents::active().and_then(|id| wb_core::agents::load(&relay.data.root, &id).ok()) {
-        if !agent.trusted(&relay.data.root) && !confirm_agent(&relay.data, &agent) {
+    if let Some(agent) = wb_core::agents::active().and_then(|id| wb_core::agents::load(&relay.data.root, &id).ok())
+        && !agent.trusted(&relay.data.root) && !confirm_agent(&relay.data, &agent) {
             record::decide("session", "agent not started", "the person did not confirm the add-on", &[("agent", agent.id.clone())]);
             std::process::exit(0);
         }
-    }
     if let Err(e) = relay.start(&argv) {
         record::error("session", "program not started", &[("error", e.clone())]);
         // The tab closes with the program: the reason stays in the status bar (an agent not installed, for one).

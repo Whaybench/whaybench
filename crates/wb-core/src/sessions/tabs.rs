@@ -4,9 +4,8 @@ use super::*;
 /// A request's kind for the record: its leading [tag], a slash command, or the person's own text.
 pub fn request_kind(text: &str) -> String {
     let t = text.trim_start();
-    if t.starts_with('[') {
-        if let Some(end) = t.char_indices().take(40).find(|(_, c)| *c == ']').map(|(i, _)| i) { return t[1..end].to_string(); }
-    }
+    if t.starts_with('[')
+        && let Some(end) = t.char_indices().take(40).find(|(_, c)| *c == ']').map(|(i, _)| i) { return t[1..end].to_string(); }
     if t.starts_with('/') { return format!("command {}", t.split_whitespace().next().unwrap_or(t)); }
     "person's input".into()
 }
@@ -28,7 +27,7 @@ pub fn queue_prompt(d: &Data, id: &str, text: &str) -> bool {
         return false;
     };
     let seq = SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0);
-    if write_atomic(&tab_inbox(d, &tab).join(format!("{seq}.json")), &serde_json::json!({"text": text, "enter": true}).to_string()).is_err() { return false; }
+    if write_atomic(&tab_inbox(d, &tab).join(format!("{seq}.json")), serde_json::json!({"text": text, "enter": true}).to_string()).is_err() { return false; }
     record::decide("request", "request queued", "the session is running", &[("request", seq.to_string()), ("session", now), ("tab", tab), ("kind", kind), ("chars", text.chars().count().to_string())]);
     true
 }
@@ -39,7 +38,7 @@ pub fn tab_inbox(d: &Data, tab: &str) -> PathBuf { tabs_dir(d).join(format!("{ta
 
 pub fn write_tab(d: &Data, tab: &str, session: Option<&str>, attached: bool) {
     let v = serde_json::json!({"tab": tab, "pid": std::process::id(), "session": session, "attached": attached});
-    let _ = write_atomic(&tab_file(d, tab), &v.to_string());
+    let _ = write_atomic(&tab_file(d, tab), v.to_string());
 }
 
 pub struct OpenTab { pub tab: String, pub session: Option<String>, pub attached: bool }

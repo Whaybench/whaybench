@@ -110,11 +110,10 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 [flag, id, rest @ ..] if flag == "--agent" => (Some(id.clone()), rest.first().cloned()),
                 rest => (None, rest.first().cloned()),
             };
-            if let Some(m) = &map_from {
-                if !m.starts_with('/') && !data.root.join(format!("{m}.json")).exists() {
+            if let Some(m) = &map_from
+                && !m.starts_with('/') && !data.root.join(format!("{m}.json")).exists() {
                     return Err(wb_core::i18n::t("new-tab-keep-map-not-opened-2").into());
                 }
-            }
             post(data, &Request::OpenTerm { open: TermOpen { map_from, agent, ..Default::default() } })
         }
         Some("show") => show_session(data, words.get(1).ok_or("session show needs an id")?),
@@ -299,11 +298,9 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
     let mut ticks = 0u32;
     event_loop.handle().insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, state| {
         crate::start::reap_apps();
-        if let Some(mime) = state.clip.pending.take() {
-            if let Ok((read, write)) = std::io::pipe() {
-                if smithay::wayland::selection::data_device::request_data_device_client_selection(&state.seat, mime, write.into()).is_ok() { state.clip.to_desktop(read); }
-            }
-        }
+        if let Some(mime) = state.clip.pending.take()
+            && let Ok((read, write)) = std::io::pipe()
+                && smithay::wayland::selection::data_device::request_data_device_client_selection(&state.seat, mime, write.into()).is_ok() { state.clip.to_desktop(read); }
         if state.clip.from_desktop().is_some() {
             let types = crate::clipboard::TEXT_TYPES.map(String::from).into();
             smithay::wayland::selection::data_device::set_data_device_selection(&state.display_handle, &state.seat, types, ());
@@ -334,7 +331,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
             }
         }
         ticks += 1;
-        if ticks % 10 == 0 { state.return_focus(); state.sync_focus(); }
+        if ticks.is_multiple_of(10) { state.return_focus(); state.sync_focus(); }
         TimeoutAction::ToDuration(Duration::from_millis(100))
     }).map_err(|e| e.to_string())?;
     Ok(())

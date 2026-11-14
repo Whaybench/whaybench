@@ -329,9 +329,8 @@ impl App {
     pub fn focus_term(&mut self, tab: &str) {
         let Some(id) = self.terms.iter().find(|(_, t)| t.as_str() == tab).map(|(i, _)| *i) else { return };
         let Some(pid) = self.surface.holding_tab(id).map(|p| p.pid) else { return };
-        if let Some(p) = self.surface.get_mut(pid) {
-            if let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; }
-        }
+        if let Some(p) = self.surface.get_mut(pid)
+            && let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; }
         self.focus_panel(pid);
     }
 
@@ -427,7 +426,7 @@ impl App {
             .and_then(|i| self.surface.holding_tab(i)).is_some_and(|p| p.modal);
         let pid = if modal {
             let pid = self.surface.new_pid();
-            let (w, h) = ((self.surface.w - 80.0).min(760.0).max(layout::MIN_W), (self.surface.h - 80.0).max(layout::MIN_H));
+            let (w, h) = ((self.surface.w - 80.0).clamp(layout::MIN_W, 760.0), (self.surface.h - 80.0).max(layout::MIN_H));
             let mut p = Panel::new(pid, tab, Rect::new(((self.surface.w - w) / 2.0).max(0.0), 40.0_f64.min(self.surface.h / 10.0), w, h));
             p.transient = true;
             p.modal = true;
@@ -449,9 +448,8 @@ impl App {
                         .filter(|k| self.surface.holding_tab(*k).is_some_and(|p| p.pid != pid && !p.tabs.iter().any(|t| self.saved.panels.iter().any(|s| s.tabs.contains(&t.key))))).collect();
                     if !strays.is_empty() {
                         for k in strays { self.surface.move_tab_to(k, pid); }
-                        if let Some(p) = self.surface.get_mut(pid) {
-                            if !front_of_group(&p.tabs[p.active].key) { if let Some(i) = p.tabs.iter().position(|t| front_of_group(&t.key)) { p.active = i; } }
-                        }
+                        if let Some(p) = self.surface.get_mut(pid)
+                            && !front_of_group(&p.tabs[p.active].key) && let Some(i) = p.tabs.iter().position(|t| front_of_group(&t.key)) { p.active = i; }
                     }
                     pid
                 }
@@ -464,7 +462,7 @@ impl App {
                         p.tabs.push(tab);
                         p.active = p.tabs.len() - 1;
                         // Whatever order they open in, these stay in front of their group.
-                        if !front_of_group(&p.tabs[p.active].key) { if let Some(i) = p.tabs.iter().position(|t| front_of_group(&t.key)) { p.active = i; } }
+                        if !front_of_group(&p.tabs[p.active].key) && let Some(i) = p.tabs.iter().position(|t| front_of_group(&t.key)) { p.active = i; }
                         pid
                     } else {
                         let pid = self.surface.new_pid();
@@ -488,9 +486,8 @@ impl App {
         self.space.map_element(window.clone(), (r.x as i32, r.y as i32), false);
         self.windows.insert(id, window);
         let asked = self.focus_when_open.take_if(|(prefix, at)| key.starts_with(prefix.as_str()) && at.elapsed() < std::time::Duration::from_secs(30));
-        if asked.is_some() {
-            if let Some(p) = self.surface.get_mut(pid) { if let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; } }
-        }
+        if asked.is_some()
+            && let Some(p) = self.surface.get_mut(pid) && let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; }
         record::decide("screen", "panel opened", if transient { "a dialog with a parent" } else { "a new app" }, &[("panel", pid.to_string()), ("app", key)]);
         self.focus_panel(pid);
         self.save_due = true;
@@ -518,9 +515,8 @@ impl App {
         let holder = self.surface.holding_tab(id).map(|p| p.pid);
         self.surface.remove_tab(id);
         record::decide("screen", "panel closed", "the app ended", &[("panel", holder.map(|p| p.to_string()).unwrap_or_default())]);
-        if let Act::Hold { pid, .. } | Act::Resize { pid, .. } | Act::TabPull { pid, .. } = self.act {
-            if self.surface.get(pid).is_none() { self.act = Act::Idle; self.zone = None; self.guides.clear(); }
-        }
+        if let Act::Hold { pid, .. } | Act::Resize { pid, .. } | Act::TabPull { pid, .. } = self.act
+            && self.surface.get(pid).is_none() { self.act = Act::Idle; self.zone = None; self.guides.clear(); }
         self.hover = None;
         if let Some(front) = self.surface.front() { self.focus_panel(front); }
         self.save_due = true;
