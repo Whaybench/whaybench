@@ -42,6 +42,24 @@ impl Maker {
         self.group.add_action(&act);
         m.append(Some(label), Some(&format!("m.{name}")));
     }
+    /// One of a set (`set` holds their action names): picked, it takes the tick from the others at once. The menu is
+    /// made again only after the pointer leaves the bar, so without this the old tick showed until then.
+    fn radio(&self, set: &Rc<RefCell<Vec<String>>>, m: &gio::Menu, label: &str, on: bool, f: impl Fn() + 'static) {
+        let name = self.name();
+        let act = gio::SimpleAction::new_stateful(&name, None, &on.to_variant());
+        // By name, through a weak handle: the actions are the group's, and holding it here would keep them alive.
+        let (group, names) = (self.group.downgrade(), set.clone());
+        act.connect_activate(move |a, _| {
+            f();
+            let Some(g) = group.upgrade() else { return };
+            for n in names.borrow().iter() {
+                if let Some(x) = g.lookup_action(n).and_downcast::<gio::SimpleAction>() { x.set_state(&(*n == a.name()).to_variant()); }
+            }
+        });
+        set.borrow_mut().push(name.clone());
+        self.group.add_action(&act);
+        m.append(Some(label), Some(&format!("m.{name}")));
+    }
 }
 
 /// Where people can support the project; it opens in the view panel's browser.
@@ -139,9 +157,10 @@ fn map_menu(d: &Data, k: &Maker) -> gio::Menu {
     let chosen = crate::mapstyles::carry_choice(d);
     let styles = std::iter::once((crate::mapstyles::DEFAULT.to_string(), wb_core::i18n::t("default").to_string()))
         .chain(crate::mapstyles::list(d).into_iter().filter(|s| s.frame().is_some()).map(|s| (s.id, s.name)));
+    let set = Rc::default();
     for (id, name) in styles {
         let d2 = d.clone();
-        k.check(&sec, &name, id == chosen, move || crate::mapstyles::set_current(&d2, "carry", &id));
+        k.radio(&set, &sec, &name, id == chosen, move || crate::mapstyles::set_current(&d2, "carry", &id));
     }
     m.append_section(Some(wb_core::i18n::t("carried-to-new-conversation")), &sec);
     let sec = gio::Menu::new();
@@ -204,9 +223,10 @@ fn settings_menu(d: &Data, k: &Maker) -> gio::Menu {
     let m = gio::Menu::new();
     let themes = gio::Menu::new();
     let now = theme::load_active(d).name;
+    let set = Rc::default();
     for (id, name) in theme::list(d) {
         let (d2, id2) = (d.clone(), id.clone());
-        k.check(&themes, &name, id == now, move || { let _ = status::post(&d2, &json!({"cmd": "theme", "name": id2})); });
+        k.radio(&set, &themes, &name, id == now, move || { let _ = status::post(&d2, &json!({"cmd": "theme", "name": id2})); });
     }
     m.append_submenu(Some(wb_core::i18n::t("theme")), &themes);
     {
@@ -232,13 +252,15 @@ fn settings_menu(d: &Data, k: &Maker) -> gio::Menu {
     }
     // Under the theme: which language. The program's texts are read once, so a change applies after a restart.
     let languages = gio::Menu::new();
-    let now = wb_core::i18n::lang().to_string();
+    // The tick is on the language chosen, which may wait for the restart, not on the one the texts are in now.
+    let now = wb_core::i18n::active(d, Some(wb_core::i18n::lang()));
+    let set = Rc::default();
     for (id, name) in wb_core::i18n::list(d) {
         let (d2, id2, w) = (d.clone(), id.clone(), k.win.clone());
-        k.check(&languages, &name, id == now, move || {
+        k.radio(&set, &languages, &name, id == now, move || {
             wb_core::i18n::choose(&d2, &id2);
             status::say(&d2, wb_core::i18n::t("language-changed-applied-after-restart"), 8);
-            match wb_core::input::missing(&d2, &id2) { Some(package) => offer_input(&w, &d2, &id2, package), None => type_with(&d2, &id2) }
+            match wb_core::input::missing(&d2, &id2) { Some(package) => offer_input(&w, &d2, &id2, package), None => { let (d, l) = (d2.clone(), id2.clone()); std::thread::spawn(move || type_with(&d, &l)); } }
         });
     }
     m.append_submenu(Some(wb_core::i18n::t("language")), &languages);
@@ -248,19 +270,26 @@ fn settings_menu(d: &Data, k: &Maker) -> gio::Menu {
 /// The language chosen types with an engine that is not installed: asks, then installs it in the background.
 fn offer_input(win: &gtk::ApplicationWindow, d: &Data, lang: &str, package: String) {
     let ask = wb_core::i18n::f("input-install-ask", &[("package", package.clone())]);
+    // A language add-on the program did not bring (or one changed since) asks in its own name: said under the question.
+    let note: Vec<String> = (!wb_core::addons::bundled_as_is(d, &format!("languages/{lang}"))).then(|| wb_core::i18n::t("input-install-not-ours").to_string()).into_iter().collect();
     let (d, lang) = (d.clone(), lang.to_string());
-    crate::common::confirm(win, &ask, &[], wb_core::i18n::t("input-install"), move || {
+    crate::common::confirm(win, &ask, &note, wb_core::i18n::t("input-install"), move || {
         let (d, lang, package) = (d.clone(), lang.clone(), package.clone());
-        let Some(mut c) = wb_core::input::install_command(&package) else {
+        let Some(steps) = wb_core::input::install_commands(&package) else {
             wb_core::log::warn("input", "engine not installed", "no PackageKit and not WSL", &[("package", package.clone())]);
             status::say(&d, &wb_core::i18n::f("input-install-by-hand", &[("package", package)]), 20);
             return;
         };
         status::say(&d, &wb_core::i18n::f("input-installing", &[("package", package.clone())]), 120);
         std::thread::spawn(move || {
-            let done = c.output();
-            let ok = done.as_ref().is_ok_and(|o| o.status.success());
-            let why = match &done { Ok(o) => String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or_default().to_string(), Err(e) => e.to_string() };
+            // In order, stopping at the first that fails.
+            let mut why = String::new();
+            let ok = steps.into_iter().all(|mut c| match c.output() {
+                Ok(o) if o.status.success() => true,
+                // pkcon says why on its output, apt-get on its errors.
+                Ok(o) => { why = [&o.stderr, &o.stdout].iter().find_map(|b| String::from_utf8_lossy(b).lines().rfind(|l| !l.trim().is_empty()).map(String::from)).unwrap_or_default(); false }
+                Err(e) => { why = e.to_string(); false }
+            });
             if ok { wb_core::log::decide("input", "engine installed", "the person agreed", &[("package", package.clone())]); }
             else { wb_core::log::warn("input", "engine not installed", &why, &[("package", package.clone())]); }
             status::say(&d, &wb_core::i18n::f(if ok { "input-installed" } else { "input-install-failed" }, &[("package", package)]), 12);
@@ -290,7 +319,7 @@ fn make(win: &gtk::ApplicationWindow, d: &Data) -> (gio::Menu, gio::SimpleAction
 }
 
 /// What the menus depend on; they are made again only when it changes.
-fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {} {:?} {:?} {} {} {:?}", wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), crate::mapstyles::current(d, "map"), crate::mapstyles::carry_choice(d), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
+fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {} {:?} {:?} {} {} {} {:?}", wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), wb_core::i18n::active(d, Some(wb_core::i18n::lang())), crate::mapstyles::current(d, "map"), crate::mapstyles::carry_choice(d), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
 
 /// Whether one of the bar's menus is showing.
 fn menu_open(w: &gtk::Widget) -> bool {

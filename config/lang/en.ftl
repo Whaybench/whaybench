@@ -160,6 +160,7 @@ map-branch = Map branch { $a1 }
 theme = Theme
 language-changed-applied-after-restart = Language changed · Applied after restart
 input-install-ask = Additional language support: { $package }{"\u000A"}Install it?
+input-install-not-ours = Requested by a language add-on that does not come with Whaybench
 input-install = Install
 input-installing = Installing language support: { $package }
 input-installed = Language support installed: { $package }

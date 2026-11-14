@@ -160,6 +160,7 @@ map-branch = 지도 분기 { $a1 }
 theme = 테마
 language-changed-applied-after-restart = 언어 변경 · 재시작 후 적용
 input-install-ask = 언어 지원 추가 설치: { $package }{"\u000A"}설치하시겠습니까?
+input-install-not-ours = Whaybench가 제공하지 않은 언어 add-on의 요청
 input-install = 설치
 input-installing = 언어 지원 설치 중: { $package }
 input-installed = 언어 지원 설치 완료: { $package }

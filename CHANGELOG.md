@@ -24,6 +24,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
   root under WSL), then adds the engine to fcitx5's input method group so the language types at once.
 
 ### Fixed
+- Settings → Language ticks the language chosen: it kept the tick on the one in use until the restart, so a choice
+  looked lost. In the language, theme and display-style menus the tick moves as soon as one is picked (it waited for
+  the pointer to leave the menu bar).
+- An add-on's package name is installed only when it is a package name: one starting with `-` was an option to
+  apt-get, which can run a command as root.
+- The confirmation to install language support says when the language add-on does not come with Whaybench.
+- Talking to fcitx5 never starts it: one started by the session bus has no display and breaks composed input.
+- Choosing a language no longer holds the menu bar while fcitx5 loads a new engine.
+- The package lists are updated before an engine is installed (apt-get under WSL, PackageKit on a desktop: its lists
+  went stale after a change made with dnf); a failed install says why in the log.
 - The notifications panel keeps its scroll place when its list changes: deleting a node jumped to the top.
 
 ## [0.6.5] - 2026-11-14

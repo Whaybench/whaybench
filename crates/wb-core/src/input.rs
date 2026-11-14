@@ -8,10 +8,18 @@ use crate::paths::Data;
 
 /// The package to install so the language can be typed: none when it needs no engine or one of its engines is
 /// installed, else the first (default) engine's. The others are choices, not needs.
-pub fn missing(d: &Data, lang: &str) -> Option<String> {
-    let about: Value = fs::read_to_string(d.root.join("addons/languages").join(lang).join("language.json"))
-        .ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    missing_in(&about, &data_dirs())
+pub fn missing(d: &Data, lang: &str) -> Option<String> { missing_in(&about(d, lang), &data_dirs()) }
+
+/// The language add-on's language.json; nothing when it has none.
+fn about(d: &Data, lang: &str) -> Value {
+    fs::read_to_string(d.root.join("addons/languages").join(lang).join("language.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// A package name as distributions allow it. Anything else is not installed: a name starting with `-` would be an
+/// option to apt-get (`-oDPkg::Pre-Invoke::=...` runs a command as root), and add-ons come from other people.
+fn valid_package(name: &str) -> bool {
+    name.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+.-".contains(c))
 }
 
 fn missing_in(about: &Value, dirs: &[PathBuf]) -> Option<String> {
@@ -19,15 +27,14 @@ fn missing_in(about: &Value, dirs: &[PathBuf]) -> Option<String> {
     // An engine is installed when fcitx5 finds its description: <data dir>/fcitx5/inputmethod/<name>.conf.
     let installed = |e: &Value| e["name"].as_str().is_some_and(|n| dirs.iter().any(|d| d.join("fcitx5/inputmethod").join(format!("{n}.conf")).is_file()));
     if engines.is_empty() || engines.iter().any(installed) { return None; }
-    engines[0]["package"].as_str().map(String::from)
+    engines[0]["package"].as_str().filter(|p| valid_package(p)).map(String::from)
 }
 
 /// Puts the language's engine into fcitx5's current input method group, so the language types at once: the first of
 /// its engines that is installed, unless one of them is in the group already. Only adds: what the person set up
 /// stays. A group with no keyboard gets the language's layout first. Ok(true) when the group changed.
 pub fn enable(d: &Data, lang: &str) -> Result<bool, String> {
-    let about: Value = fs::read_to_string(d.root.join("addons/languages").join(lang).join("language.json"))
-        .ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let about = about(d, lang);
     let dirs = data_dirs();
     let engines: Vec<&str> = about["input"]["engines"].as_array().map(|a| a.iter().filter_map(|e| e["name"].as_str()).collect()).unwrap_or_default();
     let Some(engine) = engines.iter().find(|n| dirs.iter().any(|d| d.join("fcitx5/inputmethod").join(format!("{n}.conf")).is_file())) else { return Ok(false) };
@@ -147,9 +154,10 @@ fn with_engine(layout: &str, mut items: Vec<(String, String)>, engines: &[&str],
     Some((layout, items))
 }
 
-/// A call to fcitx5's controller on the session bus, its answer as busctl's JSON.
+/// A call to fcitx5's controller on the session bus, its answer as busctl's JSON. Never starts fcitx5: one started by
+/// the bus has no display to attach to and leaves composed input dead (as start.rs avoids).
 fn busctl(args: &[&str]) -> Result<Value, String> {
-    let out = Command::new("busctl").args(["--user", "--json=short", "call", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1"]).args(args)
+    let out = Command::new("busctl").args(["--user", "--json=short", "--auto-start=no", "call", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1"]).args(args)
         .output().map_err(|e| e.to_string())?;
     if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
     let text = String::from_utf8_lossy(&out.stdout);
@@ -162,21 +170,22 @@ fn data_dirs() -> Vec<PathBuf> {
     dirs.split(':').filter(|s| !s.is_empty()).map(PathBuf::from).collect()
 }
 
-/// The command that installs the package, or None when there is no way without a terminal.
-/// Under WSL the account has no sudo: wsl.exe runs apt-get as root in this distribution (no Recommends: those are
-/// setting programs). On a desktop PackageKit installs, and the system asks for the password (polkit).
-pub fn install_command(package: &str) -> Option<Command> {
+/// The commands that install the package, run in order, or None when there is no way without a terminal (or the
+/// name is not a package name). Under WSL the account has no sudo: wsl.exe runs apt-get as root in this distribution,
+/// the package lists first (the ones from the setup go stale), without Recommends (those are setting programs). On a
+/// desktop PackageKit installs, its lists first too, and the system asks for the password (polkit).
+pub fn install_commands(package: &str) -> Option<Vec<Command>> {
+    if !valid_package(package) { return None; }
     if Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists() {
         let exe = which("wsl.exe").unwrap_or_else(|| PathBuf::from("/mnt/c/Windows/System32/wsl.exe"));
         let distro = std::env::var("WSL_DISTRO_NAME").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "Whaybench".into());
-        let mut c = Command::new(exe);
-        c.args(["-d", &distro, "-u", "root", "--", "apt-get", "install", "-y", "-q", "--no-install-recommends"]).arg(package);
-        return Some(c);
+        let apt = |args: &[&str]| { let mut c = Command::new(&exe); c.args(["-d", &distro, "-u", "root", "--", "apt-get"]).args(args); c };
+        return Some(vec![apt(&["update", "-q"]), apt(&["install", "-y", "-q", "--no-install-recommends", "--", package])]);
     }
     let pkcon = which("pkcon")?;
-    let mut c = Command::new(pkcon);
-    c.args(["install", "-y"]).arg(package);
-    Some(c)
+    let run = |args: &[&str]| { let mut c = Command::new(&pkcon); c.args(args); c };
+    // PackageKit keeps lists of its own: after a change made with dnf or apt they no longer know the package.
+    Some(vec![run(&["refresh"]), run(&["install", "-y", "--", package])])
 }
 
 fn which(name: &str) -> Option<PathBuf> {
@@ -221,5 +230,12 @@ mod tests {
         let got = serde_json::json!({"type": "a{sv}", "data": {"Keyboard": {"type": "s", "data": "Dubeolsik"},
             "Keys": {"type": "a{sv}", "data": {"0": {"type": "s", "data": "F9"}}}}});
         assert_eq!(plain(&got), serde_json::json!({"Keyboard": "Dubeolsik", "Keys": {"0": "F9"}}));
+    }
+    #[test]
+    fn only_a_package_name_is_installed() {
+        assert!(valid_package("fcitx5-hangul") && valid_package("libstdc++6") && valid_package("fcitx5-m17n"));
+        for bad in ["-oDPkg::Pre-Invoke::=id", "", "Fcitx5", "a b", "x;id", "../x"] { assert!(!valid_package(bad), "{bad}"); }
+        let about = serde_json::json!({"input": {"engines": [{"name": "x", "package": "--allow-unauthenticated"}]}});
+        assert_eq!(missing_in(&about, &[]), None, "a bad name is never offered");
     }
 }
