@@ -4,6 +4,7 @@ pub mod agents;
 pub mod db;
 pub mod hook;
 pub mod i18n;
+pub mod input;
 pub mod log;
 pub mod map;
 pub mod map_tool;

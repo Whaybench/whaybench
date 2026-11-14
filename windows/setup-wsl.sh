@@ -44,7 +44,7 @@ esac
 say "packages"
 apt-get update -q
 # shellcheck disable=SC2086 # engine is one word or none
-apt-get install -y -q libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5 $engine "$fonts" dbus-user-session
+apt-get install -y -q libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5 $engine "$fonts" dbus-user-session
 
 # The input method inside Whaybench: the engine of the language, after the plain keyboard.
 if [ -n "$im" ]; then

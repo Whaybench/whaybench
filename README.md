@@ -58,27 +58,32 @@ login and keeps everything in one folder on your computer.
 
 ## Install
 
-Whaybench runs on Linux (x86_64) in a Wayland desktop session: Fedora 39, Ubuntu 24.04, Debian 13 or newer, or
-another distribution with GTK 4.12 or newer (AlmaLinux and Rocky Linux 10 with EPEL). You need Claude Code or Codex CLI, installed and signed in. On Windows it runs in WSL, with an installer of its own: see [Windows](#windows).
+Whaybench installs on Windows and on Linux, both in a few steps.
+
+- **Windows** 11, or 10 21H2 or newer (64-bit): one installer sets up everything, Claude Code and Codex CLI
+  included. See [Windows](#windows).
+- **Linux** (x86_64) in a Wayland desktop session: Fedora 39, Ubuntu 24.04, Debian 13 or newer, or another
+  distribution with GTK 4.12 or newer (AlmaLinux and Rocky Linux 10 with EPEL). You need Claude Code or Codex CLI,
+  installed and signed in. The steps follow.
 
 ### 1. System packages
 
 Fedora:
 
-    sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox fcitx5
+    sudo dnf install webkitgtk6.0 wl-clipboard firefox fcitx5
 
 Ubuntu and Debian:
 
-    sudo apt install libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5
+    sudo apt install libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5
 
 Arch:
 
-    sudo pacman -S gtk4 webkitgtk-6.0 wl-clipboard firefox fcitx5
+    sudo pacman -S webkitgtk-6.0 wl-clipboard firefox fcitx5
 
 AlmaLinux and Rocky Linux 10:
 
     sudo dnf install epel-release
-    sudo dnf install gtk4 webkitgtk6.0 wl-clipboard firefox
+    sudo dnf install webkitgtk6.0 wl-clipboard firefox
     sudo dnf upgrade "gstreamer1*"   # webkitgtk6.0 from EPEL needs GStreamer 1.26
 
 fcitx5 is the input method inside Whaybench, the same on every desktop. Add the engine for your language, for
@@ -140,7 +145,16 @@ WSL distributions are not touched), Firefox, the input method for your Windows d
 Whaybench. This takes a while. Then start Whaybench from the Start menu or the desktop, and the first time sign in to
 Claude in the browser that opens. If the setup stops, run the installer again: it goes on from where it stopped.
 
-Your account in that Ubuntu has no password and no `sudo`, so an AI agent running as you cannot become root. To install
+Whaybench starts Claude Code and Codex CLI as they are: their own permission prompts and sandbox settings apply.
+Programs in WSL can start Windows programs and change your Windows files with your rights, so what an agent runs
+there can reach your Windows system too. In the words of [Claude Code's security guide](https://code.claude.com/docs/en/security):
+
+> You're responsible for reviewing proposed code and commands for safety before approval.
+
+> While these protections significantly reduce risk, no system is completely immune to all attacks. Always maintain
+> good security practices when working with any AI tool.
+
+For Codex, see [its Windows sandbox guide](https://learn.chatgpt.com/docs/windows/windows-sandbox). To install
 something system-wide, open PowerShell and run `wsl -d Whaybench -u root`.
 
 Whaybench updates itself from its menu, as on Linux. To remove it, uninstall Whaybench in Windows Settings → Apps; it

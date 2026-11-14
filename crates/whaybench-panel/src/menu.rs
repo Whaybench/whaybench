@@ -23,7 +23,7 @@ fn open_keys(d: &Data) -> Vec<String> {
         .filter_map(|t| t.as_str().map(String::from)).collect()
 }
 
-struct Maker { group: gio::SimpleActionGroup, n: Cell<u32> }
+struct Maker { group: gio::SimpleActionGroup, n: Cell<u32>, win: gtk::ApplicationWindow }
 
 impl Maker {
     fn name(&self) -> String { let n = self.n.get(); self.n.set(n + 1); format!("a{n}") }
@@ -227,18 +227,52 @@ fn settings_menu(d: &Data, k: &Maker) -> gio::Menu {
     let languages = gio::Menu::new();
     let now = wb_core::i18n::lang().to_string();
     for (id, name) in wb_core::i18n::list(d) {
-        let (d2, id2) = (d.clone(), id.clone());
+        let (d2, id2, w) = (d.clone(), id.clone(), k.win.clone());
         k.check(&languages, &name, id == now, move || {
             wb_core::i18n::choose(&d2, &id2);
             status::say(&d2, wb_core::i18n::t("language-changed-applied-after-restart"), 8);
+            match wb_core::input::missing(&d2, &id2) { Some(package) => offer_input(&w, &d2, &id2, package), None => type_with(&d2, &id2) }
         });
     }
     m.append_submenu(Some(wb_core::i18n::t("language")), &languages);
     m
 }
 
-fn make(d: &Data) -> (gio::Menu, gio::SimpleActionGroup) {
-    let k = Maker { group: gio::SimpleActionGroup::new(), n: Cell::new(0) };
+/// The language chosen types with an engine that is not installed: asks, then installs it in the background.
+fn offer_input(win: &gtk::ApplicationWindow, d: &Data, lang: &str, package: String) {
+    let ask = wb_core::i18n::f("input-install-ask", &[("package", package.clone())]);
+    let (d, lang) = (d.clone(), lang.to_string());
+    crate::common::confirm(win, &ask, &[], wb_core::i18n::t("input-install"), move || {
+        let (d, lang, package) = (d.clone(), lang.clone(), package.clone());
+        let Some(mut c) = wb_core::input::install_command(&package) else {
+            wb_core::log::warn("input", "engine not installed", "no PackageKit and not WSL", &[("package", package.clone())]);
+            status::say(&d, &wb_core::i18n::f("input-install-by-hand", &[("package", package)]), 20);
+            return;
+        };
+        status::say(&d, &wb_core::i18n::f("input-installing", &[("package", package.clone())]), 120);
+        std::thread::spawn(move || {
+            let done = c.output();
+            let ok = done.as_ref().is_ok_and(|o| o.status.success());
+            let why = match &done { Ok(o) => String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or_default().to_string(), Err(e) => e.to_string() };
+            if ok { wb_core::log::decide("input", "engine installed", "the person agreed", &[("package", package.clone())]); }
+            else { wb_core::log::warn("input", "engine not installed", &why, &[("package", package.clone())]); }
+            status::say(&d, &wb_core::i18n::f(if ok { "input-installed" } else { "input-install-failed" }, &[("package", package)]), 12);
+            if ok { type_with(&d, &lang); }
+        });
+    });
+}
+
+/// Puts the language's engine into the input method group, so it types at once; said in the record either way.
+fn type_with(d: &Data, lang: &str) {
+    match wb_core::input::enable(d, lang) {
+        Ok(true) => wb_core::log::decide("input", "engine added to the group", "the language was chosen", &[("language", lang.to_string())]),
+        Ok(false) => {}
+        Err(e) => wb_core::log::warn("input", "engine not added to the group", &e, &[("language", lang.to_string())]),
+    }
+}
+
+fn make(win: &gtk::ApplicationWindow, d: &Data) -> (gio::Menu, gio::SimpleActionGroup) {
+    let k = Maker { group: gio::SimpleActionGroup::new(), n: Cell::new(0), win: win.clone() };
     let bar = gio::Menu::new();
     bar.append_submenu(Some("Whaybench"), &whaybench_menu(d, &k));
     bar.append_submenu(Some(wb_core::i18n::t("sessions")), &session_menu(d, &k));
@@ -263,7 +297,7 @@ fn menu_open(w: &gtk::Widget) -> bool {
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
-    let (model, group) = make(&d);
+    let (model, group) = make(win, &d);
     let bar = gtk::PopoverMenuBar::from_model(Some(&model));
     win.insert_action_group("m", Some(&group));
     win.set_child(Some(&bar));
@@ -292,7 +326,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         if inside.get() || menu_open(bar.upcast_ref()) { return glib::ControlFlow::Continue; }
         let now = signature(&d);
         if *last.borrow() != now {
-            let (model, group) = make(&d);
+            let (model, group) = make(&w, &d);
             w.insert_action_group("m", Some(&group));
             bar.set_menu_model(Some(&model));
             *last.borrow_mut() = now;

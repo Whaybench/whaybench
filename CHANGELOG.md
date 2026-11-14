@@ -6,6 +6,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- The install commands no longer name GTK 4 (`gtk4`, `libgtk-4-1`): WebKitGTK depends on it, so it comes along.
+- README: the install section names Windows and Linux side by side. The Windows section no longer says an agent
+  cannot become root (programs in WSL can start Windows programs); it quotes the agents' own security guidance.
+
+### Added
+- A language add-on can say what it types with: `input` in `language.json` gives the keyboard layout and the
+  fcitx5 engines with their packages (`addons/languages/README.md`). The Korean add-on declares `hangul`.
+- Choosing a language whose input engine is not installed offers to install it (PackageKit on a desktop, `wsl.exe` as
+  root under WSL), then adds the engine to fcitx5's input method group so the language types at once.
+
 ## [0.6.5] - 2026-11-14
 
 Under WSL, 0.6.4 made a window flash and keys repeat while reading the Windows clipboard; this fixes it.

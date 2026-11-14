@@ -7,7 +7,7 @@ use gtk::{gio, glib, prelude::*};
 use serde_json::{Value, json};
 use wb_core::{i18n::t, memory, paths::Data, status};
 
-use crate::common::{ctl, every};
+use crate::common::{confirm, ctl, every};
 
 const SECTIONS: [(&str, &str); 7] = [("due", "notify-due"), ("marked", "notify-marked"), ("changed", "notify-changed"), ("check", "notify-check"), ("open", "notify-open"), ("held", "notify-held"), ("trash", "notify-trash")];
 
@@ -109,40 +109,6 @@ fn delete_menu(menu: &gio::Menu, group: &gio::SimpleActionGroup, d: &Data, nid: 
     menu.append_submenu(Some(t("delete")), &sub);
 }
 
-/// Asks once before something that cannot be undone: the text, Cancel, and the button that does it.
-/// `lines` are shown under the text, to read before deciding: what goes with it.
-fn confirm(win: &gtk::ApplicationWindow, text: &str, lines: &[String], then: impl Fn() + 'static) {
-    let dlg = gtk::Window::builder().title(t("notify-purge")).transient_for(win).modal(true).decorated(false).build();
-    let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    body.set_margin_top(10); body.set_margin_bottom(10); body.set_margin_start(10); body.set_margin_end(10);
-    let say = gtk::Label::new(Some(text));
-    say.set_xalign(0.0); say.set_wrap(true); say.set_max_width_chars(28);
-    body.append(&say);
-    if !lines.is_empty() {
-        let list = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        for l in lines {
-            let line = gtk::Label::new(Some(l));
-            line.set_xalign(0.0); line.set_wrap(true); line.set_wrap_mode(gtk::pango::WrapMode::WordChar); line.add_css_class("dim");
-            list.append(&line);
-        }
-        // As tall as its lines, up to a limit; the dialog takes the size of what it holds.
-        let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).max_content_height(400).build();
-        scroll.set_child(Some(&list));
-        scroll.set_vexpand(true);
-        body.append(&scroll);
-    }
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    row.set_halign(gtk::Align::End);
-    let (cancel, ok) = (gtk::Button::with_label(t("cancel")), gtk::Button::with_label(t("notify-purge")));
-    row.append(&cancel); row.append(&ok);
-    body.append(&row);
-    dlg.set_child(Some(&body));
-    { let w = dlg.clone(); cancel.connect_clicked(move |_| w.close()); }
-    let w = dlg.clone();
-    ok.connect_clicked(move |_| { w.close(); then(); });
-    dlg.present();
-}
-
 /// Before a node goes for good: its name and how many history entries go with it.
 fn confirm_purge(win: &gtk::ApplicationWindow, d: &Data, nid: &str, then: impl Fn() + 'static) {
     let shown = memory::show(&d.root, nid);
@@ -155,7 +121,7 @@ fn confirm_purge(win: &gtk::ApplicationWindow, d: &Data, nid: &str, then: impl F
         .iter().map(|r| format!("{} {}", r.day, r.line)).collect();
     lines.reverse();
     let (d2, n2) = (d.clone(), nid.to_string());
-    confirm(win, &wb_core::i18n::f("purge-confirm", &[("a1", label), ("n", n.to_string())]), &lines, move || {
+    confirm(win, &wb_core::i18n::f("purge-confirm", &[("a1", label), ("n", n.to_string())]), &lines, t("notify-purge"), move || {
         // A node not deleted yet is deleted first (alone: what is under it moves up), then it goes for good.
         let deleted = memory::show(&d2.root, &n2)["nodes"][0]["state"] == "removed";
         if !deleted && let Err(e) = wb_core::map::trash(&d2.root, &n2, false) { say_error(&d2, e); }
@@ -234,7 +200,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                     let all: Vec<String> = memory::board(&d2.root, None)["trash"].as_array().into_iter().flatten()
                         .filter_map(|i| i["node"]["id"].as_str().map(String::from)).collect();
                     let (d3, again) = (d2.clone(), again.clone());
-                    confirm(&win2, &wb_core::i18n::f("purge-all-confirm", &[("n", all.len().to_string())]), &[], move || { purge(&d3, &all); again(); });
+                    confirm(&win2, &wb_core::i18n::f("purge-all-confirm", &[("n", all.len().to_string())]), &[], t("notify-purge"), move || { purge(&d3, &all); again(); });
                 });
                 popup(&list2, &menu, &group, x, y);
                 return;

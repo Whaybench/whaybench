@@ -234,3 +234,37 @@ mod tests {
         assert_eq!(table_pipes("| `a \\| b` |"), "| `a \\| b` |", "already escaped");
     }
 }
+
+/// Asks once before a step: the text, Cancel, and the button `ok` that takes it.
+/// `lines` are shown under the text, to read before deciding: what goes with it.
+pub fn confirm(win: &gtk::ApplicationWindow, text: &str, lines: &[String], ok: &str, then: impl Fn() + 'static) {
+    let dlg = gtk::Window::builder().title(ok).transient_for(win).modal(true).decorated(false).build();
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    body.set_margin_top(10); body.set_margin_bottom(10); body.set_margin_start(10); body.set_margin_end(10);
+    let say = gtk::Label::new(Some(text));
+    say.set_xalign(0.0); say.set_wrap(true); say.set_max_width_chars(28);
+    body.append(&say);
+    if !lines.is_empty() {
+        let list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        for l in lines {
+            let line = gtk::Label::new(Some(l));
+            line.set_xalign(0.0); line.set_wrap(true); line.set_wrap_mode(gtk::pango::WrapMode::WordChar); line.add_css_class("dim");
+            list.append(&line);
+        }
+        // As tall as its lines, up to a limit; the dialog takes the size of what it holds.
+        let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).max_content_height(400).build();
+        scroll.set_child(Some(&list));
+        scroll.set_vexpand(true);
+        body.append(&scroll);
+    }
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    row.set_halign(gtk::Align::End);
+    let (cancel, ok) = (gtk::Button::with_label(wb_core::i18n::t("cancel")), gtk::Button::with_label(ok));
+    row.append(&cancel); row.append(&ok);
+    body.append(&row);
+    dlg.set_child(Some(&body));
+    { let w = dlg.clone(); cancel.connect_clicked(move |_| w.close()); }
+    let w = dlg.clone();
+    ok.connect_clicked(move |_| { w.close(); then(); });
+    dlg.present();
+}
