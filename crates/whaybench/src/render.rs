@@ -413,7 +413,7 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     // Their shadows, under every one of them: only the box's outside is drawn.
     if t.shadow_size > 0.0 {
         let none = [0.0; 4];
-        for p in panels.iter().filter(|p| !p.modal) {
+        for p in &panels {
             f.card(shaders.as_ref(), p.rect, Card { radius, border: 0.0, bar: 0.0, margin: t.shadow_size, fill: none, top: none, bottom: none, line: none, shadow: premultiplied(t.shadow) });
         }
     }

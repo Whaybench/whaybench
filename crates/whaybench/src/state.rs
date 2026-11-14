@@ -128,7 +128,6 @@ pub struct App {
     /// linux-dmabuf, offered only when the window's GPU has a render node apps can use (not under WSLg).
     pub dmabuf: Option<smithay::wayland::dmabuf::DmabufState>,
     pub gpu: Option<std::rc::Rc<std::cell::RefCell<smithay::backend::winit::WinitGraphicsBackend<smithay::backend::renderer::gles::GlesRenderer>>>>,
-    pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<App>,
     pub data_device_state: DataDeviceState,
     pub clip: crate::clipboard::Bridge,
@@ -153,7 +152,8 @@ impl App {
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         XdgDecorationState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
-        let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
+        // The globals stay registered: the manager only holds their ids and has nothing to do when dropped.
+        let _ = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let clip = crate::clipboard::Bridge::start(&data);
         let mut seat_state = SeatState::new();
@@ -200,7 +200,7 @@ impl App {
             starting: HashMap::new(),
             shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
-            compositor_state, xdg_shell_state, shm_state, dmabuf: None, gpu: None, output_manager_state, seat_state, data_device_state, clip,
+            compositor_state, xdg_shell_state, shm_state, dmabuf: None, gpu: None, seat_state, data_device_state, clip,
             popups: PopupManager::default(), seat, builtin_ime,
         }
     }
