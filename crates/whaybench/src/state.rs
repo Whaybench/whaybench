@@ -55,7 +55,7 @@ pub fn slot_of(app: &str) -> Option<&'static str> {
 }
 
 /// Apps whose window is a settings window, not a panel.
-const MODAL_APPS: [&str; 2] = ["dev.whaybench.theme", "dev.whaybench.mapstyle"];
+const MODAL_APPS: [&str; 3] = ["dev.whaybench.theme", "dev.whaybench.mapstyle", "dev.whaybench.prefs"];
 
 fn front_of_group(key: &str) -> bool { key.starts_with("dev.whaybench.sessions#") || key.starts_with("dev.whaybench.view#") }
 
@@ -476,8 +476,9 @@ impl App {
         let transient = parent_panel.is_some() || modal;
         let r = self.surface.app_of(self.surface.get(pid).unwrap().rect);
         surface.with_pending_state(|s| {
-            // A dialog too: what is wider than its place is cut off, buttons and all.
-            s.size = Some((r.w as i32, r.h as i32).into());
+            // A dialog or settings window takes the size its content wants, up to its place (the bounds: what is wider
+            // would be cut off, buttons and all); a panel takes its place.
+            if transient { s.bounds = Some((r.w as i32, r.h as i32).into()); } else { s.size = Some((r.w as i32, r.h as i32).into()); }
             s.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
             // Tiled: apps leave out their own shadows and rounded corners.
             for t in [xdg_toplevel::State::TiledLeft, xdg_toplevel::State::TiledRight, xdg_toplevel::State::TiledTop, xdg_toplevel::State::TiledBottom] { s.states.set(t); }
@@ -605,7 +606,11 @@ impl App {
             if let Some(w) = self.windows.get(&p.tab().id) {
                 let g = w.geometry().size;
                 if g.w > 0 && g.h > 0 {
-                    p.rect.w = g.w as f64 + 2.0 * pad;
+                    let w = g.w as f64 + 2.0 * pad;
+                    // A settings window that changes width keeps its middle where it was: placed in the middle of the
+                    // screen, it stays there at the size its content gives it, and where the person moved it, there.
+                    if p.modal && (w - p.rect.w).abs() > 0.5 { p.rect.x = (p.rect.x + (p.rect.w - w) / 2.0).max(0.0); }
+                    p.rect.w = w;
                     p.rect.h = g.h as f64 + layout::TITLE + pad;
                 }
             }

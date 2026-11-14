@@ -109,14 +109,10 @@ and trust the Whaybench hooks. See [docs/codex.md](docs/codex.md).
 A conversation tab opens with the agent; ask it something and the map starts to grow. Settings → Language
 switches the interface language.
 
-To see context and plan usage (5-hour and weekly, with when they reset) in Claude Code's status line and under
-the notifications panel, add this to `~/.claude/settings.json`. Whaybench does not change your settings itself.
-
-```json
-"statusLine": { "type": "command", "command": "~/.local/bin/whaybench statusline" }
-```
-
-If you already have a status line script, pass it the same input: `echo "$input" | ~/.local/bin/whaybench statusline`.
+Context and plan usage (5-hour and weekly, with when they reset) show in Claude Code's status line and under the
+notifications panel: Whaybench's conversation tabs start Claude Code with its status line, without changing your
+settings. If you set a status line of your own in `~/.claude/settings.json`, that one is kept; pass it the same
+input to keep the panel's numbers: `echo "$input" | ~/.local/bin/whaybench statusline`.
 
 Releases are signed with [minisign](https://jedisct1.github.io/minisign/). Whaybench updates itself only with files
 that check against this key, and `install.sh` checks the package with it when `minisign` is installed:

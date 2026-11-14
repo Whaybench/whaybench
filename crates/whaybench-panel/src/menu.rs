@@ -46,6 +46,8 @@ impl Maker {
 
 /// Where people can support the project; it opens in the view panel's browser.
 const SUPPORT: &str = "https://ko-fi.com/whaybench";
+/// How to use Whaybench: the README, in the view panel's browser.
+const GUIDE: &str = "https://github.com/Whaybench/whaybench#readme";
 
 fn whaybench_menu(d: &Data, k: &Maker) -> gio::Menu {
     let m = gio::Menu::new();
@@ -76,6 +78,8 @@ fn whaybench_menu(d: &Data, k: &Maker) -> gio::Menu {
         });
     }
     let d6 = d.clone();
+    let d7 = d.clone();
+    k.add(&about, wb_core::i18n::t("user-guide"), move || { let _ = wb_core::view::open(&d7, GUIDE, None); });
     k.add(&about, wb_core::i18n::t("support"), move || { let _ = wb_core::view::open(&d6, SUPPORT, None); });
     m.append_submenu(Some(wb_core::i18n::t("about")), &about);
     m
@@ -210,6 +214,13 @@ fn settings_menu(d: &Data, k: &Maker) -> gio::Menu {
         k.add(&m, wb_core::i18n::t("themeset-open"), move || {
             if open_keys(&d2).iter().any(|t| t.starts_with("dev.whaybench.theme")) { status::focus_app(&d2, "dev.whaybench.theme"); }
             else { let _ = status::post(&d2, &json!({"cmd": "togglepanel", "key": "dev.whaybench.theme", "command": panel_command("theme")})); }
+        });
+    }
+    {
+        let d2 = d.clone();
+        k.add(&m, wb_core::i18n::t("prefs-open"), move || {
+            if open_keys(&d2).iter().any(|t| t.starts_with("dev.whaybench.prefs")) { status::focus_app(&d2, "dev.whaybench.prefs"); }
+            else { let _ = status::post(&d2, &json!({"cmd": "togglepanel", "key": "dev.whaybench.prefs", "command": panel_command("prefs")})); }
         });
     }
     // Under the theme: which language. The program's texts are read once, so a change applies after a restart.

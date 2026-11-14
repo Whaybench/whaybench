@@ -158,6 +158,10 @@ mod tests {
         let (en, ko) = (keys(ENGLISH).into_iter().filter(own).collect::<Vec<_>>(), keys(BUNDLED_KO).into_iter().filter(own).collect::<Vec<_>>());
         assert!(en.len() > 300);
         assert_eq!(en, ko);
+        let mut once = en.clone();
+        once.sort();
+        once.dedup();
+        assert_eq!(once.len(), en.len(), "a key defined twice: the second is never shown");
         // What the agent reads is in no language add-on (a name people see too, such as `done`, is both).
         let leaked: Vec<String> = keys(FOR_AGENT).into_iter().filter(|k| keys(BUNDLED_KO).contains(k) && !keys(ENGLISH).contains(k)).collect();
         assert!(leaked.is_empty(), "agent texts in the Korean file: {leaked:?}");

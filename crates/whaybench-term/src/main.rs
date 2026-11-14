@@ -97,9 +97,17 @@ impl Relay {
             args.extend(["--allowedTools".into(), MAP_TOOL.into()]);
             // Answers in the interface language, as Claude Code's own `language` setting does: once in the system
             // prompt, not a note every turn. A language the person set themselves is left alone.
-            if let Some(l) = wb_core::i18n::agent_language(&self.data).filter(|_| !sessions::claude_language_set()) {
-                args.extend(["--settings".into(), serde_json::json!({"language": l}).to_string()]);
+            let mut settings = serde_json::Map::new();
+            if let Some(l) = wb_core::i18n::agent_language(&self.data).filter(|_| !sessions::claude_setting_set("language")) {
+                settings.insert("language".into(), l.into());
             }
+            // Context and plan usage for the notifications panel come from the status line. A status line the person
+            // set is theirs to keep (it can pass the same input on to `whaybench statusline`); without one, ours.
+            if !sessions::claude_setting_set("statusLine")
+                && let Some(exe) = paths::own_exe().ok().and_then(|e| wb_core::agents::shell_quote(&e).ok()) {
+                settings.insert("statusLine".into(), serde_json::json!({"type": "command", "command": format!("{exe} statusline")}));
+            }
+            if !settings.is_empty() { args.extend(["--settings".into(), serde_json::Value::Object(settings).to_string()]); }
         }
         for a in &args { argv.push(CString::new(a.as_bytes()).map_err(|e| e.to_string())?); }
         let mut ptrs: Vec<*const libc::c_char> = argv.iter().map(|a| a.as_ptr()).collect();

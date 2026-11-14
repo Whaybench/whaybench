@@ -214,12 +214,12 @@ pub fn moved_back(d: &Data, id: &str) {
     }
 }
 
-/// Whether the person set Claude Code's answer language themselves (`language` in ~/.claude/settings.json).
-pub fn claude_language_set() -> bool {
+/// Whether the person set this Claude Code setting themselves in ~/.claude/settings.json (`language`, `statusLine`).
+pub fn claude_setting_set(key: &str) -> bool {
     let Some(home) = std::env::var_os("HOME") else { return false };
     std::fs::read_to_string(std::path::Path::new(&home).join(".claude/settings.json")).ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .is_some_and(|v| v["language"].as_str().is_some_and(|l| !l.is_empty()))
+        .is_some_and(|v| match &v[key] { Value::Null => false, Value::String(s) => !s.is_empty(), _ => true })
 }
 
 pub fn claude_program() -> PathBuf {

@@ -9,15 +9,29 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 - The map tool asks for where (path:line), what and the next step in the detail of a task or problem about files, so
   a later session can carry on without looking again.
+- After /rewind the agent records the rewind in the map and marks what no longer holds as changed; it no longer
+  removes nodes. The map stays the record of the thinking, which can be taken up again.
 - CI and release workflows use their actions by commit, not by a tag that can be moved.
 - CI checks the dependencies for known vulnerabilities, licences and sources (cargo-deny, `deny.toml`).
 - SECURITY.md: how to report a vulnerability privately and how to check a release's signature.
 - CI runs clippy and fails on a warning; the code was cleaned of its warnings (no change in behaviour).
+- The notifications panel leaves out empty sections; with all of them empty one line says so.
+- `work_dir` in settings.json is not used when it is the home folder, above it, or holds Whaybench's data: an agent
+  started there could change its own settings and leave its sandbox. `~/work` is used instead.
+- Usage shows without setting anything: a conversation tab starts Claude Code with Whaybench's status line, unless
+  the person set one of their own.
+- English texts with a count no longer say "1 nodes": the count follows its name ("Nodes: 1").
+- "Whole map" was defined twice in the message files, so the lower-case one for a sentence was never used; each has
+  its own key now, and a test catches a key defined twice.
 
 ### Added
 - Conversation map → Carried to a new conversation: the display style a new conversation from the map is given in.
   Focus passes the way to where the conversation is and the open nodes, and that conversation's memory list lists
   only open nodes of others; the other styles pass the whole map. It starts as the main map's style.
+- Whaybench → About → User guide opens the README in the view panel's browser.
+- Settings → Preferences…: how long conversation records and deleted nodes are kept, automatic updates and the input
+  method, saved in settings.json as before.
+- Dialogs and settings windows take the size of their content, up to the room there is, instead of one fixed size.
 
 ### Fixed
 - A new Codex conversation from a map takes the map in: Codex makes its session only at its first prompt, so the tab

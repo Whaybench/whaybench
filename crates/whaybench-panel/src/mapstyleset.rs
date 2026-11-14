@@ -118,7 +118,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let reset = gtk::Button::with_label(t("mapstyleset-reset"));
     reset.set_halign(gtk::Align::Start);
     page.append(&reset);
-    let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&page).build();
+    let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_width(true).propagate_natural_height(true).max_content_height(640).child(&page).build();
     win.set_child(Some(&scroll));
 
     // The style on show in the right part, and the styles the list was made from.

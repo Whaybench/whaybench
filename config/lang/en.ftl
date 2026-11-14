@@ -91,7 +91,7 @@ export-branch = Save branch
 export-whole-map = Save map
 map-exported = Map saved · { $a1 }
 map-export-failed = Map save failed · { $e }
-moved-to-trash = Deleted · { $a1 } · { $n } nodes · Restore from Deleted in the notifications panel
+moved-to-trash = Deleted · { $a1 } · Nodes: { $n } · Restore from Deleted in the notifications panel
 delete-failed = Delete failed · { $e }
 delete-whole-branch-including-below = Delete branch ({ $below } below)
 delete-node-only-nodes-below-move = Delete node
@@ -129,7 +129,7 @@ open-below = {" "}<span class='cnt'>· { $o } open below</span>
 done-folded = <li class='fold'>{ $hidden } done, folded</li>
 open-2 = <li class='{ $a1 } one'><span class='g'>{ $a2 }</span><span class='t' data-n='{ $a3 }'>{ $a4 }</span> <span class='cnt'>· { $o } open</span></li>
 no-current-position = <p class='sub'>No current position</p>
-notes-and-tasks = <li class='fold'>{ $others } notes and tasks</li>
+notes-and-tasks = <li class='fold'>Notes and tasks: { $others }</li>
 open-questions-settled-notes-tasks-no = <h4>Open questions { $a1 }</h4><ul class='tree'>{ $a2 }</ul><details open><summary>Settled { $a3 }</summary><ul class='tree'>{ $a4 }</ul></details><details><summary>Notes, tasks, no kind { $a5 }</summary><ul class='tree'>{ $a6 }</ul></details>
 idea = Idea
 planned = Planned
@@ -169,9 +169,9 @@ resolved = Resolved
 dropped = Dropped
 chosen = Chosen
 request-change = [Request change]
-lines-written-by-ai = <p class='m'>{ $a1 } lines · Written by AI · { $a2 }</p>
+lines-written-by-ai = <p class='m'>Lines: { $a1 } · Written by AI · { $a2 }</p>
 original = <p class='m'>Original: { $a1 }</p>
-lines = { $a1 } <small>({ $a2 } lines)</small>
+lines = { $a1 } <small>(lines: { $a2 })</small>
 contents = <div class='toc'><b>Contents</b><br>{ $a1 }</div><hr>
 no-project-map-to-add-conversation = <p class='m'>No project map · To add: conversation map node menu → Reflect in project</p>
 scope = Scope { $a1 }
@@ -182,7 +182,7 @@ open-items = <h3>Open items</h3><p class='toc'>{ $a1 }</p><hr>
 today = Today
 n7-days = 7 days
 n30-days = 30 days
-period-records-mb-document-copies-days = <p class='m'>Period: { $a1 } · { $kept } records { $a2 } MB (document copies { $a3 } days · records { $a4 } days · up to { $a5 } MB)</p>
+period-records-mb-document-copies-days = <p class='m'>Period: { $a1 } · records: { $kept }, { $a2 } MB (document copies: { $a3 } d · records: { $a4 } d · up to { $a5 } MB)</p>
 no-changes = <p class='m'>No changes</p>
 start-of-document = (Start of document)
 details = [Details]
@@ -300,11 +300,11 @@ scope-exclude = Exclude
 deleted-mark = {" "}(deleted)
 whole-map = Whole map
 import-failed-no-map = Map open failed · No map
-imported-map-opened = Imported map opened · { $title } · { $n } nodes
+imported-map-opened = Imported map opened · { $title } · Nodes: { $n }
 import-failed = Map open failed · { $e }
 take-as-reference-this-node = Refer to the map (this branch)
 take-as-reference-whole-map = Refer to the map (whole map)
-whole-map = whole map
+whole-map-head = whole map
 reference-request-sent = Reference request sent · { $title } › { $head } · Session { $session }
 new-session-from-imported-map = New session · From imported map '{ $title }'
 open-source-imported = Open source
@@ -318,6 +318,7 @@ project-map-source = Project map
 agent-hooks = In the { $name } tab, use { $command } to review and trust the Whaybench hooks.
 about = About
 support = Support Whaybench
+user-guide = User guide
 update-to = Update to { $v }
 updating = Updating to { $v } · Whaybench restarts when it is done
 update-failed = Update failed · see { $log }
@@ -330,6 +331,18 @@ open-map = Open map
 save-map = Save map
 browser = Browser
 themeset-open = Theme settings…
+prefs-open = Preferences…
+prefs-title = Preferences
+prefs-keep-days = Conversation records kept (days)
+prefs-keep-mb = Conversation records kept (MB)
+prefs-zero-no-limit = 0: no limit
+prefs-trash-days = Deleted nodes kept (days)
+prefs-trash-days-hint = 0: only removed by hand
+prefs-auto-update = Download new releases automatically
+prefs-input = Input method
+prefs-input-built-in = Built-in (fcitx5)
+prefs-input-desktop = The desktop's
+prefs-input-hint = Applied after a restart
 themeset-title = Theme settings
 mapstyleset-title = Display style settings
 mapstyleset-open = Display style settings…
@@ -451,7 +464,7 @@ notify-restore = Restore
 notify-purge = Delete for good
 notify-empty-trash = Delete all for good
 notify-restored = Restored
-notify-restored-kept = Restored · { $n } nodes changed since were left as they are
+notify-restored-kept = Restored · Changed since and left as they are: { $n }
 notify-tab-now = Now
 notify-tab-history = History
 history-added = Created

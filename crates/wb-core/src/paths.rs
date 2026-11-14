@@ -72,8 +72,15 @@ pub fn work_dir(data: &Data, home: &Path) -> PathBuf {
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|v| v.get("work_dir").and_then(|w| w.as_str()).map(String::from))
         .filter(|w| !w.is_empty());
-    match set.as_deref() {
-        Some(w) => match w.strip_prefix("~/") { Some(rest) => home.join(rest), None => PathBuf::from(w) },
+    let chosen = set.as_deref().map(|w| match w.strip_prefix("~/") { Some(rest) => home.join(rest), None => PathBuf::from(w) });
+    // The folder an agent may write in (Codex's sandbox is the folder it starts in): never the home folder or one
+    // holding Whaybench's data, where an agent could change its own settings and leave its sandbox.
+    match chosen {
+        Some(p) if p.is_absolute() && !home.starts_with(&p) && !data.root.starts_with(&p) => p,
+        Some(p) => {
+            crate::log::warn("session", "work folder not used", "it holds the home folder or Whaybench's data", &[("folder", p.display().to_string())]);
+            home.join("work")
+        }
         None => home.join("work"),
     }
 }
@@ -193,6 +200,13 @@ mod tests {
         assert_eq!(work_dir(&data, home), Path::new("/srv/x"));
         std::fs::write(d.join("settings.json"), "{ broken").unwrap();
         assert_eq!(work_dir(&data, home), Path::new("/h/work"));
+        for unsafe_dir in [r#""~/""#, r#""/h""#, r#""/""#, r#""relative""#] {
+            std::fs::write(d.join("settings.json"), format!(r#"{{"work_dir":{unsafe_dir}}}"#)).unwrap();
+            assert_eq!(work_dir(&data, home), Path::new("/h/work"), "{unsafe_dir}: the home folder, above it, or not a full path");
+        }
+        let parent = d.parent().unwrap().to_string_lossy().to_string();
+        std::fs::write(d.join("settings.json"), format!(r#"{{"work_dir":"{parent}"}}"#)).unwrap();
+        assert_eq!(work_dir(&data, home), Path::new("/h/work"), "a folder holding the data folder");
     }
     #[test]
     fn empty_values_do_not_count_and_no_home_is_none() {

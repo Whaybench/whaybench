@@ -22,6 +22,8 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     while let Some(r) = list.row_at_index(0) { list.remove(&r); }
     for (key, title) in SECTIONS {
         let items = board[key].as_array().cloned().unwrap_or_default();
+        // An empty section is left out; with all of them empty one line says so.
+        if items.is_empty() { continue; }
         let closed = key == "trash" && !view.borrow().trash_open;
         let head = gtk::Label::new(Some(&format!("{}{} ({})", if key == "trash" { if closed { "▸ " } else { "▾ " } } else { "" }, t(title), items.len())));
         head.set_xalign(0.0);
@@ -31,15 +33,6 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
         row.set_widget_name(if key == "trash" { "__trash__" } else { "__head__" });
         list.append(&row);
         if closed { continue; }
-        if items.is_empty() {
-            let none = gtk::Label::new(Some(t("notify-none")));
-            none.set_xalign(0.0);
-            none.add_css_class("dim");
-            let row = gtk::ListBoxRow::new();
-            row.set_child(Some(&none));
-            row.set_widget_name("__head__");
-            list.append(&row);
-        }
         for item in items {
             let label = gtk::Label::new(Some(item["line"].as_str().unwrap_or("")));
             label.set_xalign(0.0);
@@ -50,6 +43,15 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
             row.set_widget_name(&format!("{}\t{}\t{}\t{}\t{}", item["session"].as_str().unwrap_or(""), item["node"]["id"].as_str().unwrap_or(""), item["node"].get("mark").is_some(), if key == "trash" { item["action"].as_str().unwrap_or("-") } else { "" }, if key == "check" { item["node"]["suggest"]["state"].as_str().unwrap_or("") } else { "" }));
             list.append(&row);
         }
+    }
+    if list.row_at_index(0).is_none() {
+        let none = gtk::Label::new(Some(t("notify-none")));
+        none.set_xalign(0.0);
+        none.add_css_class("dim");
+        let row = gtk::ListBoxRow::new();
+        row.set_child(Some(&none));
+        row.set_widget_name("__head__");
+        list.append(&row);
     }
 }
 
@@ -123,7 +125,8 @@ fn confirm(win: &gtk::ApplicationWindow, text: &str, lines: &[String], then: imp
             line.set_xalign(0.0); line.set_wrap(true); line.set_wrap_mode(gtk::pango::WrapMode::WordChar); line.add_css_class("dim");
             list.append(&line);
         }
-        let scroll = gtk::ScrolledWindow::new();
+        // As tall as its lines, up to a limit; the dialog takes the size of what it holds.
+        let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).max_content_height(400).build();
         scroll.set_child(Some(&list));
         scroll.set_vexpand(true);
         body.append(&scroll);

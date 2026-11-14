@@ -239,7 +239,7 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
         whole.add(wb_core::i18n::t("take-as-reference-whole-map"), session.is_some(), move || {
             let Some(t) = &s2 else { return };
             let text = mapimport::whole_reference_request(&p2, &t2, &data2);
-            if sessions::queue_prompt(&d2, t, &text) { status::say(&d2, &wb_core::i18n::f("reference-request-sent", &[("title", cut(&t2, 20)), ("head", wb_core::i18n::t("whole-map").to_string()), ("session", cut(t, 8))]), 8); }
+            if sessions::queue_prompt(&d2, t, &text) { status::say(&d2, &wb_core::i18n::f("reference-request-sent", &[("title", cut(&t2, 20)), ("head", wb_core::i18n::t("whole-map-head").to_string()), ("session", cut(t, 8))]), 8); }
             else { status::say(&d2, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(t, 8))]), 8); }
         });
     }
