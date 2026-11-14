@@ -67,7 +67,7 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
             }
         }
         "PreToolUse" if is_shell(tool) => write_json(&state_file(data, "bash", sid), &json!(now_ms()))?,
-        "PreToolUse" => if let Some(reason) = held_back(data, sid, a, tool, &event["tool_input"]) {
+        "PreToolUse" => if let Some(reason) = held_back(data, sid, a, tool, event) {
             return Ok(json!({"hookSpecificOutput": {"hookEventName": name, "permissionDecision": "deny", "permissionDecisionReason": reason}}));
         },
         "PostToolUse" => if let Some(context) = after_tool(data, sid, a, tool, event)? { return Ok(context_out(name, &context)); },
@@ -149,9 +149,9 @@ fn touched(tool: &str, input: &Value) -> Vec<(String, &'static str)> {
     match tool {
         "Read" => path.map(|p| vec![(p, "read")]).unwrap_or_default(),
         "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => path.map(|p| vec![(p, "edit")]).unwrap_or_default(),
-        // Codex changes files with apply_patch: its patch names each file it adds, updates or deletes.
+        // Codex changes files with apply_patch: its patch names each file it adds, updates, deletes or moves to.
         "apply_patch" => input.to_string().replace("\\n", "\n").lines()
-            .filter_map(|l| ["*** Add File: ", "*** Update File: ", "*** Delete File: "].iter().find_map(|h| l.trim_start_matches('"').strip_prefix(h)))
+            .filter_map(|l| ["*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "].iter().find_map(|h| l.trim_start_matches('"').strip_prefix(h)))
             .map(|p| (p.trim().trim_end_matches('"').to_string(), "edit")).collect(),
         _ => Vec::new(),
     }
@@ -320,22 +320,30 @@ fn vim_holding(path: &str) -> Option<(u32, bool)> {
 }
 
 /// Before an edit: held back when the file changed on disk since the agent's last look, and the first time it is open in vim.
-fn held_back(data: &Path, sid: &str, a: &Agent, tool: &str, input: &Value) -> Option<String> {
-    // shortcut: Claude Code's edit tools only; Codex's apply_patch is not held back until its deny output is checked.
-    if a.name != "claude" || !["Edit", "MultiEdit", "Write", "NotebookEdit"].contains(&tool) { return None; }
-    let path = input.get("file_path").or_else(|| input.get("notebook_path")).and_then(Value::as_str)?;
-    if let Some(change) = changed_since(data, sid, Some(path)).into_iter().next() {
-        tell_changes(data, sid, std::slice::from_ref(&change));
-        return Some(i18n::ai_f("edit-changed", &[("path", path.to_string()), ("at", clock(change.1))]));
+/// Claude Code's edit tools name one file; Codex's apply_patch names every file its patch changes. Both agents take
+/// the same refusal (`permissionDecision: deny` with the reason), and the reason is what the agent reads.
+fn held_back(data: &Path, sid: &str, _a: &Agent, tool: &str, event: &Value) -> Option<String> {
+    // A path in a patch can be relative: it is the one in the agent's folder, as the file records have it.
+    let paths: Vec<String> = touched(tool, &event["tool_input"]).into_iter().filter(|(_, how)| *how == "edit").map(|(p, _)| p)
+        .map(|p| if Path::new(&p).is_absolute() { p } else { Path::new(event["cwd"].as_str().unwrap_or("")).join(&p).to_string_lossy().to_string() })
+        .collect();
+    for path in &paths {
+        if let Some(change) = changed_since(data, sid, Some(path)).into_iter().next() {
+            tell_changes(data, sid, std::slice::from_ref(&change));
+            return Some(i18n::ai_f("edit-changed", &[("path", path.to_string()), ("at", clock(change.1))]));
+        }
     }
-    let (pid, dirty) = vim_holding(path)?;
-    let file = state_file(data, "vim", sid);
-    let mut warned: Vec<String> = serde_json::from_value(read_json(&file, json!([])).ok()?).unwrap_or_default();
-    let key = format!("{path}:{pid}");
-    if warned.contains(&key) { return None; }
-    warned.push(key);
-    let _ = write_json(&file, &json!(warned));
-    Some(i18n::ai_f("edit-in-vim", &[("path", path.to_string()), ("pid", pid.to_string()), ("dirty", (if dirty { "with unsaved changes" } else { "no unsaved changes" }).to_string())]))
+    for path in &paths {
+        let Some((pid, dirty)) = vim_holding(path) else { continue };
+        let file = state_file(data, "vim", sid);
+        let mut warned: Vec<String> = serde_json::from_value(read_json(&file, json!([])).ok()?).unwrap_or_default();
+        let key = format!("{path}:{pid}");
+        if warned.contains(&key) { continue; }
+        warned.push(key);
+        let _ = write_json(&file, &json!(warned));
+        return Some(i18n::ai_f("edit-in-vim", &[("path", path.to_string()), ("pid", pid.to_string()), ("dirty", (if dirty { "with unsaved changes" } else { "no unsaved changes" }).to_string())]));
+    }
+    None
 }
 
 /// The map in short for a session that took it over: none of the conversation behind it comes along.
@@ -492,6 +500,28 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_patch_on_a_file_the_person_changed_is_held_back_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let a = Agent { name: "codex", tab: None, inside: true };
+        let sid = "s-patch";
+        // The patch names the file relative to the agent's folder, as Codex may.
+        let ev = |name: &str, extra: Value| { let mut e = json!({"session_id": sid, "hook_event_name": name, "cwd": data}); for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); } e };
+        crate::addons::install_bundled(&crate::paths::Data::new(data.to_path_buf()));
+        let file = data.join("g.rs");
+        fs::write(&file, "x").unwrap();
+        let patch = json!({"tool_name": "apply_patch", "tool_input": {"command": "*** Begin Patch\n*** Update File: g.rs\n@@\n-x\n+y\n*** End Patch"}});
+        run(data, &a, &ev("PostToolUse", patch.clone())).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1600));
+        fs::write(&file, "person").unwrap();
+        let held = run(data, &a, &ev("PreToolUse", patch.clone())).unwrap();
+        assert_eq!(held["hookSpecificOutput"]["permissionDecision"], "deny", "{held}");
+        let why = held["hookSpecificOutput"]["permissionDecisionReason"].as_str().unwrap();
+        assert!(why.contains("was changed on disk") && why.contains("Keep what the person changed"), "{why}");
+        assert_eq!(run(data, &a, &ev("PreToolUse", patch)).unwrap(), json!({}), "told once; the patch made again goes through");
+    }
+
+    #[test]
     fn a_claude_session_is_recorded_told_and_kept_from_clashing() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path();
@@ -586,6 +616,8 @@ mod tests {
     fn codex_patches_name_their_files_and_globs_match_folders() {
         let patch = json!({"input": "*** Begin Patch\n*** Update File: src/a.rs\n@@\n*** Add File: b.md\n*** End Patch"});
         assert_eq!(touched("apply_patch", &patch), vec![("src/a.rs".to_string(), "edit"), ("b.md".to_string(), "edit")]);
+        let moved = json!({"input": "*** Begin Patch\n*** Update File: a.rs\n*** Move to: b.rs\n*** End Patch"});
+        assert_eq!(touched("apply_patch", &moved), vec![("a.rs".to_string(), "edit"), ("b.rs".to_string(), "edit")], "the file moved onto is changed too");
         assert!(glob("/w/src/**", "/w/src/a/b.rs") && glob("/w/*.rs", "/w/a.rs") && !glob("/w/*.rs", "/w/a/b.rs") && glob("a?c", "abc"));
     }
 }

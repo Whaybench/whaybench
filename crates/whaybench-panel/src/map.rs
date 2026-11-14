@@ -521,7 +521,7 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
     let current = s(&data, "current").to_string();
     let tree = tree_of(&data);
     let counts = sessions::target(d).filter(|_| imported_of(scope).is_none()).map(|t| records::file_counts(d, &t)).unwrap_or_default();
-    fn add(list: &gtk::ListBox, tree: &Tree, nodes: &[Value], depth: i32, top: bool, ctx: &(String, HashMap<String, usize>, HashSet<String>, Option<String>, i32, Rc<RefCell<Panel>>, Data, Option<(String, String)>, Value)) {
+    fn add(list: &gtk::ListBox, tree: &Tree, nodes: &[Value], depth: i32, top: bool, ctx: &(String, HashMap<String, usize>, HashSet<String>, Option<String>, i32, Rc<RefCell<Panel>>, Data, Option<(String, String)>, Rc<Value>)) {
         let (current, counts, flipped, picked, unit, panel, d, scope, data) = ctx;
         for n in nodes {
             let id = s(n, "id").to_string();
@@ -534,8 +534,9 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
             arrow.add_css_class("flat");
             arrow.set_sensitive(kids.is_some());
             {
-                let (id2, panel2, d2, scope2, list2) = (id.clone(), panel.clone(), d.clone(), scope.clone(), list.clone());
+                let (id2, panel2, d2, scope2, list2) = (id.clone(), panel.clone(), d.clone(), scope.clone(), list.downgrade());
                 arrow.connect_clicked(move |_| {
+                    let Some(list2) = list2.upgrade() else { return };
                     { let mut p = panel2.borrow_mut(); if !p.flipped.remove(&id2) { p.flipped.insert(id2.clone()); } }
                     draw(&list2, &panel2, &d2, scope2.as_ref());
                 });
@@ -573,9 +574,10 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
                 let press = gtk::GestureClick::new();
                 press.set_button(1);
                 {
-                    let (d2, panel2, list2, id2, scope2) = (d.clone(), panel.clone(), list.clone(), id.clone(), scope.clone());
+                    let (d2, panel2, list2, id2, scope2) = (d.clone(), panel.clone(), list.downgrade(), id.clone(), scope.clone());
                     press.connect_pressed(move |g, _, _, _| {
                         g.set_state(gtk::EventSequenceState::Claimed);
+                        let Some(list2) = list2.upgrade() else { return };
                         panel2.borrow_mut().picked = Some(id2.clone());
                         status::send(&d2, "files", json!({"node": id2}));
                         status::front_app(&d2, "dev.whaybench.files");
@@ -593,9 +595,12 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
             let click = gtk::GestureClick::new();
             click.set_button(3);
             {
-                let (d2, data2, n2, scope2, row2) = (d.clone(), data.clone(), n.clone(), scope.clone(), row.clone());
+                // The row weakly and the map shared: a handler holding its own row keeps it alive after the next
+                // redraw removes it, and every redraw then leaks the whole tree with a copy of the map per row.
+                let (d2, data2, n2, scope2, row2) = (d.clone(), data.clone(), n.clone(), scope.clone(), row.downgrade());
                 click.connect_pressed(move |g, _, x, y| {
                     g.set_state(gtk::EventSequenceState::Claimed);
+                    let Some(row2) = row2.upgrade() else { return };
                     popup(&row2, node_menu(&d2, &data2, Some(&n2), scope2.as_ref()), x, y);
                 });
             }
@@ -604,7 +609,7 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
             if let (Some(k), false) = (kids, folded) { add(list, tree, k, depth + 1, false, ctx); }
         }
     }
-    let ctx = (current.clone(), counts, flipped, picked, unit, panel.clone(), d.clone(), scope.cloned(), data.clone());
+    let ctx = (current.clone(), counts, flipped, picked, unit, panel.clone(), d.clone(), scope.cloned(), Rc::new(data.clone()));
     match scope.filter(|x| !x.0.starts_with('@')) {
         None => add(list, &tree, tree.kids.get("").map(Vec::as_slice).unwrap_or(&[]), 0, true, &ctx),
         Some((root, _)) => {

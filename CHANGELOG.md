@@ -6,6 +6,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-14
+
+The map panel stops growing with every map change, and Codex is kept from overwriting what the person changed.
+
+### Fixed
+- The map panel no longer grows by about 100 MB each time the map changes: a node's menu held its own row, so
+  every redraw kept the whole old tree and a copy of the map for each node.
+- Codex's file changes (apply_patch) are held back like Claude Code's edits: once when a file it changes was changed
+  on disk since (most likely by the person) or is open in vim, also for relative paths and a file a patch moves onto.
+  Both agents are told to keep what the person changed and not to undo or "correct" it unless asked.
+
 ## [0.6.2] - 2026-11-14
 
 Steadier data and panels, a cleaner start for new conversations (Focus passes only the open part of a map, Codex
