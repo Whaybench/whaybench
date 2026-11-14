@@ -523,7 +523,11 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
         }
         WinitEvent::Input(event) => state.process_input_event(event),
         WinitEvent::Ime(ime) => state.handle_ime(ime),
-        WinitEvent::Focus(focused) => record::detail("screen", "window focus", &[("focused", focused.to_string())]),
+        WinitEvent::Focus(focused) => {
+            record::detail("screen", "window focus", &[("focused", focused.to_string())]);
+            // Back from the desktop: what was copied there comes in, where the desktop cannot be watched.
+            if focused { state.clip.read_once(); }
+        }
         WinitEvent::Redraw => {
             let now = Instant::now();
             let ms = now.duration_since(last).as_secs_f64() * 1000.0;

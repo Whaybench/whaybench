@@ -46,8 +46,9 @@ impl Bridge {
     pub fn from_desktop(&mut self) -> Option<()> {
         // A watcher that ended (a desktop without data-control, as WSLg) is waited for, or it stays a zombie.
         if let Some(status) = self.watcher.as_mut().and_then(|c| c.try_wait().ok().flatten()) {
-            record::warn("clipboard", "desktop watch ended", "wl-paste --watch stopped; texts copied on the desktop do not come in", &[("status", status.to_string())]);
+            record::warn("clipboard", "desktop watch ended", "wl-paste --watch stopped; the desktop's text is read when the window gets the keyboard back", &[("status", status.to_string())]);
             self.watcher = None;
+            self.read_once();
         }
         let text = fs::read_to_string(&self.inbox).ok()?;
         let _ = fs::remove_file(&self.inbox);
@@ -56,6 +57,20 @@ impl Bridge {
         *last = text.clone();
         self.offered = Some(text);
         Some(())
+    }
+
+    /// Reads the desktop's text once, when the desktop cannot be watched (WSLg has no data-control): called when the
+    /// window gets the keyboard back, which is when something copied on the desktop is wanted inside. The text
+    /// arrives like a watched one, on the next tick.
+    pub fn read_once(&self) {
+        if self.watcher.is_some() { return; }
+        let inbox = self.inbox.clone();
+        std::thread::spawn(move || {
+            let Ok(out) = Command::new("wl-paste").args(["--no-newline", "--type", "text"]).stdin(Stdio::null()).stderr(Stdio::null()).output() else { return };
+            if !out.status.success() || out.stdout.is_empty() || out.stdout.len() as u64 > LIMIT { return; }
+            let tmp = inbox.with_extension("once");
+            if fs::write(&tmp, &out.stdout).is_ok() { let _ = fs::rename(tmp, inbox); }
+        });
     }
 
     /// A panel's app copied: its text is read from `pipe` (the app writes it there) and given to the desktop.

@@ -81,13 +81,21 @@ pub fn attach_input_method(socket: &OsStr) {
     let path = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_default().join(socket);
     std::thread::spawn(move || {
         let quiet = || std::process::Stdio::null();
-        let asked = Command::new("dbus-send").args(["--session", "--print-reply", "--dest=org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1.OpenWaylandConnection", &format!("string:{}", path.display())])
+        // Asked only when one runs: fcitx5 ships a D-Bus service, so a call to its name would start a bare fcitx5
+        // without this display's environment, report it attached, and leave composed input dead (seen under WSL).
+        let running = Command::new("dbus-send").args(["--session", "--print-reply", "--dest=org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:org.fcitx.Fcitx5"])
+            .stderr(quiet()).output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("boolean true"));
+        let asked = running && Command::new("dbus-send").args(["--session", "--print-reply", "--dest=org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1.OpenWaylandConnection", &format!("string:{}", path.display())])
             .stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
         if asked { return record::decide("input", "fcitx5 attached", "the running fcitx5 opened this display", &[]); }
-        // -k: it outlives this display, so the next Whaybench (a restart starts it before this one ends) finds it.
-        // Without it fcitx5 exits with its first display and the new one is left attached to nothing.
-        let started = Command::new("fcitx5").args(["-d", "-k"]).env("WAYLAND_DISPLAY", &path).stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
-        if started { record::decide("input", "fcitx5 started", "none was running", &[]); } else { record::warn("input", "no input method", "fcitx5 did not start; Korean and other composed input will not work", &[]); }
+        // --keep: it outlives this display, so the next Whaybench (a restart starts it before this one ends) finds it.
+        // Without it fcitx5 exits with its first display and the new one is left attached to nothing. The long form:
+        // fcitx5 before 5.1.15 (Ubuntu 24.04 has 5.1.7) lists -k but its parser refuses it, and then does not start.
+        let start = |args: &[&str]| Command::new("fcitx5").args(args).env("WAYLAND_DISPLAY", &path).stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
+        // One that knows no --keep at all still starts without it, so composed input works.
+        if start(&["-d", "--keep"]) { record::decide("input", "fcitx5 started", "none was running", &[("keep", "yes".into())]); }
+        else if start(&["-d"]) { record::decide("input", "fcitx5 started", "none was running; this fcitx5 has no --keep", &[("keep", "no".into())]); }
+        else { record::warn("input", "no input method", "fcitx5 did not start; Korean and other composed input will not work", &[]); }
     });
 }
 

@@ -12,6 +12,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Agents are told at the start how to ask another conversation (`session type`) and wait for its answer
   (`session wait`), for when the person asks them to involve it.
 
+### Fixed
+- Text copied in Windows pastes into the input panel and every other panel, not only the terminal: WSLg cannot be
+  watched for clipboard changes (no data-control), so the desktop's text is read when the Whaybench window gets the
+  keyboard back.
+- Korean and other composed input under WSL: Whaybench asked fcitx5 to attach without first checking that one
+  runs, and D-Bus started a bare fcitx5 for the call, without this display's environment, so input stayed dead. It
+  now asks only a running fcitx5 and otherwise starts its own.
+- Korean and other composed input on Ubuntu 24.04: fcitx5 is started with `--keep`, not `-k`, which fcitx5
+  before 5.1.15 lists but refuses, so it did not start at all. Without either, it is started plain.
+
 ## [0.6.3] - 2026-11-14
 
 The map panel stops growing with every map change, and Codex is kept from overwriting what the person changed.
