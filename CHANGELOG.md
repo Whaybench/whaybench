@@ -4,7 +4,10 @@ All notable changes to Whaybench are written here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.0] - 2026-11-15
+
+Themes get light, depth, see-through panels and glass, the window draws its own frame, and under WSL the window
+and the apps draw on the GPU.
 
 ### Added
 - Light and depth for themes, each in percent (`addons/themes/README.md`): a shadow that falls below a panel, and
