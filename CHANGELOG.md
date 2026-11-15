@@ -14,6 +14,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Codex's sign-in opens in Whaybench's browser, as Claude Code's does: the apps inside get BROWSER set to the same
   way to the panel's browser as xdg-open (under WSL Codex went to the Windows browser). One browser, the one the agent
   sees too.
+- `whaybench-view detach` and `attach` wait for the move and say where the browser is, so the agent knows (they
+  returned at once without a word).
 
 ### Changed
 - Input settings list the switch keys one per line under the + that adds one.

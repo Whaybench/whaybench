@@ -25,13 +25,31 @@ Work on an app through its connector or API; use this to show things and to see 
                                            (read works on a PDF in the view panel too, but gives the whole file's text)
   whaybench-view shot [--out FILE.png] [--firefox]   a picture of the panel, only when text cannot tell; prints the file's path
   whaybench-view detach | attach           only when the person asks: the Whaybench browser (the same Firefox, its tabs
-                                           and sign-ins) into a window of its own on their desktop, or back into its panel
+                                           and sign-ins) into a window of its own on their desktop, or back into its panel;
+                                           waits for the move and says where it is
   whaybench-view new [--title T] [--session|--pin] [PATH|URL]   one more view. Default: linked to the chosen session;
                                            --session: stays on this session; --pin: stays on this page or file
   whaybench-view show NAME PATH|URL        show it in that view
   whaybench-view list                      the open views and what each is tied to
   whaybench-view close NAME                close a view (not the first)
 Show a drawing by writing HTML to show/<your session id>/latest.html in the data directory: it opens by itself.";
+
+/// Moves the browser out or back and says where it is when the move is done, so the agent knows: the same Firefox,
+/// started again on the other display (a new process), out when its mark says so.
+fn move_browser(d: &Data, out: bool) -> Result<(), String> {
+    let now_out = || view::detached(d) && view::firefox_pid(d).is_some();
+    let say = |out: bool| println!("{}", if out { "The browser is out in a window of its own on the person's desktop: the same Firefox with its tabs and sign-ins. --firefox opens and reads there." } else { "The browser is back in its panel in Whaybench." });
+    if now_out() == out && view::firefox_pid(d).is_some() { say(out); return Ok(()); }
+    let before = view::firefox_pid(d);
+    wb_core::status::post(d, &json!({"cmd": "browser", "out": out})).map_err(|e| e.to_string())?;
+    let started = std::time::Instant::now();
+    while started.elapsed() < std::time::Duration::from_secs(25) {
+        let pid = view::firefox_pid(d);
+        if pid.is_some() && pid != before && view::detached(d) == out { say(out); return Ok(()); }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    Err("The browser did not move in 25 s (Whaybench's log says why).".into())
+}
 
 fn absolute(p: &str) -> String {
     if p.starts_with('/') { return p.to_string(); }
@@ -168,7 +186,7 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
             print!("{}", String::from_utf8_lossy(&o.stdout));
             Ok(())
         }
-        Some(w @ ("detach" | "attach")) => wb_core::status::post(d, &json!({"cmd": "browser", "out": w == "detach"})).map_err(|e| e.to_string()),
+        Some(w @ ("detach" | "attach")) => move_browser(d, w == "detach"),
         _ => Err(HELP.into()),
     }
 }
