@@ -329,7 +329,8 @@ pub fn firefox_pid(d: &Data) -> Option<u32> {
         let Ok(raw) = std::fs::read(e.path().join("cmdline")) else { continue };
         let args: Vec<String> = raw.split(|b| *b == 0).map(|a| String::from_utf8_lossy(a).to_string()).collect();
         let exe = args.first().map(|a| a.rsplit('/').next().unwrap_or("").to_string()).unwrap_or_default();
-        if exe != "firefox" && exe != "firefox-bin" { continue; }
+        // Debian's /usr/bin/firefox runs firefox-esr.
+        if !matches!(exe.as_str(), "firefox" | "firefox-bin" | "firefox-esr") { continue; }
         if args.iter().any(|a| a == "-contentproc") { continue; }
         if args.windows(2).any(|w| w[0] == "--profile" && w[1] == *want) { return Some(pid); }
     }
