@@ -4,7 +4,9 @@ All notable changes to Whaybench are written here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.2] - 2026-11-15
+
+The Windows setup says why it stopped and finds virtualization turned off before it installs WSL.
 
 ### Fixed
 - When the Windows setup stopped, its window closed at once and nothing kept the reason: it now waits for Enter, the
