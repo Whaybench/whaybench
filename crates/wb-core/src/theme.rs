@@ -108,6 +108,8 @@ pub struct Theme {
     pub back_opacity: f64,
     /// Glass: how far, in pixels, what lies under a floating panel is blurred (0: no glass). Seen where the panel is see-through.
     pub glass_blur: f64,
+    /// How much the docking targets enlarge what lies under them, like a drop of water (0: not at all).
+    pub dock_refraction: f64,
     pub joint_width: f64,
     pub joint_show: JointShow,
     pub background: Colour,
@@ -154,6 +156,7 @@ pub const FIELDS: &[(&str, &str, &str, Kind)] = &[
     ("joint", "frame", "shared", Kind::Colour), ("joint", "frame", "wall", Kind::Colour), ("joint", "frame", "edge", Kind::Colour),
     ("dock", "frame", "dock_dot", Kind::Colour), ("dock", "frame", "dock_dot_size", Kind::Number(4.0, 32.0)),
     ("dock", "frame", "dock_ring", Kind::Colour), ("dock", "frame", "dock_ring_size", Kind::Number(16.0, 64.0)),
+    ("dock", "frame", "dock_refraction", Kind::Number(0.0, 100.0)),
 ];
 
 fn parse_hex(text: &str) -> Option<Colour> {
@@ -236,6 +239,7 @@ impl Theme {
             panel_opacity: share("panel_opacity", 100.0),
             back_opacity: share("back_opacity", 100.0),
             glass_blur: number("glass_blur", 0.0),
+            dock_refraction: share("dock_refraction", 0.0),
             joint_width: number("joint_width", 2.0),
             joint_show: JointShow::parse(v.get("frame").and_then(|p| p.get("joint_show")).and_then(Value::as_str)),
             background,
@@ -271,7 +275,7 @@ impl Theme {
             "border_shade" => pc(self.border_shade), "bar_gloss" => pc(self.bar_gloss), "bar_shine" => pc(self.bar_shine),
             "bar_shade" => pc(self.bar_shade), "surface_light" => pc(self.surface_light), "surface_vignette" => pc(self.surface_vignette),
             "panel_light" => pc(self.panel_light), "panel_shade" => pc(self.panel_shade),
-            "window_opacity" => pc(self.window_opacity), "panel_opacity" => pc(self.panel_opacity), "back_opacity" => pc(self.back_opacity), "glass_blur" => self.glass_blur.into(),
+            "window_opacity" => pc(self.window_opacity), "panel_opacity" => pc(self.panel_opacity), "back_opacity" => pc(self.back_opacity), "glass_blur" => self.glass_blur.into(), "dock_refraction" => pc(self.dock_refraction),
             "dock_dot" => c(self.dock_dot), "dock_dot_size" => self.dock_dot_size.into(), "dock_ring" => c(self.dock_ring), "dock_ring_size" => self.dock_ring_size.into(),
             _ => Value::Null,
         }
@@ -469,7 +473,7 @@ mod tests {
     }
     #[test]
     fn the_guide_names_every_key_the_program_reads() {
-        for key in ["background", "surface", "text", "accent", "outer", "gap", "pad", "radius", "border_width", "shadow_size", "joint_width", "joint_show", "surface_top", "surface_bottom", "panel", "bar_top", "bar_bottom", "front_top", "front_bottom", "border", "front_border", "tab_front", "shadow", "shared", "wall", "edge", "shadow_drop", "back_lift", "border_light", "border_shade", "bar_gloss", "bar_shine", "bar_shade", "surface_light", "surface_vignette", "panel_light", "panel_shade", "window_opacity", "panel_opacity", "back_opacity", "glass_blur"] {
+        for key in ["background", "surface", "text", "accent", "outer", "gap", "pad", "radius", "border_width", "shadow_size", "joint_width", "joint_show", "surface_top", "surface_bottom", "panel", "bar_top", "bar_bottom", "front_top", "front_bottom", "border", "front_border", "tab_front", "shadow", "shared", "wall", "edge", "shadow_drop", "back_lift", "border_light", "border_shade", "bar_gloss", "bar_shine", "bar_shade", "surface_light", "surface_vignette", "panel_light", "panel_shade", "window_opacity", "panel_opacity", "back_opacity", "glass_blur", "dock_refraction"] {
             assert!(include_str!("../../../addons/themes/README.md").contains(&format!("`{key}`")), "{key} is not in addons/themes/README.md");
             assert!(DEFAULT_TEXT.contains(&format!("\"{key}\"")), "{key} is not in the default theme");
         }

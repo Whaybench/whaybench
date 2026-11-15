@@ -406,6 +406,7 @@ themeset-field-dock_dot = 점
 themeset-field-dock_dot_size = 점 크기
 themeset-field-dock_ring = 놓을 자리
 themeset-field-dock_ring_size = 놓을 자리 크기
+themeset-field-dock_refraction = 놓을 자리 굴절 (%)
 themeset-group-depth = 그림자와 깊이
 themeset-group-light = 조명
 themeset-field-shadow_drop = 그림자 떨어짐 (%)

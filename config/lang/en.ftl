@@ -406,6 +406,7 @@ themeset-field-dock_dot = Dot
 themeset-field-dock_dot_size = Dot size
 themeset-field-dock_ring = Targets
 themeset-field-dock_ring_size = Target size
+themeset-field-dock_refraction = Target lens (%)
 themeset-group-depth = Shadow and depth
 themeset-group-light = Light
 themeset-field-shadow_drop = Shadow fall (%)

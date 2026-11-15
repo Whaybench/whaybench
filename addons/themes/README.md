@@ -113,6 +113,8 @@ In percent, from 0 to 100; 100 (the default) is opaque.
 
 `glass_blur`, in pixels from 0 to 64 (default 0, no glass): a floating panel or dialog shows what lies under it blurred this far, where the panel is see-through.
 
+`dock_refraction`, in percent (default 0): the five docking targets enlarge what lies under them towards their middle, like a drop of water.
+
 ## `frame`: when joint lines show
 
 | Key | Value | Meaning | Default |

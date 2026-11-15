@@ -17,6 +17,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
   panels, `panel_opacity` makes the panels themselves see-through (frame, title, tabs and app), and `back_opacity`
   more so for the panels behind the front one. `glass_blur` gives floating panels and dialogs glass: what lies under
   them shows blurred. The window asks for 8 bits of alpha first. The default theme stays opaque.
+- `dock_refraction`: while a panel is docked, the five targets on each panel enlarge what lies under them towards
+  their middle, like a drop of water; the default theme at 40.
 
 ### Fixed
 - The input panel's hint names the keys that switch the input language as fcitx5 has them (it said Shift+Space,

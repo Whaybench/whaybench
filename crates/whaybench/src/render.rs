@@ -205,6 +205,30 @@ void main() {
 }
 "#;
 
+/// A lens: what lies under a docking target, magnified towards its middle like a drop of water. `area` is the
+/// target's square in texture coordinates; `strength` how much the middle is enlarged.
+const LENS: &str = r#"
+//_DEFINES_
+precision highp float;
+uniform sampler2D tex;
+uniform float alpha;
+varying vec2 v_coords;
+#if defined(DEBUG_FLAGS)
+uniform float tint;
+#endif
+uniform vec4 area;
+uniform float strength;
+
+void main() {
+    vec2 centre = area.xy + area.zw / 2.0;
+    vec2 p = (v_coords - centre) / (area.zw / 2.0);
+    float r = length(p);
+    float inside = 1.0 - smoothstep(0.94, 1.0, r);
+    vec2 uv = centre + (v_coords - centre) * (1.0 - strength * (1.0 - r * r));
+    gl_FragColor = texture2D(tex, uv) * inside * alpha;
+}
+"#;
+
 /// A disc: a solid dot with a smooth edge, or a soft target that fades out from its middle with a faint rim.
 const DISC: &str = r#"
 precision highp float;
@@ -224,7 +248,7 @@ void main() {
 }
 "#;
 
-pub struct Shaders { card: GlesPixelProgram, back: GlesPixelProgram, disc: GlesPixelProgram, glass: GlesTexProgram, under: Option<GlesTexture> }
+pub struct Shaders { card: GlesPixelProgram, back: GlesPixelProgram, disc: GlesPixelProgram, glass: GlesTexProgram, lens: GlesTexProgram, under: Option<GlesTexture>, under_lens: Option<GlesTexture> }
 
 fn compile(renderer: &mut GlesRenderer) -> Result<Shaders, String> {
     let n = |s: &'static str, t| UniformName::new(s, t);
@@ -240,7 +264,8 @@ fn compile(renderer: &mut GlesRenderer) -> Result<Shaders, String> {
     let glass = renderer.compile_custom_texture_shader(GLASS, &[
         n("area", UniformType::_4f), n("px", UniformType::_2f), n("texel", UniformType::_2f), n("blur", UniformType::_1f), n("radius", UniformType::_1f),
     ]).map_err(|e| format!("{e:?}"))?;
-    Ok(Shaders { card, back, disc, glass, under: None })
+    let lens = renderer.compile_custom_texture_shader(LENS, &[n("area", UniformType::_4f), n("strength", UniformType::_1f)]).map_err(|e| format!("{e:?}"))?;
+    Ok(Shaders { card, back, disc, glass, lens, under: None, under_lens: None })
 }
 
 fn four(name: &'static str, c: [f32; 4]) -> Uniform<'static> { Uniform::new(name, (c[0], c[1], c[2], c[3])) }
@@ -512,6 +537,7 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     for p in &modal { draw_panel(state, renderer, &mut f, shaders.as_ref(), p, Some(p.pid) == top_modal, &[], true); glass.push((f.out.len(), p.rect)); }
 
     // Above everything: the docking dot, the targets, the drop preview and the guides.
+    let mut lenses: Vec<Rect> = Vec::new();
     let (dot, ring) = (premultiplied(t.dock_dot), t.dock_ring);
     let (px, py) = state.pointer;
     match state.act {
@@ -539,6 +565,7 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
                     // The one the dot is in stands out; the others stay soft over what is behind them.
                     let c = if lit(p.pid, how) { [ring[0], ring[1], ring[2], (ring[3] * 1.8).min(1.0)] } else { ring };
                     f.disc(shaders.as_ref(), cx, cy, t.dock_ring_size, premultiplied(c), false);
+                    lenses.push(Rect::new(cx - t.dock_ring_size / 2.0, cy - t.dock_ring_size / 2.0, t.dock_ring_size, t.dock_ring_size));
                 }
             }
         }
@@ -582,6 +609,7 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
                 f.line(l, 2.0, premultiplied(t.edge));
             }
         }
+    let lens_at = f.out.len();
     // Panels that hold on to nothing lie over the joint lines; the others under them.
     let carried: Vec<u64> = active.as_ref().map(|(_, _, ps)| ps.iter().map(|(p, _)| *p).collect()).unwrap_or_default();
     let top = state.surface.front();
@@ -623,8 +651,12 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
         }
     let used = f.k;
     let mut out = f.out;
+    let screen = (state.surface.w, state.surface.h);
     if t.glass_blur > 0.0 && !glass.is_empty() && let Some(sh) = shaders.as_mut() {
-        glass_under(renderer, sh, &mut out, under_from, &glass, (state.surface.w, state.surface.h), t.glass_blur, radius);
+        glass_under(renderer, sh, &mut out, under_from, &glass, screen, t.glass_blur, radius);
+    }
+    if t.dock_refraction > 0.0 && !lenses.is_empty() && let Some(sh) = shaders.as_mut() {
+        lens_under(renderer, sh, &mut out, lens_at, &lenses, screen, t.dock_refraction);
     }
     kept.truncate(used);
     state.shaded = kept;
@@ -638,19 +670,7 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
 #[allow(clippy::too_many_arguments)]
 fn glass_under(renderer: &mut GlesRenderer, sh: &mut Shaders, out: &mut Vec<PanelElement>, from: usize, glass: &[(usize, Rect)], screen: (f64, f64), blur: f64, radius: f64) {
     let (w, h) = (screen.0.round().max(1.0) as i32, screen.1.round().max(1.0) as i32);
-    let size: Size<i32, Buffer> = (w, h).into();
-    if sh.under.as_ref().is_none_or(|t| smithay::backend::renderer::Texture::size(t) != size) {
-        sh.under = renderer.create_buffer(Fourcc::Abgr8888, size).ok();
-    }
-    let Some(mut texture) = sh.under.clone() else { return };
-    let drawn = (|| -> Result<(), String> {
-        let mut fb = renderer.bind(&mut texture).map_err(|e| e.to_string())?;
-        let mut tracker = OutputDamageTracker::new((w, h), 1.0, Transform::Normal);
-        let under: Vec<&PanelElement> = out[from..].iter().collect();
-        tracker.render_output(renderer, &mut fb, 0, &under, [0.0; 4]).map_err(|e| format!("{e:?}"))?;
-        Ok(())
-    })();
-    if let Err(e) = drawn { record::warn("screen", "glass not drawn", &e, &[]); return; }
+    let Some(texture) = draw_under(renderer, &mut sh.under, &out[from..], (w, h)) else { return };
     let context = renderer.context_id();
     // Last first, so the places of the ones before stay right.
     for (at, r) in glass.iter().rev() {
@@ -662,6 +682,42 @@ fn glass_under(renderer: &mut GlesRenderer, sh: &mut Shaders, out: &mut Vec<Pane
             Uniform::new("blur", blur as f32), Uniform::new("radius", radius.min(r.w / 2.0).min(r.h / 2.0) as f32),
         ];
         out.insert(*at, TextureShaderElement::new(e, sh.glass.clone(), uniforms).into());
+    }
+}
+
+/// Draws the elements into a texture of the surface's size, kept in `keep` for the next frame. None when it cannot.
+fn draw_under(renderer: &mut GlesRenderer, keep: &mut Option<GlesTexture>, elements: &[PanelElement], (w, h): (i32, i32)) -> Option<GlesTexture> {
+    let size: Size<i32, Buffer> = (w, h).into();
+    if keep.as_ref().is_none_or(|t| smithay::backend::renderer::Texture::size(t) != size) {
+        *keep = renderer.create_buffer(Fourcc::Abgr8888, size).ok();
+    }
+    let mut texture = keep.clone()?;
+    let drawn = (|| -> Result<(), String> {
+        let mut fb = renderer.bind(&mut texture).map_err(|e| e.to_string())?;
+        let mut tracker = OutputDamageTracker::new((w, h), 1.0, Transform::Normal);
+        let under: Vec<&PanelElement> = elements.iter().collect();
+        tracker.render_output(renderer, &mut fb, 0, &under, [0.0; 4]).map_err(|e| format!("{e:?}"))?;
+        Ok(())
+    })();
+    match drawn {
+        Ok(()) => Some(texture),
+        Err(e) => { record::warn("screen", "under not drawn", &e, &[]); None }
+    }
+}
+
+/// Puts a lens under each docking target: what lies under it, magnified towards the middle.
+fn lens_under(renderer: &mut GlesRenderer, sh: &mut Shaders, out: &mut Vec<PanelElement>, at: usize, lenses: &[Rect], screen: (f64, f64), strength: f64) {
+    let (w, h) = (screen.0.round().max(1.0) as i32, screen.1.round().max(1.0) as i32);
+    let Some(texture) = draw_under(renderer, &mut sh.under_lens, &out[at..], (w, h)) else { return };
+    let context = renderer.context_id();
+    for r in lenses {
+        let src = Rectangle::new((r.x, r.y).into(), (r.w, r.h).into());
+        let e = TextureRenderElement::from_static_texture(Id::new(), context.clone(), (r.x.round(), r.y.round()), texture.clone(), 1, Transform::Normal, None, Some(src), Some((r.w.round() as i32, r.h.round() as i32).into()), None, Kind::Unspecified);
+        let uniforms = vec![
+            Uniform::new("area", ((r.x / screen.0) as f32, (r.y / screen.1) as f32, (r.w / screen.0) as f32, (r.h / screen.1) as f32)),
+            Uniform::new("strength", (strength * 0.5) as f32),
+        ];
+        out.insert(at, TextureShaderElement::new(e, sh.lens.clone(), uniforms).into());
     }
 }
 
