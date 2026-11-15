@@ -9,6 +9,10 @@
   "base": { "background": "base", "surface": "mantle", "text": "text", "accent": "blue" },
   "frame": {
     "outer": 14, "gap": 10, "pad": 5, "radius": 12, "border_width": 1.5, "shadow_size": 16,
+    "shadow_drop": 35, "back_lift": 55, "border_light": 60, "border_shade": 30,
+    "bar_gloss": 45, "bar_shine": 95, "bar_shade": 22,
+    "surface_light": 35, "surface_vignette": 12, "panel_light": 20, "panel_shade": 9,
+    "window_opacity": 100, "panel_opacity": 100, "back_opacity": 100, "glass_blur": 0,
     "joint_width": 2, "joint_show": "always",
     "surface_top": "sky_top", "surface_bottom": "sky_bottom",
     "panel": "base",

@@ -24,10 +24,20 @@ mod view;
 
 use gtk::{gio, glib, prelude::*};
 
+/// Whether this WebKit puts WSL's GPU (/dev/dxg) in its web process sandbox: from 2.54.
+fn webkit_has_dxg(major: u32, minor: u32) -> bool { (major, minor) >= (2, 54) }
+
 fn main() -> glib::ExitCode {
     wb_core::paths::private_files();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let kind = args.first().cloned().unwrap_or_default();
+    // Under WSL the compositor asks for d3d12 (the GPU is /dev/dxg). WebKit before 2.54 leaves /dev/dxg out of its web
+    // process sandbox, where d3d12 then fails and the page stays blank: panels with web views draw on the CPU there.
+    let web = matches!(kind.as_str(), "answer" | "view" | "project" | "map");
+    if web && std::env::var("GALLIUM_DRIVER").is_ok_and(|d| d == "d3d12") && !webkit_has_dxg(webkit6::functions::major_version(), webkit6::functions::minor_version()) {
+        // SAFETY: no other thread exists yet.
+        unsafe { std::env::remove_var("GALLIUM_DRIVER") };
+    }
     let view_name = args.get(1).cloned().unwrap_or_else(|| wb_core::view::FIRST_VIEW.to_string());
     let view_app = wb_core::view::app_of(&view_name);
     let view_title = wb_core::view::panel_title(&view_name);
@@ -91,4 +101,14 @@ fn main() -> glib::ExitCode {
         win.present();
     });
     app.run_with_args(&["whaybench-panel"])
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn webkit_puts_the_wsl_gpu_in_its_sandbox_from_2_54() {
+        assert!(!super::webkit_has_dxg(2, 52));
+        assert!(super::webkit_has_dxg(2, 54));
+        assert!(super::webkit_has_dxg(3, 0));
+    }
 }

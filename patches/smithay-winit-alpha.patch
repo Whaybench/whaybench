@@ -1,0 +1,20 @@
+diff --git a/src/backend/winit/mod.rs b/src/backend/winit/mod.rs
+index 80e0cb52..f9afe3c1 100644
+--- a/src/backend/winit/mod.rs
++++ b/src/backend/winit/mod.rs
+@@ -224,12 +224,13 @@ where
+             let display = unsafe { EGLDisplay::new(window.clone())? };
+ 
+             let context =
+-                EGLContext::new_with_config(&display, gl_attributes, PixelFormatRequirements::_10_bit())
++                // Whaybench: 8 bits of alpha first, for a see-through window; 10-bit colour keeps only 2.
++                EGLContext::new_with_config(&display, gl_attributes, PixelFormatRequirements::_8_bit())
+                     .or_else(|_| {
+                         EGLContext::new_with_config(
+                             &display,
+                             gl_attributes,
+-                            PixelFormatRequirements::_8_bit(),
++                            PixelFormatRequirements::_10_bit(),
+                         )
+                     })?;
+ 

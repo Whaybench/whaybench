@@ -1,5 +1,5 @@
 #!/bin/sh
-# Puts the Smithay source in third_party/smithay with our input method change on it.
+# Puts the Smithay source in third_party/smithay with our changes on it (patches/smithay-*.patch).
 #   tools/fetch-smithay.sh           the commit recorded in third_party/smithay.rev
 #   tools/fetch-smithay.sh --latest  the newest upstream commit, and records it
 # After --latest run the tests; a patch that no longer applies stops here and says so.

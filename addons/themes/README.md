@@ -83,6 +83,36 @@ In screen pixels, from 0 to 64.
 | `dock_dot_size` | Diameter of the dot in the middle of a title bar that docks a panel | 10 |
 | `dock_ring_size` | Diameter of the five targets on each panel while one is docked | 48 |
 
+## `frame`: light and depth
+
+In percent, from 0 to 100. At 0 (the default, but for `back_lift`) a theme stays flat.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `shadow_drop` | How far a panel's shadow falls below it, as a share of `shadow_size`; 0 keeps an even shadow all round | 0 |
+| `back_lift` | How high the panels behind stand against the front one: their shadow falls this share as far | 55 |
+| `border_light` | How much lighter a panel's border gets at the top | 0 |
+| `border_shade` | How much darker a panel's border gets at the bottom | 0 |
+| `bar_gloss` | How much lighter the upper half of a title bar is | 0 |
+| `bar_shine` | A bright line along the top of a title bar, inside the border | 0 |
+| `bar_shade` | A shade at the foot of a title bar, parting it from the panel | 0 |
+| `surface_light` | A light above the window's top middle, on the surface behind the panels | 0 |
+| `surface_vignette` | The surface darker towards the window's edges | 0 |
+| `panel_light` | The same light on the panels' frames | 0 |
+| `panel_shade` | The same darkening on the panels' frames towards the edges | 0 |
+
+## `frame`: opacity
+
+In percent, from 0 to 100; 100 (the default) is opaque.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `window_opacity` | The surface behind the panels; below 100 the desktop shows through, where the desktop allows it | 100 |
+| `panel_opacity` | Every panel: its frame, title bar, tabs and app | 100 |
+| `back_opacity` | The panels other than the front one, on top of `panel_opacity` | 100 |
+
+`glass_blur`, in pixels from 0 to 64 (default 0, no glass): a floating panel or dialog shows what lies under it blurred this far, where the panel is see-through.
+
 ## `frame`: when joint lines show
 
 | Key | Value | Meaning | Default |

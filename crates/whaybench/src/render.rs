@@ -14,7 +14,8 @@ use smithay::{
                 AsRenderElements, Id, Kind, memory::MemoryRenderBufferRenderElement, render_elements,
                 solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement, utils::CropRenderElement,
             },
-            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement},
+            gles::{GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, Uniform, UniformName, UniformType, element::{PixelShaderElement, TextureShaderElement}},
+            element::texture::TextureRenderElement, Renderer,
             utils::CommitCounter,
         },
         winit::{self, WinitEvent},
@@ -34,6 +35,7 @@ render_elements! {
     Solid=SolidColorRenderElement,
     Text=MemoryRenderBufferRenderElement<GlesRenderer>,
     Shader=PixelShaderElement,
+    Glass=TextureShaderElement,
 }
 
 // What goes to the window: the surface moved down below the menu bar, and the menu bar with its menus over everything.
@@ -48,9 +50,22 @@ const TAB_CLOSE: f64 = 18.0;
 /// The drop preview's fill and the tint of a panel about to be carried along.
 const CARRIED: [f32; 4] = [0.45, 0.43, 0.38, 0.45];
 
+/// One light above the window's top middle, shared by the surface and the cards: how lit a point is, and how dark
+/// towards the edges. Distances in pixels over the shorter side, so the light stays round whatever the window's shape.
+macro_rules! scene { () => { r#"
+float scene_light(vec2 uv, vec2 sz) {
+    vec2 p = (uv - vec2(0.5, -0.1)) * sz / min(sz.x, sz.y);
+    return exp(-dot(p, p) * 1.6);
+}
+float scene_dark(vec2 uv, vec2 sz) {
+    vec2 e = (uv - vec2(0.5)) * sz / min(sz.x, sz.y);
+    return smoothstep(0.35, 1.1, length(e));
+}
+"# } }
+
 /// A rounded box with its border, an optional title bar with a gradient, and a soft shadow around it.
 /// `v_coords` runs 0..1 over the element and `size` is the element's size in pixels.
-const CARD: &str = r#"
+const CARD: &str = concat!(r#"
 precision highp float;
 varying vec2 v_coords;
 uniform vec2 size;
@@ -67,7 +82,18 @@ uniform vec4 bar_top;
 uniform vec4 bar_bottom;
 uniform vec4 line;
 uniform vec4 shadow;
-
+uniform float lift;
+uniform float drop;
+uniform float gloss;
+uniform float shine_at;
+uniform float foot;
+uniform float panel_light;
+uniform float panel_shade;
+uniform float rim_light;
+uniform float rim_shade;
+uniform vec2 at;
+uniform vec2 screen;
+"#, scene!(), r#"
 float box(vec2 p, vec2 half_size, float r) {
     vec2 d = abs(p) - half_size + vec2(r);
     return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
@@ -81,21 +107,46 @@ void main() {
 
     float y = px.y - margin;
     vec4 body = fill;
-    if (bar > 0.0 && y < bar) body = mix(bar_top, bar_bottom, clamp(y / bar, 0.0, 1.0));
-    if (border > 0.0) body = mix(body, line, smoothstep(-border - 0.5, -border + 0.5, d));
+    if (bar > 0.0 && y < bar) {
+        body = mix(bar_top, bar_bottom, clamp(y / bar, 0.0, 1.0));
+        // A glossy bar: its upper half catches the light, and a thin shade at its foot parts it from the body.
+        body = mix(body, vec4(body.a), gloss * (1.0 - smoothstep(0.0, bar * 0.55, y)));
+        body = mix(body, vec4(0.0, 0.0, 0.0, body.a), foot * smoothstep(bar - 3.0, bar, y));
+    }
+    // A bright line just inside the rim along the top, following the rounded corners.
+    float shine = smoothstep(-border - 2.5, -border - 1.0, d) * (1.0 - smoothstep(-border - 0.5, -border, d));
+    float top = 1.0 - clamp(y / max(radius * 2.0, 1.0), 0.0, 1.0);
+    if (bar > 0.0) body = mix(body, vec4(body.a), shine_at * shine * top * top);
+    if (border > 0.0) {
+        // Light from above: the rim is lighter at the top and darker at the bottom (premultiplied colours).
+        float down = clamp(y / max(inner.y, 1.0), 0.0, 1.0);
+        vec4 rim = mix(line, vec4(line.a), rim_light * (1.0 - down) * (1.0 - down));
+        rim = mix(rim, vec4(0.0, 0.0, 0.0, line.a), rim_shade * down * down);
+        body = mix(body, rim, smoothstep(-border - 0.5, -border + 0.5, d));
+    }
+
+    // The same light as the surface behind, fainter: one light over the whole window.
+    vec2 uv = (at + px) / max(screen, vec2(1.0));
+    body = mix(body, vec4(body.a), panel_light * scene_light(uv, screen));
+    body = mix(body, vec4(0.0, 0.0, 0.0, body.a), panel_shade * scene_dark(uv, screen));
 
     float inside = 1.0 - smoothstep(-0.5, 0.5, d);
     vec4 colour = body * inside;
     if (margin > 0.0) {
+        // Two shadows, as an object lit from above casts: a wide soft one all round and a tighter one that falls
+        // below. The higher the card (lift), the further the second falls.
         float fall = clamp(1.0 - max(d, 0.0) / margin, 0.0, 1.0);
-        colour += shadow * fall * fall * (1.0 - inside);
+        float k = box(centre - vec2(0.0, margin * drop * lift), inner / 2.0, radius);
+        float key = clamp(1.0 - max(k, 0.0) / (margin * 0.75), 0.0, 1.0);
+        float cast_shadow = drop > 0.0 ? 0.5 * fall * fall + lift * key * key * key : fall * fall;
+        colour += shadow * cast_shadow * (1.0 - inside);
     }
     gl_FragColor = colour * alpha;
 }
-"#;
+"#);
 
 /// The surface behind the panels: a vertical gradient.
-const BACK: &str = r#"
+const BACK: &str = concat!(r#"
 precision highp float;
 varying vec2 v_coords;
 uniform vec2 size;
@@ -105,7 +156,53 @@ uniform float tint;
 #endif
 uniform vec4 top;
 uniform vec4 bottom;
-void main() { gl_FragColor = mix(top, bottom, v_coords.y) * alpha; }
+uniform float light;
+uniform float vignette;
+"#, scene!(), r#"void main() {
+    vec4 c = mix(top, bottom, v_coords.y);
+    // Lit from a light above the top middle, darker towards the edges (a vignette). Distances in pixels over the
+    // shorter side, so the light stays round whatever the window's shape.
+    c = mix(c, vec4(c.a), light * scene_light(v_coords, size));
+    c = mix(c, vec4(0.0, 0.0, 0.0, c.a), vignette * scene_dark(v_coords, size));
+    gl_FragColor = c * alpha;
+}
+"#);
+
+/// Glass: what lies under a floating panel, blurred, inside the panel's rounded box. `area` is the panel's place in the
+/// texture (x, y, w, h in texture coordinates), `px` its size in pixels.
+const GLASS: &str = r#"
+//_DEFINES_
+precision highp float;
+uniform sampler2D tex;
+uniform float alpha;
+varying vec2 v_coords;
+#if defined(DEBUG_FLAGS)
+uniform float tint;
+#endif
+uniform vec4 area;
+uniform vec2 px;
+uniform vec2 texel;
+uniform float blur;
+uniform float radius;
+
+float box(vec2 p, vec2 half_size, float r) {
+    vec2 d = abs(p) - half_size + vec2(r);
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
+}
+
+void main() {
+    // Two rings of eight around the middle, the outer at the blur's reach: soft enough at a glance, and cheap.
+    vec4 sum = texture2D(tex, v_coords) * 0.2;
+    for (int i = 0; i < 8; i++) {
+        float a = float(i) * 0.785398 + 0.392699;
+        vec2 d = vec2(cos(a), sin(a)) * texel * blur;
+        sum += texture2D(tex, v_coords + d * 0.5) * 0.06;
+        sum += texture2D(tex, v_coords + d) * 0.04;
+    }
+    vec2 p = (v_coords - area.xy) / area.zw * px - px / 2.0;
+    float inside = 1.0 - smoothstep(-0.5, 0.5, box(p, px / 2.0, radius));
+    gl_FragColor = sum * inside * alpha;
+}
 "#;
 
 /// A disc: a solid dot with a smooth edge, or a soft target that fades out from its middle with a faint rim.
@@ -127,27 +224,45 @@ void main() {
 }
 "#;
 
-pub struct Shaders { card: GlesPixelProgram, back: GlesPixelProgram, disc: GlesPixelProgram }
+pub struct Shaders { card: GlesPixelProgram, back: GlesPixelProgram, disc: GlesPixelProgram, glass: GlesTexProgram, under: Option<GlesTexture> }
 
 fn compile(renderer: &mut GlesRenderer) -> Result<Shaders, String> {
     let n = |s: &'static str, t| UniformName::new(s, t);
     let card = renderer.compile_custom_pixel_shader(CARD, &[
         n("margin", UniformType::_1f), n("radius", UniformType::_1f), n("border", UniformType::_1f), n("bar", UniformType::_1f),
         n("fill", UniformType::_4f), n("bar_top", UniformType::_4f), n("bar_bottom", UniformType::_4f), n("line", UniformType::_4f), n("shadow", UniformType::_4f),
+        n("lift", UniformType::_1f), n("rim_light", UniformType::_1f), n("rim_shade", UniformType::_1f),
+        n("at", UniformType::_2f), n("screen", UniformType::_2f), n("drop", UniformType::_1f), n("gloss", UniformType::_1f),
+        n("shine_at", UniformType::_1f), n("foot", UniformType::_1f), n("panel_light", UniformType::_1f), n("panel_shade", UniformType::_1f),
     ]).map_err(|e| format!("{e:?}"))?;
-    let back = renderer.compile_custom_pixel_shader(BACK, &[n("top", UniformType::_4f), n("bottom", UniformType::_4f)]).map_err(|e| format!("{e:?}"))?;
+    let back = renderer.compile_custom_pixel_shader(BACK, &[n("top", UniformType::_4f), n("bottom", UniformType::_4f), n("light", UniformType::_1f), n("vignette", UniformType::_1f)]).map_err(|e| format!("{e:?}"))?;
     let disc = renderer.compile_custom_pixel_shader(DISC, &[n("colour", UniformType::_4f), n("hard", UniformType::_1f)]).map_err(|e| format!("{e:?}"))?;
-    Ok(Shaders { card, back, disc })
+    let glass = renderer.compile_custom_texture_shader(GLASS, &[
+        n("area", UniformType::_4f), n("px", UniformType::_2f), n("texel", UniformType::_2f), n("blur", UniformType::_1f), n("radius", UniformType::_1f),
+    ]).map_err(|e| format!("{e:?}"))?;
+    Ok(Shaders { card, back, disc, glass, under: None })
 }
 
 fn four(name: &'static str, c: [f32; 4]) -> Uniform<'static> { Uniform::new(name, (c[0], c[1], c[2], c[3])) }
 
+/// The theme's light and depth, each a share from 0 to 1, as the card shader takes them.
+#[derive(Debug, Default, Clone, Copy)]
+struct Light { drop: f32, rim_light: f32, rim_shade: f32, gloss: f32, shine: f32, foot: f32, panel_light: f32, panel_shade: f32 }
+
+impl Light {
+    fn of(t: &wb_core::theme::Theme) -> Self {
+        let f = |x: f64| x as f32;
+        Light { drop: f(t.shadow_drop), rim_light: f(t.border_light), rim_shade: f(t.border_shade), gloss: f(t.bar_gloss),
+            shine: f(t.bar_shine), foot: f(t.bar_shade), panel_light: f(t.panel_light), panel_shade: f(t.panel_shade) }
+    }
+}
+
 /// What a card looks like, in the colours as drawing wants them.
-struct Card { radius: f64, border: f64, bar: f64, margin: f64, fill: [f32; 4], top: [f32; 4], bottom: [f32; 4], line: [f32; 4], shadow: [f32; 4] }
+struct Card { radius: f64, border: f64, bar: f64, margin: f64, fill: [f32; 4], top: [f32; 4], bottom: [f32; 4], line: [f32; 4], shadow: [f32; 4], lift: f32 }
 
 impl Card {
     fn plain(radius: f64, fill: [f32; 4]) -> Self {
-        Card { radius, border: 0.0, bar: 0.0, margin: 0.0, fill, top: fill, bottom: fill, line: fill, shadow: [0.0; 4] }
+        Card { radius, border: 0.0, bar: 0.0, margin: 0.0, fill, top: fill, bottom: fill, line: fill, shadow: [0.0; 4], lift: 0.0 }
     }
 }
 
@@ -243,11 +358,12 @@ fn phys(r: Rect) -> Rectangle<i32, Physical> {
 
 /// Adds elements in order, front first. Solid colours reuse ids, and shaded boxes are kept while they look the same, so
 /// frames are comparable and only what changed is sent.
-struct Frame<'a> { out: Vec<PanelElement>, ids: &'a mut Vec<(Id, [f32; 4])>, n: usize, commit: CommitCounter, kept: &'a mut Vec<(String, PixelShaderElement)>, k: usize }
+struct Frame<'a> { out: Vec<PanelElement>, ids: &'a mut Vec<(Id, [f32; 4])>, n: usize, commit: CommitCounter, kept: &'a mut Vec<(String, PixelShaderElement)>, k: usize, screen: (f64, f64), light: Light, alpha: f32 }
 
 impl Frame<'_> {
     fn solid(&mut self, r: Rect, colour: [f32; 4]) {
         // A new colour is a new element: the same one in another colour would not count as changed.
+        let colour = colour.map(|c| c * self.alpha);
         if self.n == self.ids.len() { self.ids.push((Id::new(), colour)); }
         else if self.ids[self.n].1 != colour { self.ids[self.n] = (Id::new(), colour); }
         let id = self.ids[self.n].0.clone();
@@ -256,7 +372,8 @@ impl Frame<'_> {
     }
     /// A shaded box: the one of last frame at this place in the order if it looks the same, else a new one.
     fn shaded(&mut self, program: &GlesPixelProgram, area: Rectangle<i32, Logical>, uniforms: Vec<Uniform<'static>>, look: String) {
-        let make = || PixelShaderElement::new(program.clone(), area, None, 1.0, uniforms, Kind::Unspecified);
+        let (alpha, look) = (self.alpha, format!("{look} {}", self.alpha));
+        let make = || PixelShaderElement::new(program.clone(), area, None, alpha, uniforms, Kind::Unspecified);
         if self.k == self.kept.len() { self.kept.push((look, make())); }
         else if self.kept[self.k].0 != look { self.kept[self.k] = (look, make()); }
         self.out.push(self.kept[self.k].1.clone().into());
@@ -280,11 +397,16 @@ impl Frame<'_> {
         let area = phys(Rect::new(r.x - m, r.y - m, r.w + 2.0 * m, r.h + 2.0 * m));
         let logical: Rectangle<i32, Logical> = Rectangle::new((area.loc.x, area.loc.y).into(), (area.size.w, area.size.h).into());
         let radius = c.radius.min(r.w / 2.0).min(r.h / 2.0);
-        let look = format!("card {logical:?} {m} {radius} {} {} {:?} {:?} {:?} {:?} {:?}", c.border, c.bar, c.fill, c.top, c.bottom, c.line, c.shadow);
+        let look = format!("card {logical:?} {m} {radius} {} {} {:?} {:?} {:?} {:?} {:?} {} {:?} {:?}", c.border, c.bar, c.fill, c.top, c.bottom, c.line, c.shadow, c.lift, self.screen, self.light);
+        let l = self.light;
         self.shaded(&sh.card, logical, vec![
             Uniform::new("margin", m as f32), Uniform::new("radius", radius as f32),
             Uniform::new("border", c.border as f32), Uniform::new("bar", c.bar as f32),
             four("fill", c.fill), four("bar_top", c.top), four("bar_bottom", c.bottom), four("line", c.line), four("shadow", c.shadow),
+            Uniform::new("lift", c.lift), Uniform::new("rim_light", l.rim_light), Uniform::new("rim_shade", l.rim_shade),
+            Uniform::new("drop", l.drop), Uniform::new("gloss", l.gloss), Uniform::new("shine_at", l.shine), Uniform::new("foot", l.foot),
+            Uniform::new("panel_light", l.panel_light), Uniform::new("panel_shade", l.panel_shade),
+            Uniform::new("at", (r.x as f32 - m as f32, r.y as f32 - m as f32)), Uniform::new("screen", (self.screen.0 as f32, self.screen.1 as f32)),
         ], look);
     }
     fn line(&mut self, l: Line, width: f64, colour: [f32; 4]) {
@@ -293,23 +415,23 @@ impl Frame<'_> {
     }
 }
 
-fn add_text(state: &mut App, renderer: &mut GlesRenderer, f: &mut Vec<PanelElement>, text: &str, colour: [u8; 3], area: Rect) {
+fn add_text(state: &mut App, renderer: &mut GlesRenderer, f: &mut Vec<PanelElement>, alpha: f32, text: &str, colour: [u8; 3], area: Rect) {
     let Some(t) = state.chrome.text(text, colour) else { return };
     let x = area.x + ((area.w - t.w as f64) / 2.0).max(0.0);
     let y = area.y + (area.h - t.h as f64) / 2.0;
     let src = (t.w as f64 > area.w).then(|| Rectangle::new((0.0, 0.0).into(), (area.w, t.h as f64).into()));
     let size = src.map(|_| (area.w as i32, t.h).into());
-    if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(renderer, (x.round(), y.round()), &t.buffer, None, src, size, Kind::Unspecified) {
+    if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(renderer, (x.round(), y.round()), &t.buffer, Some(alpha), src, size, Kind::Unspecified) {
         f.push(e.into());
     }
 }
 
 /// The panel's front app, cut to its area: nothing an app draws reaches outside its panel.
-fn app_elements(state: &App, p: &Panel, renderer: &mut GlesRenderer, area: Rect) -> Vec<PanelElement> {
+fn app_elements(state: &App, p: &Panel, renderer: &mut GlesRenderer, area: Rect, alpha: f32) -> Vec<PanelElement> {
     let Some(w) = state.windows.get(&p.tab().id) else { return Vec::new() };
     let g = w.geometry().loc;
     let at = (area.x.round() as i32 - g.x, area.y.round() as i32 - g.y);
-    let elements = AsRenderElements::<GlesRenderer>::render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(w, renderer, at.into(), Scale::from(1.0), 1.0);
+    let elements = AsRenderElements::<GlesRenderer>::render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(w, renderer, at.into(), Scale::from(1.0), alpha);
     let crop = phys(area);
     elements.into_iter().filter_map(|e| CropRenderElement::from_element(e, 1.0, crop)).map(PanelElement::from).collect()
 }
@@ -321,19 +443,21 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
     let t = state.theme.clone();
     let radius = t.radius;
     let app = state.surface.app_of(p.rect);
+    // A see-through panel: its frame, title, tabs and app alike; the panels behind the front one can be more so.
+    f.alpha = (t.panel_opacity * if front { 1.0 } else { t.back_opacity }) as f32;
     if carried.contains(&p.pid) { f.card(shaders, p.rect, Card::plain(radius, CARRIED)); }
     if p.tabs.len() == 1 {
-        add_text(state, renderer, &mut f.out, "×", t.ink, Rect::new(p.rect.right() - CLOSE, p.rect.y, CLOSE, title()));
+        add_text(state, renderer, &mut f.out, f.alpha, "×", t.ink, Rect::new(p.rect.right() - CLOSE, p.rect.y, CLOSE, title()));
     }
     let ink = [(t.accent[0] * 255.0) as u8, (t.accent[1] * 255.0) as u8, (t.accent[2] * 255.0) as u8];
-    if let Some(r) = undo_rect(state, p) { add_text(state, renderer, &mut f.out, "↩", ink, r); }
-    for (_, label, r) in back_rects(state, p) { add_text(state, renderer, &mut f.out, &label, ink, r); }
+    if let Some(r) = undo_rect(state, p) { add_text(state, renderer, &mut f.out, f.alpha, "↩", ink, r); }
+    for (_, label, r) in back_rects(state, p) { add_text(state, renderer, &mut f.out, f.alpha, &label, ink, r); }
     if p.tabs.len() > 1 {
         let rects = tab_rects(state, p);
         for (i, r) in rects.iter().enumerate() {
             let ink = if i == p.active { t.ink } else { t.ink_soft };
-            add_text(state, renderer, &mut f.out, "×", ink, Rect::new(r.right() - TAB_CLOSE, r.y, TAB_CLOSE, r.h));
-            add_text(state, renderer, &mut f.out, &p.tabs[i].name.clone(), ink, Rect::new(r.x, r.y, (r.w - TAB_CLOSE).max(1.0), r.h));
+            add_text(state, renderer, &mut f.out, f.alpha, "×", ink, Rect::new(r.right() - TAB_CLOSE, r.y, TAB_CLOSE, r.h));
+            add_text(state, renderer, &mut f.out, f.alpha, &p.tabs[i].name.clone(), ink, Rect::new(r.x, r.y, (r.w - TAB_CLOSE).max(1.0), r.h));
         }
         if let Some(r) = rects.get(p.active) { f.card(shaders, *r, Card::plain(radius.min(7.0), premultiplied(t.tab_front))); }
     } else {
@@ -342,9 +466,9 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
         let left = 8.0 + (radius / 2.0).max(0.0);
         let end = marks_left(state, p);
         let area = Rect::new(p.rect.x + left, p.rect.y, wide.min((end - p.rect.x - left - 6.0).max(1.0)), title());
-        add_text(state, renderer, &mut f.out, &p.tab().name.clone(), if front { t.ink } else { t.ink_soft }, area);
+        add_text(state, renderer, &mut f.out, f.alpha, &p.tab().name.clone(), if front { t.ink } else { t.ink_soft }, area);
     }
-    f.out.extend(app_elements(state, p, renderer, app));
+    f.out.extend(app_elements(state, p, renderer, app, f.alpha));
     f.solid(app, premultiplied(t.panel));
     f.card(shaders, p.rect, Card {
         radius, border: t.border_width, bar: title(), margin: if own_shadow { t.shadow_size } else { 0.0 },
@@ -353,13 +477,16 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
         bottom: premultiplied(if front { t.front_bottom } else { t.bar_bottom }),
         line: premultiplied(if front { t.front_border } else { t.border }),
         shadow: if own_shadow { premultiplied(t.shadow) } else { [0.0; 4] },
+        // The front panel stands higher than the others.
+        lift: if front { 1.0 } else { t.back_lift as f32 },
     });
+    f.alpha = 1.0;
 }
 
 fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelElement> {
     let mut ids = std::mem::take(&mut state.solid_ids);
     let mut kept = std::mem::take(&mut state.shaded);
-    let shaders = state.shaders.take();
+    let mut shaders = state.shaders.take();
     let status_elements = state.status.clone().map(|w| {
         let g = w.geometry().loc;
         let area = Rect::new(0.0, state.surface.h, state.surface.w, crate::state::STATUS_H as f64);
@@ -368,7 +495,7 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
         (e, area)
     });
     let t = state.theme.clone();
-    let mut f = Frame { out: Vec::new(), ids: &mut ids, n: 0, commit: CommitCounter::default(), kept: &mut kept, k: 0 };
+    let mut f = Frame { out: Vec::new(), ids: &mut ids, n: 0, commit: CommitCounter::default(), kept: &mut kept, k: 0, screen: (state.surface.w, state.surface.h), light: Light::of(&state.theme), alpha: 1.0 };
     let accent = premultiplied(t.accent);
     let radius = t.radius;
     if let Some((elements, area)) = status_elements {
@@ -380,7 +507,9 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     // A settings window is above everything else, the joint lines included.
     let modal: Vec<Panel> = state.surface.panels.iter().rev().filter(|p| p.modal).cloned().collect();
     let top_modal = modal.first().map(|p| p.pid);
-    for p in &modal { draw_panel(state, renderer, &mut f, shaders.as_ref(), p, Some(p.pid) == top_modal, &[], true); }
+    // Floating panels with glass: where each one's elements end, so what lies under it can go right there.
+    let mut glass: Vec<(usize, Rect)> = Vec::new();
+    for p in &modal { draw_panel(state, renderer, &mut f, shaders.as_ref(), p, Some(p.pid) == top_modal, &[], true); glass.push((f.out.len(), p.rect)); }
 
     // Above everything: the docking dot, the targets, the drop preview and the guides.
     let (dot, ring) = (premultiplied(t.dock_dot), t.dock_ring);
@@ -400,7 +529,7 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
                     let a = if at == Some(side) { (ring[3] * 1.4).min(1.0) } else { ring[3] * 0.4 };
                     if at == Some(side) {
                         let ink = [(t.accent[0] * 255.0) as u8, (t.accent[1] * 255.0) as u8, (t.accent[2] * 255.0) as u8];
-                        add_text(state, renderer, &mut f.out, wb_core::i18n::t("browser-detach-here"), ink, r);
+                        add_text(state, renderer, &mut f.out, f.alpha, wb_core::i18n::t("browser-detach-here"), ink, r);
                     }
                     f.solid(r, premultiplied([ring[0], ring[1], ring[2], a]));
                 }
@@ -423,7 +552,7 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
         let name = state.surface.get(z.target).map(|p| p.tab().name.clone()).unwrap_or_default();
         let label = if z.how == How::Tab { wb_core::i18n::f("as-a-tab-of", &[("name", (name).to_string())]) } else { wb_core::i18n::f("beside", &[("name", (name).to_string())]) };
         let ink = [(t.accent[0] * 255.0) as u8, (t.accent[1] * 255.0) as u8, (t.accent[2] * 255.0) as u8];
-        add_text(state, renderer, &mut f.out, &label, ink, z.preview);
+        add_text(state, renderer, &mut f.out, f.alpha, &label, ink, z.preview);
         let mut c = Card::plain(radius, [accent[0] * 0.24, accent[1] * 0.24, accent[2] * 0.24, 0.24]);
         c.border = 2.0;
         c.line = accent;
@@ -460,7 +589,9 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     let panels: Vec<Panel> = state.surface.panels.iter().rev().filter(|p| !p.modal).cloned().collect();
     for p in panels.iter().filter(|p| free.contains(&p.pid)) {
         draw_panel(state, renderer, &mut f, shaders.as_ref(), p, Some(p.pid) == top, &carried, false);
+        glass.push((f.out.len(), p.rect));
     }
+    let under_from = f.out.len();
     let busy = active.is_some() || !matches!(state.act, Act::Idle);
     if t.joint_width > 0.0 && t.joint_show.visible(busy) {
         let (shared, walls) = state.surface.joints();
@@ -476,23 +607,62 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     if t.shadow_size > 0.0 {
         let none = [0.0; 4];
         for p in &panels {
-            f.card(shaders.as_ref(), p.rect, Card { radius, border: 0.0, bar: 0.0, margin: t.shadow_size, fill: none, top: none, bottom: none, line: none, shadow: premultiplied(t.shadow) });
+            f.card(shaders.as_ref(), p.rect, Card { radius, border: 0.0, bar: 0.0, margin: t.shadow_size, fill: none, top: none, bottom: none, line: none, shadow: premultiplied(t.shadow), lift: if Some(p.pid) == top { 1.0 } else { t.back_lift as f32 } });
         }
     }
     // The surface itself, under everything.
     if let Some(sh2) = &shaders
-        && t.surface_top != t.surface_bottom {
+        && (t.surface_top != t.surface_bottom || t.surface_light > 0.0 || t.surface_vignette > 0.0 || t.window_opacity < 1.0) {
             let area: Rectangle<i32, Logical> = Rectangle::new((0, 0).into(), (sw.round() as i32, sh.round() as i32).into());
             let (top, bottom) = (premultiplied(t.surface_top), premultiplied(t.surface_bottom));
-            f.shaded(&sh2.back, area, vec![four("top", top), four("bottom", bottom)], format!("back {area:?} {top:?} {bottom:?}"));
+            let (light, vignette) = (t.surface_light as f32, t.surface_vignette as f32);
+            f.alpha = t.window_opacity as f32;
+            f.shaded(&sh2.back, area, vec![four("top", top), four("bottom", bottom), Uniform::new("light", light), Uniform::new("vignette", vignette)],
+                format!("back {area:?} {top:?} {bottom:?} {light} {vignette}"));
+            f.alpha = 1.0;
         }
     let used = f.k;
-    let out = f.out;
+    let mut out = f.out;
+    if t.glass_blur > 0.0 && !glass.is_empty() && let Some(sh) = shaders.as_mut() {
+        glass_under(renderer, sh, &mut out, under_from, &glass, (state.surface.w, state.surface.h), t.glass_blur, radius);
+    }
     kept.truncate(used);
     state.shaded = kept;
     state.solid_ids = ids;
     state.shaders = shaders;
     out
+}
+
+/// Draws what lies under the floating panels (the elements from `from` on) into a texture of the surface's size, and
+/// puts it, blurred, under each floating panel. A panel that cannot have it just goes without.
+#[allow(clippy::too_many_arguments)]
+fn glass_under(renderer: &mut GlesRenderer, sh: &mut Shaders, out: &mut Vec<PanelElement>, from: usize, glass: &[(usize, Rect)], screen: (f64, f64), blur: f64, radius: f64) {
+    let (w, h) = (screen.0.round().max(1.0) as i32, screen.1.round().max(1.0) as i32);
+    let size: Size<i32, Buffer> = (w, h).into();
+    if sh.under.as_ref().is_none_or(|t| smithay::backend::renderer::Texture::size(t) != size) {
+        sh.under = renderer.create_buffer(Fourcc::Abgr8888, size).ok();
+    }
+    let Some(mut texture) = sh.under.clone() else { return };
+    let drawn = (|| -> Result<(), String> {
+        let mut fb = renderer.bind(&mut texture).map_err(|e| e.to_string())?;
+        let mut tracker = OutputDamageTracker::new((w, h), 1.0, Transform::Normal);
+        let under: Vec<&PanelElement> = out[from..].iter().collect();
+        tracker.render_output(renderer, &mut fb, 0, &under, [0.0; 4]).map_err(|e| format!("{e:?}"))?;
+        Ok(())
+    })();
+    if let Err(e) = drawn { record::warn("screen", "glass not drawn", &e, &[]); return; }
+    let context = renderer.context_id();
+    // Last first, so the places of the ones before stay right.
+    for (at, r) in glass.iter().rev() {
+        let src = Rectangle::new((r.x, r.y).into(), (r.w, r.h).into());
+        let e = TextureRenderElement::from_static_texture(Id::new(), context.clone(), (r.x.round(), r.y.round()), texture.clone(), 1, Transform::Normal, None, Some(src), Some((r.w.round() as i32, r.h.round() as i32).into()), None, Kind::Unspecified);
+        let uniforms = vec![
+            Uniform::new("area", ((r.x / screen.0) as f32, (r.y / screen.1) as f32, (r.w / screen.0) as f32, (r.h / screen.1) as f32)),
+            Uniform::new("px", (r.w as f32, r.h as f32)), Uniform::new("texel", (1.0 / w as f32, 1.0 / h as f32)),
+            Uniform::new("blur", blur as f32), Uniform::new("radius", radius.min(r.w / 2.0).min(r.h / 2.0) as f32),
+        ];
+        out.insert(*at, TextureShaderElement::new(e, sh.glass.clone(), uniforms).into());
+    }
 }
 
 fn window_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<WindowElement> {
@@ -550,9 +720,9 @@ fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: Size<i32, P
             (Some(p), _) => {
                 let a = state.surface.app_of(p.rect);
                 let (w, h) = (a.w.round() as i32, a.h.round() as i32);
-                let mut e = app_elements(state, &p, renderer, Rect::new(0.0, 0.0, w as f64, h as f64));
+                let mut e = app_elements(state, &p, renderer, Rect::new(0.0, 0.0, w as f64, h as f64), 1.0);
                 let (mut ids, mut kept) = (Vec::new(), Vec::new());
-                let mut f = Frame { out: Vec::new(), ids: &mut ids, n: 0, commit: CommitCounter::default(), kept: &mut kept, k: 0 };
+                let mut f = Frame { out: Vec::new(), ids: &mut ids, n: 0, commit: CommitCounter::default(), kept: &mut kept, k: 0, screen: (w as f64, h as f64), light: Light::of(&state.theme), alpha: 1.0 };
                 let panel = premultiplied(state.theme.panel);
                 f.solid(Rect::new(0.0, 0.0, w as f64, h as f64), panel);
                 e.extend(f.out);
@@ -593,7 +763,7 @@ fn offer_gpu(state: &mut App, backend: &Rc<RefCell<winit::WinitGraphicsBackend<G
 
 pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = state.saved_window().map(|(w, h)| (w as f64, h as f64)).unwrap_or(FIRST_WINDOW);
-    let attributes = WindowAttributes::default().with_title("Whaybench").with_surface_size(LogicalSize::new(w, h)).with_visible(true);
+    let attributes = WindowAttributes::default().with_transparent(true).with_title("Whaybench").with_surface_size(LogicalSize::new(w, h)).with_visible(true);
     let (backend, winit) = winit::init_from_attributes::<GlesRenderer>(attributes)?;
 
     let mode = Mode { size: backend.window_size(), refresh: 60_000 };
@@ -686,7 +856,8 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
                 }
                 if !state.shots.is_empty() { take_shots(state, renderer, size); }
                 let elements = window_elements(state, renderer);
-                let clear = premultiplied(state.theme.surface_top);
+                // Behind a see-through window the desktop shows: the surface's own colour only as opaque as the theme says.
+                let clear = premultiplied(state.theme.surface_top).map(|c| c * state.theme.window_opacity as f32);
                 damage_tracker.render_output(renderer, &mut framebuffer, age, &elements, clear).map(|r| r.damage.cloned().unwrap_or_default()).map_err(|e| format!("{e:?}"))
             };
             let drawn = drawn.and_then(|damage| if damage.is_empty() { Ok(false) } else { backend.submit(Some(&damage)).map(|_| true).map_err(|e| format!("{e:?}")) });

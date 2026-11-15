@@ -37,6 +37,12 @@ pub fn prepare() -> Result<(), String> {
     // winit reads this when it opens the window. Set before any thread starts reading the environment.
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &host) };
     record::decide("run", "display connected", "the user's desktop socket", &[("socket", host)]);
+    // WSL's GPU has no render node, only /dev/dxg, and Mesa picks llvmpipe unless told to use d3d12. The window and
+    // every app inside inherit it; a choice the person made in GALLIUM_DRIVER is kept.
+    if Path::new("/dev/dxg").exists() && std::env::var_os("GALLIUM_DRIVER").is_none() {
+        unsafe { std::env::set_var("GALLIUM_DRIVER", "d3d12") };
+        record::decide("screen", "drawing on d3d12", "WSL's GPU is /dev/dxg", &[]);
+    }
 
     let (early, rest) = versions::read_components(Duration::from_millis(500), Duration::from_secs(20));
     let mut version = vec![("Whaybench".to_string(), format!("{} ({})", env!("CARGO_PKG_VERSION"), env!("WB_COMMIT"))), ("Rust".to_string(), env!("WB_RUSTC").to_string()), ("Smithay".to_string(), env!("WB_SMITHAY").to_string())];
@@ -329,7 +335,8 @@ fn start_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) -> Op
         // the desktop's input method would talk past it and the apps would get no composed text.
         .env_remove("GTK_IM_MODULE").env_remove("QT_IM_MODULE")
         // Without linux-dmabuf (no render node, as under WSLg) Mesa would look for a GPU device, warn and fall back
-        // to drawing on the CPU anyway, so it is told to from the start.
+        // to drawing on the CPU anyway, so it is told to from the start. Under WSL GALLIUM_DRIVER=d3d12 (set at
+        // start) still draws on the GPU and hands over the result in shared memory.
         .envs((!GPU_APPS.load(Ordering::Relaxed)).then_some(("LIBGL_ALWAYS_SOFTWARE", "1")))
         .env(paths::ENV_DATA_DIR, Path::new(&data.root))
         .env(record::ENV_RUN, run)

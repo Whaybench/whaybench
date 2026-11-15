@@ -86,6 +86,28 @@ pub struct Theme {
     pub radius: f64,
     pub border_width: f64,
     pub shadow_size: f64,
+    /// Depth, each a share from 0 to 1 (percent in the file); 0 leaves a theme flat. How far the shadow falls below
+    /// a panel, as a share of its size, and how high the panels behind stand against the front one.
+    pub shadow_drop: f64,
+    pub back_lift: f64,
+    /// A border lighter at the top and darker at the bottom, as lit from above.
+    pub border_light: f64,
+    pub border_shade: f64,
+    /// A glossy title bar: its upper half lighter, a bright line along its top, a shade at its foot.
+    pub bar_gloss: f64,
+    pub bar_shine: f64,
+    pub bar_shade: f64,
+    /// One light above the window's top middle: on the surface, fainter on the panels, darker towards the edges.
+    pub surface_light: f64,
+    pub surface_vignette: f64,
+    pub panel_light: f64,
+    pub panel_shade: f64,
+    /// How opaque the window's surface (the desktop shows through), every panel, and the panels behind the front one.
+    pub window_opacity: f64,
+    pub panel_opacity: f64,
+    pub back_opacity: f64,
+    /// Glass: how far, in pixels, what lies under a floating panel is blurred (0: no glass). Seen where the panel is see-through.
+    pub glass_blur: f64,
     pub joint_width: f64,
     pub joint_show: JointShow,
     pub background: Colour,
@@ -107,18 +129,26 @@ pub enum Kind { Colour, Number(f64, f64), Font, Joint }
 /// Every key the theme settings show, in groups: (group, part, key, kind). The format is in addons/themes/README.md.
 pub const FIELDS: &[(&str, &str, &str, Kind)] = &[
     ("base", "base", "background", Kind::Colour), ("base", "base", "surface", Kind::Colour),
-    ("base", "base", "text", Kind::Colour), ("base", "base", "accent", Kind::Colour),
-    ("font", "base", "font", Kind::Font), ("font", "base", "font_size", Kind::Number(6.0, 24.0)),
+    ("base", "base", "accent", Kind::Colour), ("base", "base", "text", Kind::Colour),
+    ("font", "base", "font_size", Kind::Number(6.0, 24.0)), ("font", "base", "font", Kind::Font),
+    ("font", "base", "terminal_size", Kind::Number(6.0, 32.0)), ("font", "base", "terminal_font", Kind::Font),
     ("font", "base", "title_size", Kind::Number(8.0, 32.0)),
-    ("font", "base", "terminal_font", Kind::Font), ("font", "base", "terminal_size", Kind::Number(6.0, 32.0)),
-    ("panel", "frame", "outer", Kind::Number(0.0, 64.0)), ("panel", "frame", "gap", Kind::Number(0.0, 64.0)),
-    ("panel", "frame", "pad", Kind::Number(0.0, 64.0)), ("panel", "frame", "radius", Kind::Number(0.0, 64.0)),
-    ("panel", "frame", "border_width", Kind::Number(0.0, 64.0)), ("panel", "frame", "shadow_size", Kind::Number(0.0, 64.0)),
-    ("panel", "frame", "shadow", Kind::Colour), ("panel", "frame", "panel", Kind::Colour),
-    ("bar", "frame", "bar_top", Kind::Colour), ("bar", "frame", "bar_bottom", Kind::Colour),
+    ("panel", "frame", "panel", Kind::Colour), ("panel", "frame", "radius", Kind::Number(0.0, 64.0)),
+    ("panel", "frame", "gap", Kind::Number(0.0, 64.0)), ("panel", "frame", "outer", Kind::Number(0.0, 64.0)),
+    ("panel", "frame", "pad", Kind::Number(0.0, 64.0)),
+    ("opacity", "frame", "window_opacity", Kind::Number(0.0, 100.0)), ("opacity", "frame", "panel_opacity", Kind::Number(0.0, 100.0)),
+    ("opacity", "frame", "back_opacity", Kind::Number(0.0, 100.0)), ("opacity", "frame", "glass_blur", Kind::Number(0.0, 64.0)),
+    ("depth", "frame", "shadow_size", Kind::Number(0.0, 64.0)), ("depth", "frame", "shadow", Kind::Colour),
+    ("depth", "frame", "shadow_drop", Kind::Number(0.0, 100.0)), ("depth", "frame", "back_lift", Kind::Number(0.0, 100.0)),
+    ("light", "frame", "surface_light", Kind::Number(0.0, 100.0)), ("light", "frame", "panel_light", Kind::Number(0.0, 100.0)),
+    ("light", "frame", "surface_vignette", Kind::Number(0.0, 100.0)), ("light", "frame", "panel_shade", Kind::Number(0.0, 100.0)),
     ("bar", "frame", "front_top", Kind::Colour), ("bar", "frame", "front_bottom", Kind::Colour),
-    ("bar", "frame", "tab_front", Kind::Colour),
-    ("border", "frame", "border", Kind::Colour), ("border", "frame", "front_border", Kind::Colour),
+    ("bar", "frame", "bar_top", Kind::Colour), ("bar", "frame", "bar_bottom", Kind::Colour),
+    ("bar", "frame", "bar_gloss", Kind::Number(0.0, 100.0)), ("bar", "frame", "bar_shine", Kind::Number(0.0, 100.0)),
+    ("bar", "frame", "bar_shade", Kind::Number(0.0, 100.0)), ("bar", "frame", "tab_front", Kind::Colour),
+    ("border", "frame", "border_width", Kind::Number(0.0, 64.0)), ("border", "frame", "front_border", Kind::Colour),
+    ("border", "frame", "border", Kind::Colour),
+    ("border", "frame", "border_light", Kind::Number(0.0, 100.0)), ("border", "frame", "border_shade", Kind::Number(0.0, 100.0)),
     ("surface", "frame", "surface_top", Kind::Colour), ("surface", "frame", "surface_bottom", Kind::Colour),
     ("joint", "frame", "joint_show", Kind::Joint), ("joint", "frame", "joint_width", Kind::Number(0.0, 64.0)),
     ("joint", "frame", "shared", Kind::Colour), ("joint", "frame", "wall", Kind::Colour), ("joint", "frame", "edge", Kind::Colour),
@@ -150,6 +180,7 @@ impl Theme {
         let text_of = |key: &str, default: &str| v.get("base").and_then(|p| p.get(key)).and_then(Value::as_str).filter(|t| !t.trim().is_empty()).unwrap_or(default).to_string();
         let size = |key: &str, range: std::ops::RangeInclusive<f64>, default: f64| v.get("base").and_then(|p| p.get(key)).and_then(Value::as_f64).filter(|n| range.contains(n)).unwrap_or(default);
         let number = |key: &str, default: f64| v.get("frame").and_then(|p| p.get(key)).and_then(Value::as_f64).filter(|n| (0.0..=64.0).contains(n)).unwrap_or(default);
+        let share = |key: &str, default: f64| v.get("frame").and_then(|p| p.get(key)).and_then(Value::as_f64).filter(|n| (0.0..=100.0).contains(n)).unwrap_or(default) / 100.0;
 
         let background = colour("base", "background", "#eff1f5");
         let surface = colour("base", "surface", "#e6e9ef");
@@ -190,6 +221,21 @@ impl Theme {
             radius: number("radius", 0.0),
             border_width: number("border_width", 0.0),
             shadow_size: number("shadow_size", 0.0),
+            shadow_drop: share("shadow_drop", 0.0),
+            back_lift: share("back_lift", 55.0),
+            border_light: share("border_light", 0.0),
+            border_shade: share("border_shade", 0.0),
+            bar_gloss: share("bar_gloss", 0.0),
+            bar_shine: share("bar_shine", 0.0),
+            bar_shade: share("bar_shade", 0.0),
+            surface_light: share("surface_light", 0.0),
+            surface_vignette: share("surface_vignette", 0.0),
+            panel_light: share("panel_light", 0.0),
+            panel_shade: share("panel_shade", 0.0),
+            window_opacity: share("window_opacity", 100.0),
+            panel_opacity: share("panel_opacity", 100.0),
+            back_opacity: share("back_opacity", 100.0),
+            glass_blur: number("glass_blur", 0.0),
             joint_width: number("joint_width", 2.0),
             joint_show: JointShow::parse(v.get("frame").and_then(|p| p.get("joint_show")).and_then(Value::as_str)),
             background,
@@ -208,6 +254,7 @@ impl Theme {
             let b = |x: f32| (x * 255.0).round() as u8;
             Value::from(if c[3] >= 1.0 { format!("#{:02x}{:02x}{:02x}", b(c[0]), b(c[1]), b(c[2])) } else { format!("#{:02x}{:02x}{:02x}{:02x}", b(c[0]), b(c[1]), b(c[2]), b(c[3])) })
         };
+        let pc = |x: f64| Value::from((x * 1000.0).round() / 10.0);
         let ink = |i: [u8; 3]| Value::from(format!("#{:02x}{:02x}{:02x}", i[0], i[1], i[2]));
         match key {
             "background" => c(self.background), "surface" => c(self.surface), "text" => ink(self.ink), "accent" => c(self.accent),
@@ -220,6 +267,11 @@ impl Theme {
             "front_top" => c(self.front_top), "front_bottom" => c(self.front_bottom), "tab_front" => c(self.tab_front),
             "border" => c(self.border), "front_border" => c(self.front_border), "surface_top" => c(self.surface_top),
             "surface_bottom" => c(self.surface_bottom), "shared" => c(self.shared), "wall" => c(self.wall), "edge" => c(self.edge),
+            "shadow_drop" => pc(self.shadow_drop), "back_lift" => pc(self.back_lift), "border_light" => pc(self.border_light),
+            "border_shade" => pc(self.border_shade), "bar_gloss" => pc(self.bar_gloss), "bar_shine" => pc(self.bar_shine),
+            "bar_shade" => pc(self.bar_shade), "surface_light" => pc(self.surface_light), "surface_vignette" => pc(self.surface_vignette),
+            "panel_light" => pc(self.panel_light), "panel_shade" => pc(self.panel_shade),
+            "window_opacity" => pc(self.window_opacity), "panel_opacity" => pc(self.panel_opacity), "back_opacity" => pc(self.back_opacity), "glass_blur" => self.glass_blur.into(),
             "dock_dot" => c(self.dock_dot), "dock_dot_size" => self.dock_dot_size.into(), "dock_ring" => c(self.dock_ring), "dock_ring_size" => self.dock_ring_size.into(),
             _ => Value::Null,
         }
@@ -417,7 +469,7 @@ mod tests {
     }
     #[test]
     fn the_guide_names_every_key_the_program_reads() {
-        for key in ["background", "surface", "text", "accent", "outer", "gap", "pad", "radius", "border_width", "shadow_size", "joint_width", "joint_show", "surface_top", "surface_bottom", "panel", "bar_top", "bar_bottom", "front_top", "front_bottom", "border", "front_border", "tab_front", "shadow", "shared", "wall", "edge"] {
+        for key in ["background", "surface", "text", "accent", "outer", "gap", "pad", "radius", "border_width", "shadow_size", "joint_width", "joint_show", "surface_top", "surface_bottom", "panel", "bar_top", "bar_bottom", "front_top", "front_bottom", "border", "front_border", "tab_front", "shadow", "shared", "wall", "edge", "shadow_drop", "back_lift", "border_light", "border_shade", "bar_gloss", "bar_shine", "bar_shade", "surface_light", "surface_vignette", "panel_light", "panel_shade", "window_opacity", "panel_opacity", "back_opacity", "glass_blur"] {
             assert!(include_str!("../../../addons/themes/README.md").contains(&format!("`{key}`")), "{key} is not in addons/themes/README.md");
             assert!(DEFAULT_TEXT.contains(&format!("\"{key}\"")), "{key} is not in the default theme");
         }

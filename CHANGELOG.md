@@ -6,6 +6,18 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Light and depth for themes, each in percent (`addons/themes/README.md`): a shadow that falls below a panel, and
+  higher for the front one (`shadow_drop`, `back_lift`); a border lighter at the top and darker at the bottom
+  (`border_light`, `border_shade`); a glossy title bar (`bar_gloss`, `bar_shine`, `bar_shade`); and one light above the
+  window's top middle on the surface and, fainter, on the panels' frames (`surface_light`, `surface_vignette`,
+  `panel_light`, `panel_shade`). The default theme uses them; at 0 a theme stays flat, so the other themes look as
+  before.
+- See-through themes (`addons/themes/README.md`): `window_opacity` lets the desktop show through the surface behind the
+  panels, `panel_opacity` makes the panels themselves see-through (frame, title, tabs and app), and `back_opacity`
+  more so for the panels behind the front one. `glass_blur` gives floating panels and dialogs glass: what lies under
+  them shows blurred. The window asks for 8 bits of alpha first. The default theme stays opaque.
+
 ### Fixed
 - The input panel's hint names the keys that switch the input language as fcitx5 has them (it said Shift+Space,
   which the Windows setup no longer sets).
@@ -17,7 +29,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - `whaybench-view detach` and `attach` wait for the move and say where the browser is, so the agent knows (they
   returned at once without a word).
 
+- Under WSL the window and the apps inside draw on the GPU through Mesa's d3d12 driver (GALLIUM_DRIVER=d3d12, unless
+  set otherwise); Mesa took the CPU before. With WebKit older than 2.54, which leaves the GPU out of its web process
+  sandbox, the panels that show web pages (answer, view, project, map) keep drawing on the CPU, or their pages stayed
+  blank.
+
 ### Changed
+- Theme settings are ordered by how much of the screen each part changes: base colours, fonts, panels, shadow
+  and depth, light, title bar, border, surface, joint lines, docking.
 - Input settings list the switch keys one per line under the + that adds one.
 
 ## [0.7.0] - 2026-11-15
