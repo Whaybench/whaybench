@@ -50,6 +50,9 @@ Versions are a.b.c. A release is a patch unless the maintainer names another ste
 - Major (2.0.0): a sweeping, ground-breaking overhaul of the program, chosen by the maintainer. 1.0.0 comes only
   when the program as it is now has proved stable and well used, or when the maintainer decides.
 
+Before every version tag the number is confirmed with the maintainer again, even when a release was asked for. A
+change to documents only (no code) is not released.
+
 Every change worth telling goes into `CHANGELOG.md` under `[Unreleased]`.
 
 A release:
