@@ -4,6 +4,14 @@ All notable changes to Whaybench are written here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- When the Windows setup stopped, its window closed at once and nothing kept the reason: it now waits for Enter, the
+  setup writes `%LOCALAPPDATA%\Whaybench\install.log`, and Whaybench Setup's message says where it is.
+- The Windows setup checks that virtualization is on before it installs WSL, and says to turn it on in the BIOS:
+  turned off, it used to fail later, after a restart, with a message about the internet connection.
+
 ## [0.8.1] - 2026-11-15
 
 Glass no longer keeps the window redrawing, see-through themes show the opacity they set, and fixes to the new window

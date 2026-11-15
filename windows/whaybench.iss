@@ -42,7 +42,7 @@ Type: files; Name: "{userdesktop}\Whaybench.lnk"
 Type: files; Name: "{userprograms}\Whaybench.lnk"
 
 [CustomMessages]
-Stopped=The setup stopped before it finished; its window showed why. Run Whaybench Setup again to continue from there.
+Stopped=The setup stopped before it finished. Why is written in %1. Run Whaybench Setup again to continue from there.
 RemoveLinux=Also delete the Whaybench Linux system, with everything kept in it (conversations, settings, files made there)?
 
 [Code]
@@ -57,7 +57,7 @@ begin
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
        ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1"'), '', SW_SHOW, ewWaitUntilTerminated, Code);
   if Code = 3010 then Restart := True
-  else if Code <> 0 then SuppressibleMsgBox(CustomMessage('Stopped'), mbError, MB_OK, IDOK);
+  else if Code <> 0 then SuppressibleMsgBox(FmtMessage(CustomMessage('Stopped'), [ExpandConstant('{app}\install.log')]), mbError, MB_OK, IDOK);
 end;
 
 function NeedRestart(): Boolean;

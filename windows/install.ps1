@@ -9,8 +9,23 @@ param(
     [string]$Icon = "https://github.com/Whaybench/whaybench/releases/latest/download/whaybench.ico"
 )
 $ErrorActionPreference = "Stop"
+# What this window says is kept in a log, which Whaybench Setup points to when this stops.
+# shortcut: Windows PowerShell 5.1 may leave the output of wsl.exe and setup-wsl.sh out of the transcript; the window
+# still shows it while it waits. Upgrade if a log without the Linux part proves not enough.
+$log = Join-Path $env:LOCALAPPDATA "Whaybench\install.log"
+New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+try { Start-Transcript -Path $log -Append | Out-Null } catch {}
 function Say($text) { Write-Host "Whaybench: $text" }
-function Fail($text) { Write-Host "Whaybench: $text" -ForegroundColor Red; exit 1 }
+# The window stays until Enter is pressed, so the reason can be read before it closes.
+function Fail($text) {
+    Write-Host "Whaybench: $text" -ForegroundColor Red
+    Write-Host "Whaybench: this is kept in $log"
+    try { Stop-Transcript | Out-Null } catch {}
+    Read-Host "Press Enter to close this window" | Out-Null
+    exit 1
+}
+# Any other error stops the same way, with its message.
+trap { Fail "$_" }
 # wsl.exe writes UTF-16; read it as such.
 [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
 $wsl = "$env:SystemRoot\System32\wsl.exe"
@@ -18,6 +33,14 @@ $wsl = "$env:SystemRoot\System32\wsl.exe"
 # WSLg, which shows Linux windows, needs Windows 11 or Windows 10 21H2 (build 19044) with WSL from the Store.
 $build = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
 if ($build -lt 19044) { Fail "Windows 10 21H2 or newer is needed (this is build $build). Update Windows first." }
+
+# WSL 2 runs in a virtual machine. Off in the BIOS, WSL still installs and the distribution fails later (0x80370102),
+# so it is asked here, before the restart. A running hypervisor (WSL 2, Hyper-V) hides the firmware flag: either is enough.
+$hypervisor = (Get-CimInstance Win32_ComputerSystem).HypervisorPresent
+$firmware = @(Get-CimInstance Win32_Processor | Where-Object { $_.VirtualizationFirmwareEnabled }).Count -gt 0
+if (-not $hypervisor -and -not $firmware) {
+    Fail "virtualization is turned off. Turn it on in the computer's BIOS or UEFI settings (often called Intel VT-x, Intel Virtualization Technology, AMD-V or SVM), then run Whaybench Setup again."
+}
 
 # WSL itself. Without it, wsl.exe --status fails or says it is not installed.
 & $wsl --status *> $null
@@ -31,6 +54,7 @@ if ($LASTEXITCODE -ne 0) {
     $again = "powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`""
     Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name "WhaybenchSetup" -Value $again
     Say "restart Windows to finish; the installation continues by itself after the restart"
+    try { Stop-Transcript | Out-Null } catch {}
     exit 3010
 }
 & $wsl --update *> $null
@@ -40,7 +64,7 @@ $have = (& $wsl --list --quiet) -split "`r?`n" | ForEach-Object { $_.Trim() } | 
 if (-not $have) {
     Say "installing $Ubuntu as $Distro (a few minutes)"
     & $wsl --install $Ubuntu --name $Distro --no-launch
-    if ($LASTEXITCODE -ne 0) { Fail "Ubuntu could not be installed. Check the internet connection and run this again." }
+    if ($LASTEXITCODE -ne 0) { Fail "Ubuntu could not be installed. Check the internet connection, and that virtualization is on in the BIOS, and run this again." }
 }
 
 # Inside: an account named after the Windows one, the programs, the input method for the Windows display language.
@@ -87,3 +111,4 @@ foreach ($place in $places) {
     $link.Save()
 }
 Say "done. Start Whaybench from the Start menu or the desktop; the first time, sign in to Claude in the browser that opens."
+try { Stop-Transcript | Out-Null } catch {}
