@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-15
+
 ### Added
 - Panels other than the conversations and the input panel (map, sessions, files, answer, notifications, project,
   views) go out to the desktop the same way as the browser: dragged by the dot onto the band at the window's edge,
