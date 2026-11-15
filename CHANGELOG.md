@@ -4,7 +4,10 @@ All notable changes to Whaybench are written here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.1] - 2026-11-15
+
+Glass no longer keeps the window redrawing, see-through themes show the opacity they set, and fixes to the new window
+frame and the WSL GPU check.
 
 ### Fixed
 - Under WSL, WebKit 2.54.0 and 2.54.1 kept the GPU out of their web sandbox too: the panels with web pages draw on
