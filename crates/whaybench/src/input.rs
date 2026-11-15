@@ -173,6 +173,11 @@ impl App {
     fn pointer_pressed(&mut self, button: u32) -> bool {
         let (x, y) = self.pointer;
         self.close_popups_unless_at((x, y).into());
+        // The window's own frame: its edges, its buttons and its empty title strip.
+        if button == LEFT && let Some(cmd) = self.frame_press(x, y) { 
+            // Not Swallow: once the desktop takes the pointer to move or resize, the release may never come here.
+            self.window_cmd = Some(cmd); self.act = Act::Idle; return false;
+        }
         // While a settings window is open, a press elsewhere does nothing.
         if let Some(m) = self.surface.modal().map(|m| (m.pid, m.rect))
             && !m.1.contains(x, y) { self.focus_panel(m.0); self.act = Act::Swallow; return false; }

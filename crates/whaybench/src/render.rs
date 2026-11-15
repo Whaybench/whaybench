@@ -523,6 +523,27 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     let mut f = Frame { out: Vec::new(), ids: &mut ids, n: 0, commit: CommitCounter::default(), kept: &mut kept, k: 0, screen: (state.surface.w, state.surface.h), light: Light::of(&state.theme), alpha: 1.0 };
     let accent = premultiplied(t.accent);
     let radius = t.radius;
+    // The window's own frame: its buttons and the empty title strip right of the menus, over the menu bar's row.
+    if state.menu.is_some() {
+        let (w, top) = (state.surface.w, -(crate::state::MENU_H as f64));
+        let h = crate::state::MENU_H as f64;
+        let (px, py) = state.pointer;
+        let under = state.control_at(px, py);
+        for (c, n, glyph) in [(crate::state::Control::Close, 1.0, "✕"), (crate::state::Control::Maximize, 2.0, if state.maximized { "❐" } else { "☐" }), (crate::state::Control::Minimize, 3.0, "—")] {
+            let r = Rect::new(w - n * crate::state::CONTROL_W, top, crate::state::CONTROL_W, h);
+            let lit = under == Some(c);
+            // Close goes red under the pointer, as on Windows; the others take a touch of the accent.
+            let ink = if lit && c == crate::state::Control::Close { [255, 255, 255] } else { t.ink };
+            add_text(state, renderer, &mut f.out, 1.0, glyph, ink, r);
+            if lit {
+                let bg = if c == crate::state::Control::Close { [0.77, 0.17, 0.11, 1.0] } else { [t.accent[0], t.accent[1], t.accent[2], 0.15] };
+                f.solid(r, premultiplied(bg));
+            }
+        }
+        let from = state.menu_width() as f64;
+        // The menu bar's own colour (its style sheet paints it in bar_bottom), so the strip reads as one bar.
+        f.solid(Rect::new(from, top, (w - from).max(0.0), h), premultiplied(t.bar_bottom));
+    }
     if let Some((elements, area)) = status_elements {
         let crop = phys(area);
         f.out.extend(elements.into_iter().filter_map(|e| CropRenderElement::from_element(e, 1.0, crop)).map(PanelElement::from));
@@ -819,7 +840,8 @@ fn offer_gpu(state: &mut App, backend: &Rc<RefCell<winit::WinitGraphicsBackend<G
 
 pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = state.saved_window().map(|(w, h)| (w as f64, h as f64)).unwrap_or(FIRST_WINDOW);
-    let attributes = WindowAttributes::default().with_transparent(true).with_title("Whaybench").with_surface_size(LogicalSize::new(w, h)).with_visible(true);
+    // No frame from the desktop: the menu bar is the title strip, with the window's buttons drawn at its right.
+    let attributes = WindowAttributes::default().with_decorations(false).with_transparent(true).with_title("Whaybench").with_surface_size(LogicalSize::new(w, h)).with_visible(true);
     let (backend, winit) = winit::init_from_attributes::<GlesRenderer>(attributes)?;
 
     let mode = Mode { size: backend.window_size(), refresh: 60_000 };
@@ -864,10 +886,25 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
         WinitEvent::Resized { size, .. } => {
             output.change_current_state(Some(Mode { size, refresh: 60_000 }), None, None, None);
             state.window_size = (size.w, size.h);
+            state.maximized = backend.window().is_maximized();
             state.fit_strips();
             state.note_saved_soon();
         }
-        WinitEvent::Input(event) => state.process_input_event(event),
+        WinitEvent::Input(event) => {
+            state.process_input_event(event);
+            if let Some(cmd) = state.window_cmd.take() {
+                use crate::state::WindowCmd;
+                let w = backend.window();
+                let done = match cmd {
+                    WindowCmd::Move => w.drag_window().map_err(|e| e.to_string()),
+                    WindowCmd::Resize(d) => w.drag_resize_window(d).map_err(|e| e.to_string()),
+                    WindowCmd::Minimize => { w.set_minimized(true); Ok(()) }
+                    WindowCmd::Maximize => { w.set_maximized(!w.is_maximized()); Ok(()) }
+                    WindowCmd::Close => { state.end_reason = "window closed".into(); state.loop_signal.stop(); Ok(()) }
+                };
+                if let Err(e) = done { record::warn("screen", "window not moved", &e, &[("asked", format!("{cmd:?}"))]); }
+            }
+        }
         WinitEvent::Ime(ime) => state.handle_ime(ime),
         WinitEvent::Focus(focused) => {
             record::detail("screen", "window focus", &[("focused", focused.to_string())]);
@@ -892,6 +929,10 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
                 (Act::Hold { .. }, _) => CursorIcon::Grabbing,
                 (Act::Resize { edges, .. }, _) => edge_cursor(edges),
                 (_, Some((_, edges, _))) => edge_cursor(edges),
+                (Act::Idle, None) => state.window_edge_at(state.pointer.0, state.pointer.1).map_or(CursorIcon::Default, |d| {
+                    use smithay::reexports::winit::window::ResizeDirection as D;
+                    match d { D::East | D::West => CursorIcon::EwResize, D::North | D::South => CursorIcon::NsResize, D::NorthWest | D::SouthEast => CursorIcon::NwseResize, _ => CursorIcon::NeswResize }
+                }),
                 _ => CursorIcon::Default,
             };
             if wanted != cursor {

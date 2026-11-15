@@ -37,6 +37,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   blank.
 
 ### Changed
+- The window draws its own frame instead of the desktop's (or, where the desktop has none, as under WSLg and GNOME, a
+  plain fallback bar): the menu bar is the title strip, with minimise, maximise and close at its right. Drag the empty
+  strip to move the window, double-click it to maximise, and drag the window's edges to resize it.
 - Theme settings are ordered by how much of the screen each part changes: base colours, fonts, panels, shadow
   and depth, light, title bar, border, surface, joint lines, docking.
 - Input settings list the switch keys one per line under the + that adds one.

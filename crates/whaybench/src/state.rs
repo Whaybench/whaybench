@@ -35,6 +35,19 @@ pub const STATUS_APP: &str = "dev.whaybench.status";
 pub const STATUS_H: i32 = 26;
 pub const MENU_APP: &str = "dev.whaybench.menu";
 pub const MENU_H: i32 = 30;
+/// The window's own buttons at the right of the menu bar (minimise, maximise, close), each this wide, as Windows has them.
+pub const CONTROL_W: f64 = 46.0;
+/// How close to the window's edge a press resizes the window. The top edge is thinner: the menu is there.
+const WINDOW_EDGE: f64 = 5.0;
+const WINDOW_TOP_EDGE: f64 = 3.0;
+
+/// What the window's own frame asks of the window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WindowCmd { Move, Resize(smithay::reexports::winit::window::ResizeDirection), Minimize, Maximize, Close }
+
+/// A button of the window's own frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Control { Minimize, Maximize, Close }
 
 /// `end_reason` of a restart: the program starts itself again after it has ended.
 pub const RESTART: &str = "restart";
@@ -106,6 +119,11 @@ pub struct App {
     pub act: Act,
     pub pointer: (f64, f64),
     pub hover: Option<(u64, Edges, Vec<(u64, Side)>)>,
+    /// What the window's own frame was asked to do (move, resize, minimise, maximise, close); the window does it.
+    pub window_cmd: Option<WindowCmd>,
+    /// The last press on the window's empty title strip, for a double click.
+    pub strip_pressed: Option<Instant>,
+    pub maximized: bool,
     pub guides: Vec<Guide>,
     pub zone: Option<Zone>,
     /// The held browser's dot is in the band along the window's edge: dropped, the browser goes out to the desktop.
@@ -229,7 +247,7 @@ impl App {
             shaders: None,
             grabbed_popups: Vec::new(),
             windows: HashMap::new(), unmapped: Vec::new(), next_tab: 1,
-            act: Act::Idle, pointer: (0.0, 0.0), hover: None, guides: Vec::new(), zone: None, out_zone: false,
+            act: Act::Idle, pointer: (0.0, 0.0), hover: None, window_cmd: None, strip_pressed: None, maximized: false, guides: Vec::new(), zone: None, out_zone: false,
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
             title_zoom,
             starting: HashMap::new(),
@@ -447,6 +465,49 @@ impl App {
     /// Pixels the menu bar takes at the top of the window. The surface starts below it: the output is mapped this far
     /// above the surface's origin, so pointer positions come out in surface coordinates and the menu bar is at y < 0.
     pub fn menu_height(&self) -> i32 { if self.menu.is_some() { MENU_H } else { 0 } }
+
+    /// How wide the menu bar is: what its menus need, leaving the window's title strip and buttons the rest.
+    pub fn menu_width(&self) -> i32 {
+        let width = self.window_size.0;
+        let room = (width as f64 - 3.0 * CONTROL_W).max(0.0) as i32;
+        let need = self.menu.as_ref().and_then(|w| w.toplevel()).map(|t| with_states(t.wl_surface(), |s| s.cached_state.get::<smithay::wayland::shell::xdg::SurfaceCachedState>().current().min_size.w)).unwrap_or(0);
+        if need > 0 { need.min(room) } else { room }
+    }
+
+    /// The window's button at this point (surface coordinates: the menu bar is at y < 0).
+    pub fn control_at(&self, x: f64, y: f64) -> Option<Control> {
+        if self.menu.is_none() || y >= 0.0 || y < -(MENU_H as f64) { return None; }
+        let right = self.window_size.0 as f64 - x;
+        [(Control::Close, 1.0), (Control::Maximize, 2.0), (Control::Minimize, 3.0)].into_iter().find(|(_, n)| right > (n - 1.0) * CONTROL_W && right <= n * CONTROL_W).map(|(c, _)| c)
+    }
+
+    /// The window's edge at this point, to resize it from there.
+    pub fn window_edge_at(&self, x: f64, y: f64) -> Option<smithay::reexports::winit::window::ResizeDirection> {
+        use smithay::reexports::winit::window::ResizeDirection as D;
+        if self.maximized { return None; }
+        let (w, h) = (self.window_size.0 as f64, self.window_size.1 as f64);
+        let wy = y + self.menu_height() as f64;
+        let (l, r, t, b) = (x < WINDOW_EDGE, x > w - WINDOW_EDGE, wy < WINDOW_TOP_EDGE, wy > h - WINDOW_EDGE);
+        Some(match (l, r, t, b) {
+            (true, _, true, _) => D::NorthWest, (_, true, true, _) => D::NorthEast,
+            (true, _, _, true) => D::SouthWest, (_, true, _, true) => D::SouthEast,
+            (true, ..) => D::West, (_, true, ..) => D::East, (_, _, true, _) => D::North, (_, _, _, true) => D::South,
+            _ => return None,
+        })
+    }
+
+    /// What a left press on the window's own frame does: resize from an edge, a button, or move from the empty strip
+    /// (a double click maximises). None when the press is not on the frame.
+    pub fn frame_press(&mut self, x: f64, y: f64) -> Option<WindowCmd> {
+        if let Some(d) = self.window_edge_at(x, y) { return Some(WindowCmd::Resize(d)); }
+        if let Some(c) = self.control_at(x, y) {
+            return Some(match c { Control::Minimize => WindowCmd::Minimize, Control::Maximize => WindowCmd::Maximize, Control::Close => WindowCmd::Close });
+        }
+        if self.menu.is_none() || y >= 0.0 || x < self.menu_width() as f64 { return None; }
+        let double = self.strip_pressed.replace(Instant::now()).is_some_and(|t| t.elapsed() < Duration::from_millis(400));
+        if double { self.strip_pressed = None; }
+        Some(if double { WindowCmd::Maximize } else { WindowCmd::Move })
+    }
 
     /// The surface takes what the menu bar and the status line leave.
     pub fn fit_strips(&mut self) {
@@ -867,11 +928,12 @@ impl App {
             }
         }
         let (width, _) = self.window_size;
-        for (w, y, high) in [(self.status.clone(), self.surface.h as i32, STATUS_H), (self.menu.clone(), -self.menu_height(), MENU_H)] {
+        let menu_w = self.menu_width();
+        for (w, y, high, wide) in [(self.status.clone(), self.surface.h as i32, STATUS_H, width), (self.menu.clone(), -self.menu_height(), MENU_H, menu_w)] {
             let Some(w) = w else { continue };
             self.space.map_element(w.clone(), (0, y), false);
             let top = w.toplevel().unwrap();
-            top.with_pending_state(|s| s.size = Some((width, high).into()));
+            top.with_pending_state(|s| s.size = Some((wide, high).into()));
             top.send_pending_configure();
         }
         if self.save_due && matches!(self.act, Act::Idle) { self.save_layout(); }
