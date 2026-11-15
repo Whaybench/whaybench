@@ -4,6 +4,29 @@ All notable changes to Whaybench are written here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- On Linux, install.sh finds the distribution and installs the system packages it needs with sudo once you answer
+  `y`, so the README starts with the one install command. Without a terminal (the update at start), without sudo or on
+  another distribution it shows the command, as before. It knows Fedora (Silverblue and Kinoite through rpm-ostree),
+  Ubuntu, Debian, Arch, openSUSE, AlmaLinux and Rocky Linux.
+- install.sh tries a download again up to three times, and when `~/.local/bin` is not on PATH it shows the line to add
+  for your shell (zsh, fish or bash).
+- The README says how to remove the Claude Code plugin too.
+
+### Fixed
+- install.sh runs nothing until the whole script has downloaded: a download cut short under `curl | sh` no longer runs
+  half of it.
+- When adding the Claude Code marketplace failed (no network, or settings that name another source), install.sh
+  stopped there and the update at start counted as failed: it now goes on and shows the plugin command.
+- On Ubuntu, `apt install firefox` installs the snap, which cannot open in the view panel: install.sh counts a snap
+  Firefox as missing and installs Firefox from Mozilla's archive, put before Ubuntu's (as the Windows setup does).
+- On Debian the view panel did not find its Firefox, whose process is `firefox-esr`.
+- On Debian the system package command asked for `firefox`, which Debian does not have: it is `firefox-esr`. The
+  library check found `ldconfig` only when `/usr/sbin` was on PATH, so a normal Debian account was always told
+  GTK and WebKitGTK were missing.
+
 ## [0.8.2] - 2026-11-15
 
 The Windows setup says why it stopped and finds virtualization turned off before it installs WSL.

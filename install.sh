@@ -5,7 +5,7 @@
 # Each version goes to a folder of its own in ~/.local/lib/whaybench-versions; ~/.local/lib/whaybench is a link to the
 # one in use, switched in one step, and the version before is kept: `sh install.sh --rollback` goes back to it.
 # The command is ~/.local/bin/whaybench. When Claude Code is installed, its
-# Whaybench plugin is installed too. System packages are only checked: their install command is shown.
+# Whaybench plugin is installed too. Missing system packages are installed with sudo when the person says yes.
 set -eu
 
 REPO="${WHAYBENCH_REPO:-https://github.com/Whaybench/whaybench}"
@@ -21,6 +21,9 @@ fail() { say "whaybench install: $*" >&2; exit 1; }
 
 # Points the link at another folder in one step: a program starting meanwhile finds the old version or the new one.
 switch() { ln -sfn "$1" "$LIB.new" && mv -T "$LIB.new" "$LIB"; }
+
+# Everything runs from main, called on the last line: a download cut short under curl | sh runs nothing.
+main() {
 
 if [ "${1:-}" = --rollback ]; then
     prev=$(readlink "$VERS/previous" 2>/dev/null) || fail "there is no earlier version to go back to."
@@ -46,7 +49,7 @@ if [ -f "$NAME.tar.gz" ] && [ -f "$NAME.tar.gz.sha256" ]; then
 else
     say "Downloading $NAME.tar.gz"
     for f in "$NAME.tar.gz" "$NAME.tar.gz.sha256" "$NAME.tar.gz.minisig"; do
-        curl -fsSL "$REPO/releases/latest/download/$f" -o "$tmp/$f"
+        curl -fsSL --retry 3 "$REPO/releases/latest/download/$f" -o "$tmp/$f"
     done
 fi
 (cd "$tmp" && sha256sum -c --quiet "$NAME.tar.gz.sha256") || fail "the download does not match its checksum."
@@ -85,7 +88,7 @@ say "Installed $("$LIB/whaybench" --version 2>/dev/null || echo whaybench) in $d
 
 if command -v claude >/dev/null; then
     # An existing marketplace makes add fail; only a failed install is reported, with the reason.
-    added=$(claude plugin marketplace add Whaybench/whaybench 2>&1)
+    added=$(claude plugin marketplace add Whaybench/whaybench 2>&1) || true
     # A marketplace added before keeps the catalogue of then, and install leaves an installed plugin as it is.
     claude plugin marketplace update whaybench >/dev/null 2>&1 || true
     if claude plugin install context-map@whaybench >/dev/null 2>&1 && claude plugin update context-map@whaybench >/dev/null 2>&1; then
@@ -99,20 +102,74 @@ else
     say "Claude Code was not found. With Codex CLI, open a conversation with Session → New conversation · Codex."
 fi
 
-# What the programs need from the system.
+# What the programs need from the system: missing packages are installed with sudo once the person says yes.
+osr=/etc/os-release; [ -r "$osr" ] || osr=/usr/lib/os-release
+distro=$( (. "$osr" && echo " ${ID:-} ${ID_LIKE:-} ") 2>/dev/null || true)
+# Fedora Silverblue and Kinoite say ID=fedora but take packages through rpm-ostree.
+[ -e /run/ostree-booted ] && distro=" ostree$distro"
 missing=""
-for c in wl-paste firefox fcitx5; do command -v "$c" >/dev/null || missing="$missing $c"; done
+for c in wl-paste fcitx5; do command -v "$c" >/dev/null || missing="$missing $c"; done
+# A snap Firefox cannot open in Whaybench's view panel: Ubuntu's firefox package is only a way to that snap, and a
+# snap's command (/snap/bin/firefox) is a link to /usr/bin/snap.
+ff=$(command -v firefox || true)
+case "${ff:-/}|$(readlink -f "${ff:-/}")" in "/|"*|/snap/*|*/usr/bin/snap) missing="$missing firefox" ;; esac
+case " $missing " in *" firefox "*) ;; *) dpkg-query -W -f='${Version}' firefox 2>/dev/null | grep -q snap && missing="$missing firefox" ;; esac
+# AlmaLinux and Rocky Linux 10 have no fcitx5; Whaybench then takes the desktop's input method.
+case "$distro" in *" rhel "*|*" almalinux "*|*" rocky "*) missing=$(printf '%s' "$missing" | sed 's/ fcitx5//') ;; esac
 [ -x "$LIB/alacritty" ] || command -v alacritty >/dev/null || missing="$missing alacritty"
-for l in libgtk-4.so.1 libwebkitgtk-6.0.so.4; do ldconfig -p 2>/dev/null | grep -q "$l" || missing="$missing $l"; done
+libs=$(PATH="$PATH:/usr/sbin:/sbin" ldconfig -p 2>/dev/null || true)
+if [ -n "$libs" ]; then
+    for l in libgtk-4.so.1 libwebkitgtk-6.0.so.4; do printf '%s' "$libs" | grep -q "$l" || missing="$missing $l"; done
+fi
 if [ -n "$missing" ]; then
-    say "Missing:$missing. Install them with one of:"
-    say "  Fedora:            sudo dnf install webkitgtk6.0 wl-clipboard firefox fcitx5 google-noto-color-emoji-fonts"
-    say "  Ubuntu, Debian:    sudo apt install libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5 fonts-noto-color-emoji"
-    say "  Arch:              sudo pacman -S webkitgtk-6.0 wl-clipboard firefox fcitx5 noto-fonts-emoji"
-    say "  AlmaLinux, Rocky:  sudo dnf install epel-release && sudo dnf install webkitgtk6.0 wl-clipboard firefox google-noto-color-emoji-fonts && sudo dnf upgrade \"gstreamer1*\""
+    S="sudo "; [ "$(id -u)" = 0 ] && S=""
+    after=""
+    case "$distro" in
+        *" rhel "*|*" almalinux "*|*" rocky "*) cmd="${S}dnf install -y epel-release && ${S}dnf install -y webkitgtk6.0 wl-clipboard firefox google-noto-color-emoji-fonts && ${S}dnf upgrade -y \"gstreamer1*\"" ;;
+        *" ostree "*) cmd="${S}rpm-ostree install -y --idempotent webkitgtk6.0 wl-clipboard firefox fcitx5 google-noto-color-emoji-fonts"
+            after="Restart the computer to use them (rpm-ostree applies packages at the next boot)." ;;
+        *" fedora "*) cmd="${S}dnf install -y webkitgtk6.0 wl-clipboard firefox fcitx5 google-noto-color-emoji-fonts" ;;
+        *" arch "*) cmd="${S}pacman -S --needed --noconfirm webkitgtk-6.0 wl-clipboard firefox fcitx5 noto-fonts-emoji" ;;
+        # Firefox from Mozilla's archive, put before Ubuntu's snap one (as in setup-wsl.sh); only when it is missing,
+        # so a system with a Firefox of its own (Linux Mint) keeps it.
+        # Ubuntu's snap package has the epoch 1:, so apt counts Mozilla's as a downgrade.
+        *" ubuntu "*) case " $missing " in
+            *" firefox "*) cmd="${S}install -d -m 0755 /etc/apt/keyrings && curl -fsSL --retry 3 https://packages.mozilla.org/apt/repo-signing-key.gpg | ${S}tee /etc/apt/keyrings/packages.mozilla.org.asc >/dev/null && echo 'deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main' | ${S}tee /etc/apt/sources.list.d/mozilla.list >/dev/null && printf 'Package: *\\nPin: origin packages.mozilla.org\\nPin-Priority: 1000\\n' | ${S}tee /etc/apt/preferences.d/mozilla >/dev/null && " ff="--allow-downgrades firefox" ;;
+            *) cmd="" ff="" ;;
+            esac
+            cmd="$cmd${S}apt-get update && ${S}apt-get install -y libwebkitgtk-6.0-4 wl-clipboard ${ff:+$ff }fcitx5 fonts-noto-color-emoji" ;;
+        # Debian has Firefox as firefox-esr (it gives /usr/bin/firefox too).
+        *" debian "*) cmd="${S}apt-get update && ${S}apt-get install -y libwebkitgtk-6.0-4 wl-clipboard firefox-esr fcitx5 fonts-noto-color-emoji" ;;
+        *" suse "*|*" opensuse "*) cmd="${S}zypper --non-interactive install libwebkitgtk-6_0-4 wl-clipboard MozillaFirefox fcitx5 google-noto-coloremoji-fonts" ;;
+        *) cmd="" ;;
+    esac
+    say "Missing:$missing."
+    ans=n
+    # Asked on the terminal: under curl | sh the script itself is stdin. Not asked when there is no terminal (the
+    # update at start writes to a log), when sudo is missing, or on a distribution this script does not know.
+    if [ -n "$cmd" ] && [ -t 1 ] && { [ -z "$S" ] || command -v sudo >/dev/null; } && (: </dev/tty) 2>/dev/null; then
+        printf 'Install them now with:\n  %s\nProceed? [y/N] ' "$cmd"
+        read -r ans </dev/tty || ans=n
+    fi
+    case "$ans" in
+        y|Y|yes|YES) if sh -c "$cmd"; then say "System packages installed.${after:+ $after}"; else say "Installing the system packages failed. Run:  $cmd"; fi ;;
+        *) if [ -n "$cmd" ]; then say "Install them with:  $cmd"; else
+            say "Install them with your package manager: WebKitGTK 6.0, wl-clipboard, Firefox, fcitx5 and a colour emoji font."; fi ;;
+    esac
     say "With fcitx5, add the engine for your language, e.g. fcitx5-hangul, fcitx5-mozc or fcitx5-chinese-addons."
-    say "AlmaLinux and Rocky Linux 10 have no fcitx5; Whaybench then takes the desktop's input method."
 fi
 
-case ":$PATH:" in *":$BIN:"*) ;; *) say "Add $BIN to your PATH to run whaybench." ;; esac
+case ":$PATH:" in
+    *":$BIN:"*) ;;
+    *) say "$BIN is not on your PATH. Add it with:"
+        case "${SHELL:-}" in
+            *zsh) say "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && . ~/.zshrc" ;;
+            *fish) say "  fish_add_path -U ~/.local/bin" ;;
+            *) say "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && . ~/.bashrc" ;;
+        esac
+        say "Or run it as $BIN/whaybench." ;;
+esac
 say "Run: whaybench"
+}
+
+main "$@"

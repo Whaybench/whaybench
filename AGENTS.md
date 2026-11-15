@@ -4,6 +4,7 @@
 
     tools/fetch-smithay.sh
     cargo test --workspace
+    sh tools/test-install.sh    # the system package part of install.sh, per distribution
     cargo run --release -p whaybench -- --app alacritty
 
 After changing `mod/context-map` or the hook and MCP code (`crates/wb-core/src/hook.rs`, `map_tool.rs`,
@@ -61,7 +62,7 @@ A release:
 
 ## Done
 
-- `cargo test --workspace` passes.
+- `cargo test --workspace` passes, and `sh tools/test-install.sh` after a change to `install.sh`.
 - A change on screen is checked by running Whaybench and taking a screenshot
   (`whaybench ctl shot --out /tmp/a.png`, outside the repository: a screenshot holds the conversation on screen).
 - Test results are reported as they are.

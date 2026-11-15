@@ -30,24 +30,15 @@ Needs Windows 11, or Windows 10 21H2 or newer (64-bit).
 
 ### Linux
 
-1. Install the system packages:
-
-   ```sh
-   # Fedora
-   sudo dnf install webkitgtk6.0 wl-clipboard firefox fcitx5 google-noto-color-emoji-fonts
-   # Ubuntu, Debian
-   sudo apt install libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5 fonts-noto-color-emoji
-   # Arch
-   sudo pacman -S webkitgtk-6.0 wl-clipboard firefox fcitx5 noto-fonts-emoji
-   ```
-
-2. Install Whaybench:
+1. Install Whaybench:
 
    ```sh
    curl -fsSL https://github.com/Whaybench/whaybench/releases/latest/download/install.sh | sh
    ```
 
-3. Start it:
+   It finds what your Linux is missing and installs it for you: answer `y` and type your password.
+
+2. Start it:
 
    ```sh
    whaybench

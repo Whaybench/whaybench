@@ -27,24 +27,16 @@ it.
 
 ### Linux
 
-1. Install the system packages:
-
-   ```sh
-   # Fedora
-   sudo dnf install webkitgtk6.0 wl-clipboard firefox fcitx5 google-noto-color-emoji-fonts
-   # Ubuntu, Debian
-   sudo apt install libwebkitgtk-6.0-4 wl-clipboard firefox fcitx5 fonts-noto-color-emoji
-   # Arch
-   sudo pacman -S webkitgtk-6.0 wl-clipboard firefox fcitx5 noto-fonts-emoji
-   ```
-
-2. Install Whaybench:
+1. Install Whaybench:
 
    ```sh
    curl -fsSL https://github.com/Whaybench/whaybench/releases/latest/download/install.sh | sh
    ```
 
-3. Start it:
+   On Fedora (Silverblue and Kinoite too), Ubuntu, Debian, Arch, openSUSE, AlmaLinux and Rocky Linux it shows the command for the system packages it needs
+   (WebKitGTK, wl-clipboard, Firefox, fcitx5, an emoji font) and runs it with `sudo` once you answer `y`.
+
+2. Start it:
 
    ```sh
    whaybench
@@ -59,7 +51,8 @@ To type in Korean, Japanese, Chinese or another language, also install its fcitx
 Whaybench updates itself and says so in its status line; **Whaybench → Restart** starts the new version.
 
 - Windows: remove it in **Settings → Apps**.
-- Linux: delete `~/.local/lib/whaybench`, `~/.local/lib/whaybench-versions` and `~/.local/bin/whaybench`.
+- Linux: delete `~/.local/lib/whaybench`, `~/.local/lib/whaybench-versions` and `~/.local/bin/whaybench`. Remove the
+  Claude Code plugin with `claude plugin uninstall context-map@whaybench`.
 
 Your data stays in its folder (see below).
 
