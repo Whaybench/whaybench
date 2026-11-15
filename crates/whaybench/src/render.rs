@@ -152,7 +152,12 @@ impl Card {
 }
 
 /// Where the pointer is in a panel's title bar.
-pub enum BarHit { Close, CloseTab(usize), Tab(usize), Undo, BrowserBack, Bar }
+pub enum BarHit { Close, CloseTab(usize), Tab(usize), Undo, Back(Back), Bar }
+
+/// A way back on a main window's bar: the browser's (the conversations' panel), or a panel's that is out (the input
+/// panel), by its place in the list.
+#[derive(Clone, Copy)]
+pub enum Back { Browser, Panel(usize) }
 
 /// Each tab's area in the bar, as many as fit: left of the close button.
 fn tab_rects(state: &mut App, p: &Panel) -> Vec<Rect> {
@@ -185,25 +190,41 @@ fn undo_rect(state: &App, p: &Panel) -> Option<Rect> {
     Some(Rect::new(marks_right(p) - CLOSE, p.rect.y, CLOSE, title()))
 }
 
-fn back_rect(state: &mut App, p: &Panel) -> Option<Rect> {
-    if state.browser_back_panel() != Some(p.pid) { return None; }
-    let w = state.chrome.width(wb_core::i18n::t("browser-back")) + 12.0;
-    let right = marks_right(p) - if state.undo_of(p.pid).is_some() { CLOSE } else { 0.0 };
-    Some(Rect::new(right - w, p.rect.y, w, title()))
+/// The ways back this bar shows, right to left from its ↩: "↩ Browser" on the conversations' panel, "↩ <name>" for each
+/// panel out, on the input panel.
+fn back_rects(state: &mut App, p: &Panel) -> Vec<(Back, String, Rect)> {
+    let mut want: Vec<(Back, String)> = Vec::new();
+    if state.browser_back_panel() == Some(p.pid) { want.push((Back::Browser, wb_core::i18n::t("browser-back").to_string())); }
+    if p.tabs.iter().any(|t| t.key.starts_with("dev.whaybench.input")) {
+        want.extend(state.outside.iter().enumerate().map(|(i, o)| (Back::Panel(i), format!("↩ {}", o.name))));
+    }
+    let mut right = marks_right(p) - if state.undo_of(p.pid).is_some() { CLOSE } else { 0.0 };
+    // Only what fits on the bar, past room for its name: one drawn outside it could not be clicked (or would click
+    // the panel beside). What does not fit is a bare ↩ each, and if not even that, the rest wait for room.
+    let floor = p.rect.x + 40.0;
+    let mut out = Vec::new();
+    for (b, label) in want {
+        let w = state.chrome.width(&label) + 12.0;
+        let (label, w) = if right - w >= floor { (label, w) } else { ("↩".to_string(), CLOSE) };
+        if right - w < floor { break; }
+        right -= w;
+        out.push((b, label, Rect::new(right, p.rect.y, w, title())));
+    }
+    out
 }
 
 fn marks_right(p: &Panel) -> f64 { if p.tabs.len() == 1 { p.rect.right() - CLOSE } else { p.rect.right() } }
 
 /// Where the bar's own content ends: before the marks.
 fn marks_left(state: &mut App, p: &Panel) -> f64 {
-    back_rect(state, p).or_else(|| undo_rect(state, p)).map_or(marks_right(p), |r| r.x)
+    back_rects(state, p).last().map(|b| b.2).or_else(|| undo_rect(state, p)).map_or(marks_right(p), |r| r.x)
 }
 
 pub fn bar_hit(state: &mut App, pid: u64, x: f64, y: f64) -> Option<BarHit> {
     let p = state.surface.get(pid)?.clone();
     if !p.rect.bar().contains(x, y) { return None; }
     if undo_rect(state, &p).is_some_and(|r| r.contains(x, y)) { return Some(BarHit::Undo); }
-    if back_rect(state, &p).is_some_and(|r| r.contains(x, y)) { return Some(BarHit::BrowserBack); }
+    if let Some((b, _, _)) = back_rects(state, &p).into_iter().find(|b| b.2.contains(x, y)) { return Some(BarHit::Back(b)); }
     if p.tabs.len() > 1 {
         if let Some((i, r)) = tab_rects(state, &p).iter().enumerate().find(|(_, r)| r.contains(x, y)) {
             return Some(if x >= r.right() - TAB_CLOSE { BarHit::CloseTab(i) } else { BarHit::Tab(i) });
@@ -306,7 +327,7 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
     }
     let ink = [(t.accent[0] * 255.0) as u8, (t.accent[1] * 255.0) as u8, (t.accent[2] * 255.0) as u8];
     if let Some(r) = undo_rect(state, p) { add_text(state, renderer, &mut f.out, "↩", ink, r); }
-    if let Some(r) = back_rect(state, p) { add_text(state, renderer, &mut f.out, wb_core::i18n::t("browser-back"), ink, r); }
+    for (_, label, r) in back_rects(state, p) { add_text(state, renderer, &mut f.out, &label, ink, r); }
     if p.tabs.len() > 1 {
         let rects = tab_rects(state, p);
         for (i, r) in rects.iter().enumerate() {
@@ -371,8 +392,8 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
             let zone = state.zone;
             let lit = |target: u64, how: How| zone.is_some_and(|z| z.target == target && z.how == how);
             let panels: Vec<Panel> = state.surface.panels.iter().filter(|p| p.pid != pid && !p.transient).cloned().collect();
-            // The browser can go out: a soft band along each edge of the window, the one the dot is in stronger.
-            if crate::state::holds_browser(&held) {
+            // It can go out: a soft band along each edge of the window, the one the dot is in stronger.
+            if crate::state::can_go_out(&held) {
                 let (sw, sh, b) = (state.surface.w, state.surface.h, t.dock_ring_size);
                 let at = crate::state::out_edge(sw, sh, b, dx, dy).filter(|_| state.out_zone);
                 for (side, r) in [(Side::Top, Rect::new(0.0, 0.0, sw, b)), (Side::Bottom, Rect::new(0.0, sh - b, sw, b)), (Side::Left, Rect::new(0.0, b, b, sh - 2.0 * b)), (Side::Right, Rect::new(sw - b, b, b, sh - 2.0 * b))] {

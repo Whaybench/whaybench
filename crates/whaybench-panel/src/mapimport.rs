@@ -102,16 +102,12 @@ pub fn app_id(path: &str) -> String {
 
 pub fn message_key(path: &str) -> String { format!("map-{}", app_id(path)) }
 
-fn program() -> PathBuf {
-    wb_core::paths::own_exe().unwrap_or_else(|_| "whaybench-panel".into())
-}
-
 /// Opens the file's panel, or brings it up if it is open, at a node if one is given.
 pub fn show(d: &Data, path: &Path, title: &str, node: Option<&str>) {
     let (p, id) = (path.to_string_lossy().to_string(), app_id(&path.to_string_lossy()));
     let open = fs::read_to_string(d.layout()).is_ok_and(|t| t.contains(&format!("\"{id}#")));
     if open { status::focus_app(d, &id); }
-    else { let _ = std::process::Command::new(program()).args(["map", &format!("@{p}"), title]).spawn(); }
+    else { crate::common::open_panel(d, &["map", &format!("@{p}"), title]); }
     if let Some(n) = node { let (d2, key, n2) = (d.clone(), message_key(&p), n.to_string()); gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(if open { 100 } else { 1500 }), move || status::send(&d2, &key, json!({"do": "pick", "node": n2}))); }
 }
 

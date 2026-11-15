@@ -169,15 +169,19 @@ const PANEL_STARTS_PER_MINUTE: usize = 3;
 
 /// One of Whaybench's own panels: like an app, but started again if it ends by a crash. Closed on purpose, it exits
 /// with success and stays closed.
-pub fn spawn_panel(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
-    if let Some(child) = start_app(command, socket, data, run) {
-        PANELS.lock().unwrap().push(Panel { child, command: command.into(), socket: socket.into(), data: data.clone(), run: run.into(), starts: vec![std::time::Instant::now()] });
-    }
+pub fn spawn_panel(command: &str, socket: &OsStr, data: &paths::Data, run: &str) -> Option<u32> {
+    let child = start_app(command, socket, data, run)?;
+    let pid = child.id();
+    PANELS.lock().unwrap().push(Panel { child, command: command.into(), socket: socket.into(), data: data.clone(), run: run.into(), starts: vec![std::time::Instant::now()] });
+    Some(pid)
 }
 
 /// Called often: the apps that have ended are waited for; a crashed panel is started again.
 pub fn reap_apps() {
-    APPS.lock().unwrap().retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+    // One out on the desktop that ended (the person closed it) leaves the list: its number may go to another program.
+    let mut ended = Vec::new();
+    APPS.lock().unwrap().retain_mut(|c| { let done = matches!(c.try_wait(), Ok(Some(_))); if done { ended.push(c.id()); } !done });
+    if !ended.is_empty() { OUTSIDE.lock().unwrap().retain(|p| !ended.contains(p)); }
     let mut panels = PANELS.lock().unwrap();
     let mut again = Vec::new();
     panels.retain_mut(|p| match p.child.try_wait() {
@@ -240,6 +244,45 @@ fn open_shim(data: &paths::Data, bins: &str) -> String {
 /// Set once the window's GPU is offered to the apps through linux-dmabuf.
 pub static GPU_APPS: AtomicBool = AtomicBool::new(false);
 
+/// Ends one of Whaybench's panels, not as a crash: it is not started again. The program ending is not a close for it
+/// (a view or a map branch closed for good is forgotten), so it comes back as it was.
+pub fn end_panel(pid: u32) {
+    let mut panels = PANELS.lock().unwrap();
+    // Waited for as any app once it ends, not left as a zombie.
+    if let Some(i) = panels.iter().position(|p| p.child.id() == pid) { APPS.lock().unwrap().push(panels.remove(i).child); }
+    drop(panels);
+    unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+}
+
+/// A command line as `sh -c` runs it again, each argument quoted.
+pub fn exec_line(args: &[String]) -> String {
+    format!("exec {}", args.iter().map(|a| format!("'{}'", a.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" "))
+}
+
+/// Panels moved out to the desktop, by process: they end with Whaybench, or its next start would show them twice.
+static OUTSIDE: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+/// An app on another display (the desktop's): its process, to bring it back or end it with Whaybench.
+pub fn spawn_outside(command: &str, display: &OsStr, data: &paths::Data, run: &str) -> Option<u32> {
+    let c = start_app(command, display, data, run)?;
+    let pid = c.id();
+    // Listed out here before it can be waited for: ended before it was listed, it would stay listed.
+    OUTSIDE.lock().unwrap().push(pid);
+    APPS.lock().unwrap().push(c);
+    Some(pid)
+}
+
+/// Ends the panels out on the desktop: Whaybench is ending.
+pub fn end_outside() {
+    for pid in OUTSIDE.lock().unwrap().drain(..) { unsafe { libc::kill(pid as i32, libc::SIGTERM); } }
+}
+
+/// The panel came back: its process out there is no longer Whaybench's to end.
+pub fn forget_outside(pid: u32) { OUTSIDE.lock().unwrap().retain(|p| *p != pid); }
+
+/// Whether this process is one Whaybench started out on the desktop and is still running.
+pub fn is_outside(pid: u32) -> bool { OUTSIDE.lock().unwrap().contains(&pid) }
+
 pub fn spawn_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) {
     if let Some(c) = start_app(command, socket, data, run) { APPS.lock().unwrap().push(c); }
 }
@@ -278,6 +321,28 @@ fn start_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) -> Op
 #[cfg(test)]
 mod panel_tests {
     use super::*;
+    #[test]
+    fn one_out_on_the_desktop_that_ended_leaves_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = paths::Data::new(dir.path().to_path_buf());
+        let pid = spawn_outside("exit 0", OsStr::new("none"), &data, "test").unwrap();
+        assert!(is_outside(pid));
+        for _ in 0..100 {
+            reap_apps();
+            if !is_outside(pid) { break; }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!is_outside(pid), "its number is not kept to be ended later: another program may have it by then");
+    }
+
+    #[test]
+    fn a_command_line_runs_again_as_it_was() {
+        let line = exec_line(&["/a b/whaybench-panel".into(), "map".into(), "it's".into()]);
+        assert_eq!(line, "exec '/a b/whaybench-panel' 'map' 'it'\\''s'");
+        let out = Command::new("sh").arg("-c").arg(line.replacen("exec ", "printf '%s|' ", 1)).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "/a b/whaybench-panel|map|it's|");
+    }
+
     #[test]
     fn a_crashed_panel_starts_again_a_few_times_a_closed_one_stays_closed() {
         let dir = tempfile::tempdir().unwrap();

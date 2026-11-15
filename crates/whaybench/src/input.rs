@@ -207,8 +207,8 @@ impl App {
                     self.act = Act::Swallow;
                     return false;
                 }
-                Some(BarHit::BrowserBack) => {
-                    self.move_browser(false);
+                Some(BarHit::Back(back)) => {
+                    match back { crate::render::Back::Browser => self.move_browser(false), crate::render::Back::Panel(i) => self.bring_back(i) }
                     self.act = Act::Swallow;
                     return false;
                 }
@@ -238,13 +238,19 @@ impl App {
     fn pointer_released(&mut self) {
         match std::mem::replace(&mut self.act, Act::Idle) {
             Act::Hold { pid, .. } if std::mem::take(&mut self.out_zone) => {
-                record::decide("screen", "browser dropped at the edge", "it goes out", &[("panel", pid.to_string())]);
+                record::decide("screen", "panel dropped at the edge", "it goes out", &[("panel", pid.to_string())]);
                 self.surface.keep_reachable(pid);
                 self.guides.clear();
-                // Out there it shows no ↩: the conversations' panel shows the way back, to where it was before the drag.
-                let tab = self.surface.get(pid).map(|p| p.tab().id);
-                if let (Some(start), Some(t)) = (self.drag_from.take(), tab) { self.browser_home = crate::layout::home_of(&start, t); }
-                self.move_browser(true);
+                // Out there it shows no ↩: a main window shows the way back, to where it was before the drag.
+                if let Some((tab, browser)) = self.surface.get(pid).map(|p| (p.tab().id, crate::state::holds_browser(p))) {
+                    let home = self.drag_from.take().and_then(|start| crate::layout::home_of(&start, tab));
+                    if browser {
+                        if let Some(h) = home { self.homes.push((crate::state::Comer::App(wb_core::view::FIREFOX_APP.into()), h)); }
+                        self.move_browser(true);
+                    } else {
+                        self.send_out(tab, home);
+                    }
+                }
             }
             Act::Hold { pid, .. } => {
                 // The moved one by its front tab: as a tab of another panel it is found there.

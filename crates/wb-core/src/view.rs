@@ -9,6 +9,8 @@ use serde_json::{json, Value};
 use crate::{paths::Data, status};
 
 pub const FIREFOX_APP: &str = "org.mozilla.firefox";
+/// Set for a panel started out on the desktop: the size it had inside, `WxH`. It then has a bar of its own.
+pub const ENV_OUTSIDE: &str = "WHAYBENCH_OUTSIDE";
 pub const TERM_APP: &str = "dev.whaybench.view-term";
 pub const VIEW_APP: &str = "dev.whaybench.view";
 /// The first view: always there, cannot be closed.

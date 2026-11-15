@@ -65,7 +65,12 @@ fn main() -> glib::ExitCode {
         common::follow_theme(&data);
         let win = gtk::ApplicationWindow::new(app);
         win.set_title(Some(&title));
-        win.set_decorated(false); // the compositor's panel has the title bar
+        // Inside, the compositor's panel has the title bar and gives the size. Out on the desktop (moved out by the
+        // person) the window has its own bar and starts at the size the panel had.
+        match std::env::var(wb_core::view::ENV_OUTSIDE).ok().and_then(|v| v.split_once('x').and_then(|(w, h)| Some((w.parse::<i32>().ok()?, h.parse::<i32>().ok()?)))) {
+            Some((w, h)) => win.set_default_size(w, h),
+            None => win.set_decorated(false),
+        }
         common::zoom_by_wheel(&win, &data);
         match kind.as_str() {
             "map" => map::build(&win, data, args.get(1).zip(args.get(2)).map(|(n, l)| (n.clone(), l.clone()))),

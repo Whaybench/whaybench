@@ -7,6 +7,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Panels other than the conversations and the input panel (map, sessions, files, answer, notifications, project,
+  views) go out to the desktop the same way as the browser: dragged by the dot onto the band at the window's edge,
+  each runs again out there with its command line. The input panel's title bar shows "↩ <name>" for each, which
+  brings it back where it was. They end with Whaybench.
+
+### Added
 - The browser can go out to a window of its own on the desktop and come back, the same Firefox with its tabs and
   sign-ins: drag its panel by the dot onto the band along the window's edge, or ask the agent (`whaybench-view
   detach`). The others take its room; while it is out, the conversations' panel shows "↩ Browser" on its title bar,

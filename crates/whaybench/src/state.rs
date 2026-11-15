@@ -63,6 +63,13 @@ fn front_of_group(key: &str) -> bool { key.starts_with("dev.whaybench.sessions#"
 pub const FIRST_WINDOW: (f64, f64) = (1500.0, 900.0);
 
 /// What the pointer is doing, from press to release.
+/// The browser is on its way out or in: ended here and not yet started there. Meanwhile it runs nowhere, and that is
+/// not the person closing it.
+static BROWSER_MOVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Ends the move when the thread that does it ends, however it ends.
+struct MovingDone;
+impl Drop for MovingDone { fn drop(&mut self) { BROWSER_MOVING.store(false, std::sync::atomic::Ordering::Relaxed); } }
+
 /// How long the ↩ of the last move stays on a title bar.
 pub const UNDO_FOR: Duration = Duration::from_secs(10);
 
@@ -70,6 +77,14 @@ pub const UNDO_FOR: Duration = Duration::from_secs(10);
 /// when the first of its drags began (moves of one panel one after another are one), and the panels it changed, as
 /// they were.
 pub struct Undo { pub at: Instant, pub mark: u64, pub start: Vec<Panel>, pub was: Vec<Panel> }
+
+/// A panel moved out to a window of its own on the desktop: its app id and name, its command line (run again out
+/// there, and back here), where it comes back to, and its process out there (0 until it is started).
+/// What a window coming back is known by.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Comer { Process(u32), App(String) }
+
+pub struct Outside { pub app: String, pub name: String, pub command: String, pub home: Option<layout::Home>, pub pid: u32 }
 
 pub enum Act {
     Idle,
@@ -101,8 +116,11 @@ pub struct App {
     /// Panels of the panel menu started and not yet open, by key: a click again while one starts (Firefox takes
     /// seconds) would start a second, which finds the first one's profile locked.
     pub starting: HashMap<String, Instant>,
-    /// Where the browser goes when it comes back by ↩: the panel it was a tab of, or the place it had.
-    pub browser_home: Option<layout::Home>,
+    /// Where windows coming back from the desktop go: the panel they were a tab of, or the place they had. By the
+    /// process started for it (two map branches share an app id), or by app id for the browser (Firefox's own start).
+    pub homes: Vec<(Comer, layout::Home)>,
+    /// The panels out on the desktop, but the browser (its own way): the input panel shows the way back for each.
+    pub outside: Vec<Outside>,
     /// The layout when a drag began, and the last move's, to go back to for a while (the ↩ on a title bar).
     pub drag_from: Option<Vec<Panel>>,
     pub undos: Vec<Undo>,
@@ -215,7 +233,8 @@ impl App {
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
             title_zoom,
             starting: HashMap::new(),
-            browser_home: None,
+            homes: Vec::new(),
+            outside: Vec::new(),
             drag_from: None,
             undos: Vec::new(),
             browser_away: (false, now),
@@ -296,6 +315,42 @@ impl App {
         self.save_due = true;
     }
 
+    /// Moves a panel (its one tab) out to a window of its own on the desktop: the same program, started again out
+    /// there with the same command line (its content is read from the data folder, so it shows the same). `home`:
+    /// where it comes back to.
+    pub fn send_out(&mut self, tab: u64, home: Option<layout::Home>) {
+        let Some(w) = self.windows.get(&tab) else { return };
+        let top = w.toplevel().unwrap();
+        let pid = smithay::reexports::wayland_server::Resource::client(top.wl_surface()).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32);
+        let Some(pid) = pid else { return record::warn("screen", "panel not moved out", "no process for its window", &[]) };
+        let args: Vec<String> = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default().split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).to_string()).collect();
+        if args.is_empty() { return record::warn("screen", "panel not moved out", "its command line is gone", &[]); }
+        let command = crate::start::exec_line(&args);
+        let Some((key, name)) = self.surface.holding_tab(tab).and_then(|p| p.tabs.iter().find(|t| t.id == tab)).map(|t| (t.key.clone(), t.name.clone())) else { return };
+        let app = key.split('#').next().unwrap_or(&key).to_string();
+        // Ended, not closed: closed, a view or a map branch would be gone for good, and the first view does not close.
+        crate::start::end_panel(pid);
+        // The compositor runs with the desktop's display (start.rs).
+        let display = std::env::var_os("WAYLAND_DISPLAY").unwrap_or_default();
+        // At the size it had here, with a bar of its own: the desktop gives neither.
+        let size = self.surface.holding_tab(tab).map(|p| self.surface.app_of(p.rect)).map(|r| format!("{}x{}", r.w.round(), r.h.round())).unwrap_or_default();
+        let outside = format!("export {}={size}; {command}", wb_core::view::ENV_OUTSIDE);
+        let out = crate::start::spawn_outside(&outside, &display, &self.data, &record::run_id(&self.data)).unwrap_or(0);
+        record::decide("screen", "panel moved out", "dropped at the window's edge", &[("app", app.clone())]);
+        self.outside.push(Outside { app, name, command, home, pid: out });
+    }
+
+    /// The way back of a panel out on the desktop: it ends out there and starts here again, where it was.
+    pub fn bring_back(&mut self, i: usize) {
+        if i >= self.outside.len() { return; }
+        let o = self.outside.remove(i);
+        // Only while it is still the one started out there: its number may belong to another program since.
+        if o.pid != 0 && crate::start::is_outside(o.pid) { crate::start::forget_outside(o.pid); unsafe { libc::kill(o.pid as i32, libc::SIGTERM); } }
+        record::decide("screen", "panel moved in", "its way back on the input panel", &[("app", o.app)]);
+        let pid = crate::start::spawn_panel(&o.command, &self.socket_name, &self.data, &record::run_id(&self.data));
+        if let (Some(h), Some(pid)) = (o.home, pid) { self.homes.push((Comer::Process(pid), h)); }
+    }
+
     /// The panel that shows the way back for the browser while it is out: the one with the conversations.
     pub fn browser_back_panel(&self) -> Option<u64> {
         if !self.browser_away.0 { return None; }
@@ -325,13 +380,21 @@ impl App {
             self.close_app(wb_core::view::FIREFOX_APP);
         } else if let Some(pid) = wb_core::view::firefox_pid(&data) {
             // Out there it has no window of ours to close: asked to end, as on a desktop's log out.
+            crate::start::forget_outside(pid);
             unsafe { libc::kill(pid as i32, libc::SIGTERM); }
         }
+        BROWSER_MOVING.store(true, std::sync::atomic::Ordering::Relaxed);
         std::thread::spawn(move || {
+            let _done = MovingDone;
             if !wb_core::view::firefox_gone(&data, Duration::from_secs(15)) {
                 return record::warn("browser", "not moved", "Firefox did not end in 15 s", &[]);
             }
-            crate::start::spawn_app(&wb_core::view::firefox_command(&data, ""), &display, &data, &run);
+            // Out there it ends with Whaybench, as the panels moved out do; the next start finds its profile free.
+            let command = wb_core::view::firefox_command(&data, "");
+            if out { crate::start::spawn_outside(&command, &display, &data, &run); } else { crate::start::spawn_app(&command, &display, &data, &run); }
+            // Still moving until it runs (its start takes seconds): meanwhile it runs nowhere, not closed by the person.
+            let started = std::time::Instant::now();
+            while wb_core::view::firefox_pid(&data).is_none() && started.elapsed() < Duration::from_secs(15) { std::thread::sleep(Duration::from_millis(200)); }
         });
     }
 
@@ -413,6 +476,8 @@ impl App {
             // The browser moved out comes back into its panel, rather than a second window out there (or a second
             // panel beside the one that stands in for it, when the person closed it out there).
             (None, Some(_)) if key == wb_core::view::FIREFOX_APP && wb_core::view::detached(&self.data) => self.move_browser(false),
+            // One out on the desktop comes back, rather than a second one here.
+            (None, Some(_)) if let Some(i) = self.outside.iter().position(|o| key.split('#').next() == Some(o.app.as_str())) => self.bring_back(i),
             (None, Some(c)) => {
                 if key == wb_core::view::FIREFOX_APP { wb_core::view::set_detached(&self.data, false); }
                 self.starting.insert(key.to_string(), Instant::now());
@@ -543,7 +608,9 @@ impl App {
         let parent_panel = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i)).and_then(|i| self.surface.holding_tab(i)).map(|p| p.rect);
         let parent_modal = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i))
             .and_then(|i| self.surface.holding_tab(i)).is_some_and(|p| p.modal);
-        let home = (app_id == wb_core::view::FIREFOX_APP).then(|| self.browser_home.take()).flatten();
+        let pid = smithay::reexports::wayland_server::Resource::client(surface.wl_surface()).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32);
+        let comer = |c: &Comer| match c { Comer::Process(p) => Some(*p) == pid, Comer::App(a) => *a == app_id };
+        let home = self.homes.iter().position(|(c, _)| comer(c)).map(|i| self.homes.remove(i).1);
         // A dialog of a window that is not a panel (the menu bar, the status line) goes where a settings window goes.
         let pid = if let Some(home) = home {
             // The browser back by ↩: where it was before it went out (the others are back where they were too).
@@ -749,7 +816,16 @@ impl App {
     /// One frame's work outside drawing: movement, sizes, names, the drop preview, saving.
     pub fn frame(&mut self, ms: f64) {
         self.follow_theme();
-        if self.browser_away.1.elapsed() > Duration::from_secs(1) { self.browser_away = (browser_out(&self.data), Instant::now()); }
+        if self.browser_away.1.elapsed() > Duration::from_secs(1) {
+            self.browser_away = (browser_out(&self.data), Instant::now());
+            // One the person closed out there has no way back to show.
+            self.outside.retain(|o| o.pid == 0 || crate::start::is_outside(o.pid));
+            // The browser closed out there (not on its way in or out): no place waits for it any more.
+            if wb_core::view::detached(&self.data) && !self.browser_away.0 && !BROWSER_MOVING.load(std::sync::atomic::Ordering::Relaxed) {
+                wb_core::view::set_detached(&self.data, false);
+                self.homes.retain(|(c, _)| *c != Comer::App(wb_core::view::FIREFOX_APP.into()));
+            }
+        }
         self.surface.step(ms);
         self.surface.keep_order();
         self.update_hold();
@@ -812,7 +888,7 @@ impl App {
         let dot = self.surface.get(pid).map(dot_at);
         self.zone = match dot { Some((dx, dy)) if dock && !free => self.surface.drop_zone(pid, dx, dy, self.theme.dock_ring_size), _ => None };
         // The browser's dot at the window's edge, not on a target: it goes out.
-        self.out_zone = dock && !free && self.zone.is_none() && self.surface.get(pid).is_some_and(holds_browser)
+        self.out_zone = dock && !free && self.zone.is_none() && self.surface.get(pid).is_some_and(can_go_out)
             && dot.is_some_and(|(dx, dy)| out_edge(self.surface.w, self.surface.h, self.theme.dock_ring_size, dx, dy).is_some());
         let (tx, ty, guides) = if free || self.zone.is_some() {
             (x - gx, y - gy, Vec::new())
@@ -881,7 +957,22 @@ pub fn dot_at(p: &Panel) -> (f64, f64) { (p.rect.x + p.rect.w / 2.0, p.rect.y + 
 /// out there, or Whaybench started again since).
 fn browser_out(data: &wb_core::paths::Data) -> bool { wb_core::view::detached(data) && wb_core::view::firefox_pid(data).is_some() }
 
-/// Whether the panel holds the browser: the one that can go out to the desktop.
+/// Whether the panel can go out to the desktop: one tab, the browser or a panel of Whaybench's that shows what the data
+/// folder holds (not the conversations, the input panel, the bars or a dialog).
+pub fn can_go_out(p: &Panel) -> bool {
+    !p.transient && p.tabs.len() == 1 && (holds_browser(p) || goes_out(&p.tabs[0].key))
+}
+
+/// Whether a tab of this key is a panel that can go out: one of these apps, or one named under it (a view
+/// `<view>.<name>`, an imported map `<map>.i<n>`), its number after `#`; not a terminal in the view's place
+/// (`dev.whaybench.view-term`) or the map style settings (`dev.whaybench.mapstyle`).
+pub fn goes_out(key: &str) -> bool {
+    const OUT: [&str; 7] = ["dev.whaybench.map", "dev.whaybench.sessions", "dev.whaybench.files", "dev.whaybench.answer", "dev.whaybench.notify", "dev.whaybench.project", wb_core::view::VIEW_APP];
+    let app = key.split('#').next().unwrap_or(key);
+    OUT.iter().any(|a| app == *a || app.strip_prefix(a).is_some_and(|rest| rest.starts_with('.')))
+}
+
+/// Whether the panel holds the browser.
 pub fn holds_browser(p: &Panel) -> bool {
     let app = wb_core::view::FIREFOX_APP;
     p.tabs.iter().any(|t| t.key == app || t.key.starts_with(&format!("{app}#")))
@@ -896,6 +987,12 @@ pub fn out_edge(w: f64, h: f64, band: f64, x: f64, y: f64) -> Option<Side> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_panels_that_show_the_data_folder_go_out() {
+        for yes in ["dev.whaybench.map#1", "dev.whaybench.map#3", "dev.whaybench.map.i0a1b2c3d#1", "dev.whaybench.view#1", "dev.whaybench.view.notes#1", "dev.whaybench.files#1"] { assert!(goes_out(yes), "{yes}"); }
+        for no in ["dev.whaybench.view-term#1", "whaybench-term#1", "dev.whaybench.input#1", "dev.whaybench.mapstyle#1", "dev.whaybench.prefs#1", "dev.whaybench.viewer#1"] { assert!(!goes_out(no), "{no}"); }
+    }
 
     #[test]
     fn the_band_at_the_window_edge_is_the_nearest_edge_within_its_depth() {

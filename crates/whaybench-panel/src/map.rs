@@ -289,10 +289,8 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
             });
         }
         {
-            let (id2, label2) = (id.clone(), label.clone());
-            items.add(wb_core::i18n::t("open-branch-in-a-new-panel"), true, move || {
-                if let Ok(exe) = std::env::current_exe() { let _ = std::process::Command::new(exe).args(["map", &id2, &label2]).spawn(); }
-            });
+            let (d2, id2, label2) = (d.clone(), id.clone(), label.clone());
+            items.add(wb_core::i18n::t("open-branch-in-a-new-panel"), true, move || crate::common::open_panel(&d2, &["map", &id2, &label2]));
         }
         // Related answers: dimmed when the node has no time.
         let at = records::node_time(n);

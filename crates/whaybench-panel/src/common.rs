@@ -296,6 +296,14 @@ pub fn install_engine(win: &gtk::ApplicationWindow, d: &Data, package: String, n
     });
 }
 
+/// Another of Whaybench's panels, started by the compositor on its own display: started here, it would take this
+/// panel's display (the desktop's, when this one is out there) and be neither placed nor ended with Whaybench.
+pub fn open_panel(d: &Data, args: &[&str]) {
+    let exe = std::env::current_exe().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+    let line = std::iter::once(exe.as_str()).chain(args.iter().copied()).map(|a| format!("'{}'", a.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" ");
+    let _ = wb_core::status::post(d, &json!({"cmd": "spawn", "command": format!("exec {line}")}));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
