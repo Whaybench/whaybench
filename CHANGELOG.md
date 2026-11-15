@@ -2,7 +2,8 @@
 
 All notable changes to Whaybench are written here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and versions follow [Semantic Versioning](https://semver.org/).
+and versions are numbered as [AGENTS.md](AGENTS.md#versions-and-releases) says: a patch unless the maintainer
+names another step.
 
 ## [0.8.3] - 2026-11-16
 

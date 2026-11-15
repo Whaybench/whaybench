@@ -40,15 +40,15 @@ calls `~/.local/bin/whaybench`), and run one short session with a temporary data
 
 ## Versions and releases
 
-Versions follow Semantic Versioning:
+Versions are a.b.c. A release is a patch unless the maintainer names another step.
 
-- Major (2.0.0): a change in how the program is built, such as a new way of
-  connecting agents.
-- Minor (0.2.0): a new way of working that users notice as new, or a change
-  users have to follow (a data format, a command). The bar rises as the
-  version does: without users, the version is not raised for small features.
-- Patch (0.1.1): fixes, small features and refinements, and following a change
-  in an external component.
+- Patch (0.1.1): the default. Fixes, refinements, and additions inside what is there: a document template, a
+  command, an option, a setting, a message, a check, an install step. These are not "new features" for the
+  version, however they are listed in the changelog.
+- Minor (0.2.0): only a new panel, or a large change to how the program works inside, and only when the
+  maintainer chooses it.
+- Major (2.0.0): a sweeping, ground-breaking overhaul of the program, chosen by the maintainer. 1.0.0 comes only
+  when the program as it is now has proved stable and well used, or when the maintainer decides.
 
 Every change worth telling goes into `CHANGELOG.md` under `[Unreleased]`.
 
