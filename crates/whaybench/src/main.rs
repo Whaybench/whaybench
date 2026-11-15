@@ -183,7 +183,7 @@ fn serve(data: &paths::Data, run_id: &str, apps: Vec<String>, no_session: bool) 
     let saved = state::read_layout(data);
     let mut state = App::new(&mut event_loop, display, data.clone(), saved);
 
-    render::init_window(&mut event_loop, &mut state).map_err(|e| e.to_string())?;
+    render::init_window(&mut event_loop, &mut state, !no_session).map_err(|e| e.to_string())?;
     ctl::listen(&event_loop, data).map_err(|e| e.to_string())?;
     ctl::write_instance(data, run_id, &state.socket_name.to_string_lossy()).map_err(|e| e.to_string())?;
     record::decide("run", "start", "the program started", &[("run", run_id.to_string()), ("reason", if std::env::var_os(ENV_AGAIN).is_some() { "again" } else { "first" }.into()), ("socket", state.socket_name.to_string_lossy().to_string())]);

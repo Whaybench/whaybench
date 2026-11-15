@@ -35,7 +35,7 @@ render_elements! {
     Solid=SolidColorRenderElement,
     Text=MemoryRenderBufferRenderElement<GlesRenderer>,
     Shader=PixelShaderElement,
-    Glass=TextureShaderElement,
+    Glass=Steady,
 }
 
 // What goes to the window: the surface moved down below the menu bar, and the menu bar with its menus over everything.
@@ -248,7 +248,32 @@ void main() {
 }
 "#;
 
-pub struct Shaders { card: GlesPixelProgram, back: GlesPixelProgram, disc: GlesPixelProgram, glass: GlesTexProgram, lens: GlesTexProgram, under: Option<GlesTexture>, under_lens: Option<GlesTexture> }
+pub struct Shaders { card: GlesPixelProgram, back: GlesPixelProgram, disc: GlesPixelProgram, glass: GlesTexProgram, lens: GlesTexProgram, glass_slots: Vec<Under>, lens_under: Under }
+
+/// What lies under a glass or lens, drawn off-screen and kept between frames, with the element that shows it. The
+/// element keeps its id and only counts as changed when what lies under it changed, so a still window is not redrawn.
+#[derive(Default)]
+struct Under { texture: Option<GlesTexture>, tracker: Option<OutputDamageTracker>, id: Option<Id>, commit: CommitCounter, look: String }
+
+/// A texture shader element under an id and change count of our own: smithay's makes a new id each time.
+#[derive(Debug)]
+pub struct Steady { inner: TextureShaderElement, id: Id, commit: CommitCounter }
+
+impl smithay::backend::renderer::element::Element for Steady {
+    fn id(&self) -> &Id { &self.id }
+    fn current_commit(&self) -> CommitCounter { self.commit }
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> { self.inner.geometry(scale) }
+    fn transform(&self) -> Transform { self.inner.transform() }
+    fn src(&self) -> Rectangle<f64, Buffer> { self.inner.src() }
+    fn alpha(&self) -> f32 { self.inner.alpha() }
+    fn kind(&self) -> Kind { self.inner.kind() }
+}
+
+impl smithay::backend::renderer::element::RenderElement<GlesRenderer> for Steady {
+    fn draw(&self, frame: &mut smithay::backend::renderer::gles::GlesFrame<'_, '_>, src: Rectangle<f64, Buffer>, dst: Rectangle<i32, Physical>, damage: &[Rectangle<i32, Physical>], opaque: &[Rectangle<i32, Physical>], cache: Option<&smithay::utils::user_data::UserDataMap>) -> Result<(), smithay::backend::renderer::gles::GlesError> {
+        self.inner.draw(frame, src, dst, damage, opaque, cache)
+    }
+}
 
 fn compile(renderer: &mut GlesRenderer) -> Result<Shaders, String> {
     let n = |s: &'static str, t| UniformName::new(s, t);
@@ -265,7 +290,7 @@ fn compile(renderer: &mut GlesRenderer) -> Result<Shaders, String> {
         n("area", UniformType::_4f), n("px", UniformType::_2f), n("texel", UniformType::_2f), n("blur", UniformType::_1f), n("radius", UniformType::_1f),
     ]).map_err(|e| format!("{e:?}"))?;
     let lens = renderer.compile_custom_texture_shader(LENS, &[n("area", UniformType::_4f), n("strength", UniformType::_1f)]).map_err(|e| format!("{e:?}"))?;
-    Ok(Shaders { card, back, disc, glass, lens, under: None, under_lens: None })
+    Ok(Shaders { card, back, disc, glass, lens, glass_slots: Vec::new(), lens_under: Under::default() })
 }
 
 fn four(name: &'static str, c: [f32; 4]) -> Uniform<'static> { Uniform::new(name, (c[0], c[1], c[2], c[3])) }
@@ -494,7 +519,8 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
         add_text(state, renderer, &mut f.out, f.alpha, &p.tab().name.clone(), if front { t.ink } else { t.ink_soft }, area);
     }
     f.out.extend(app_elements(state, p, renderer, app, f.alpha));
-    f.solid(app, premultiplied(t.panel));
+    // The card fills the panel too; see-through, a second fill under the app would make it more opaque than asked.
+    if f.alpha >= 1.0 { f.solid(app, premultiplied(t.panel)); }
     f.card(shaders, p.rect, Card {
         radius, border: t.border_width, bar: title(), margin: if own_shadow { t.shadow_size } else { 0.0 },
         fill: premultiplied(t.panel),
@@ -640,7 +666,6 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
         draw_panel(state, renderer, &mut f, shaders.as_ref(), p, Some(p.pid) == top, &carried, false);
         glass.push((f.out.len(), p.rect));
     }
-    let under_from = f.out.len();
     let busy = active.is_some() || !matches!(state.act, Act::Idle);
     if t.joint_width > 0.0 && t.joint_show.visible(busy) {
         let (shared, walls) = state.surface.joints();
@@ -673,8 +698,10 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     let used = f.k;
     let mut out = f.out;
     let screen = (state.surface.w, state.surface.h);
+    let mut lens_at = lens_at;
     if t.glass_blur > 0.0 && !glass.is_empty() && let Some(sh) = shaders.as_mut() {
-        glass_under(renderer, sh, &mut out, under_from, &glass, screen, t.glass_blur, radius);
+        // A glass put in above the lenses' place (a settings window's) moves that place down by one.
+        lens_at += glass_under(renderer, sh, &mut out, &glass, screen, t.glass_blur, radius).iter().filter(|at| **at <= lens_at).count();
     }
     if t.dock_refraction > 0.0 && !lenses.is_empty() && let Some(sh) = shaders.as_mut() {
         lens_under(renderer, sh, &mut out, lens_at, &lenses, screen, t.dock_refraction);
@@ -686,59 +713,77 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
     out
 }
 
-/// Draws what lies under the floating panels (the elements from `from` on) into a texture of the surface's size, and
-/// puts it, blurred, under each floating panel. A panel that cannot have it just goes without.
+/// Puts glass under each floating panel: what lies under that panel (the elements after its own, lower floating panels
+/// included), blurred. Returns where glass went in. A panel whose under cannot be drawn goes without.
 #[allow(clippy::too_many_arguments)]
-fn glass_under(renderer: &mut GlesRenderer, sh: &mut Shaders, out: &mut Vec<PanelElement>, from: usize, glass: &[(usize, Rect)], screen: (f64, f64), blur: f64, radius: f64) {
-    let (w, h) = (screen.0.round().max(1.0) as i32, screen.1.round().max(1.0) as i32);
-    let Some(texture) = draw_under(renderer, &mut sh.under, &out[from..], (w, h)) else { return };
-    let context = renderer.context_id();
-    // Last first, so the places of the ones before stay right.
-    for (at, r) in glass.iter().rev() {
-        let src = Rectangle::new((r.x, r.y).into(), (r.w, r.h).into());
-        let e = TextureRenderElement::from_static_texture(Id::new(), context.clone(), (r.x.round(), r.y.round()), texture.clone(), 1, Transform::Normal, None, Some(src), Some((r.w.round() as i32, r.h.round() as i32).into()), None, Kind::Unspecified);
+fn glass_under(renderer: &mut GlesRenderer, sh: &mut Shaders, out: &mut Vec<PanelElement>, glass: &[(usize, Rect)], screen: (f64, f64), blur: f64, radius: f64) -> Vec<usize> {
+    let size = (screen.0.round().max(1.0) as i32, screen.1.round().max(1.0) as i32);
+    sh.glass_slots.resize_with(glass.len(), Under::default);
+    let mut put = Vec::new();
+    // Lowest first: each upper panel's glass then shows the lower panels with theirs.
+    for (i, (at, r)) in glass.iter().enumerate().rev() {
+        let slot = &mut sh.glass_slots[i];
+        let Some(texture) = draw_under(renderer, slot, &out[*at..], size) else { continue };
+        let area = ((r.x / screen.0) as f32, (r.y / screen.1) as f32, (r.w / screen.0) as f32, (r.h / screen.1) as f32);
         let uniforms = vec![
-            Uniform::new("area", ((r.x / screen.0) as f32, (r.y / screen.1) as f32, (r.w / screen.0) as f32, (r.h / screen.1) as f32)),
-            Uniform::new("px", (r.w as f32, r.h as f32)), Uniform::new("texel", (1.0 / w as f32, 1.0 / h as f32)),
+            Uniform::new("area", area), Uniform::new("px", (r.w as f32, r.h as f32)), Uniform::new("texel", (1.0 / size.0 as f32, 1.0 / size.1 as f32)),
             Uniform::new("blur", blur as f32), Uniform::new("radius", radius.min(r.w / 2.0).min(r.h / 2.0) as f32),
         ];
-        out.insert(*at, TextureShaderElement::new(e, sh.glass.clone(), uniforms).into());
+        let look = format!("{r:?} {blur} {radius}");
+        if slot.look != look { slot.look = look; slot.commit.increment(); }
+        out.insert(*at, steady(renderer, slot, texture, *r, sh.glass.clone(), uniforms).into());
+        put.push(*at);
     }
+    put
 }
 
-/// Draws the elements into a texture of the surface's size, kept in `keep` for the next frame. None when it cannot.
-fn draw_under(renderer: &mut GlesRenderer, keep: &mut Option<GlesTexture>, elements: &[PanelElement], (w, h): (i32, i32)) -> Option<GlesTexture> {
+/// The element showing a slot's texture over `r`, under the slot's id and change count.
+fn steady(renderer: &GlesRenderer, slot: &mut Under, texture: GlesTexture, r: Rect, program: GlesTexProgram, uniforms: Vec<Uniform<'static>>) -> Steady {
+    let src = Rectangle::new((r.x, r.y).into(), (r.w, r.h).into());
+    let e = TextureRenderElement::from_static_texture(Id::new(), renderer.context_id(), (r.x.round(), r.y.round()), texture, 1, Transform::Normal, None, Some(src), Some((r.w.round() as i32, r.h.round() as i32).into()), None, Kind::Unspecified);
+    Steady { inner: TextureShaderElement::new(e, program, uniforms), id: slot.id.get_or_insert_with(Id::new).clone(), commit: slot.commit }
+}
+
+/// Draws the elements into the slot's texture of the surface's size, kept for the next frame, and counts the slot as
+/// changed when anything under it changed. None when it cannot.
+fn draw_under(renderer: &mut GlesRenderer, slot: &mut Under, elements: &[PanelElement], (w, h): (i32, i32)) -> Option<GlesTexture> {
     let size: Size<i32, Buffer> = (w, h).into();
-    if keep.as_ref().is_none_or(|t| smithay::backend::renderer::Texture::size(t) != size) {
-        *keep = renderer.create_buffer(Fourcc::Abgr8888, size).ok();
+    let fresh = slot.texture.as_ref().is_none_or(|t| smithay::backend::renderer::Texture::size(t) != size);
+    if fresh {
+        slot.texture = renderer.create_buffer(Fourcc::Abgr8888, size).ok();
+        slot.tracker = Some(OutputDamageTracker::new((w, h), 1.0, Transform::Normal));
     }
-    let mut texture = keep.clone()?;
+    let mut texture = slot.texture.clone()?;
+    let tracker = slot.tracker.as_mut()?;
+    let under: Vec<&PanelElement> = elements.iter().collect();
+    // Nothing under it changed: the texture stays and is not bound at all. Binding it takes the window's surface off
+    // the context, its next frame then has no age, and every frame would be drawn and sent whole.
+    let changed = fresh || tracker.damage_output(1, &under).is_ok_and(|(d, _)| d.is_some_and(|d| !d.is_empty()));
+    if !changed { return Some(texture); }
     let drawn = (|| -> Result<(), String> {
         let mut fb = renderer.bind(&mut texture).map_err(|e| e.to_string())?;
-        let mut tracker = OutputDamageTracker::new((w, h), 1.0, Transform::Normal);
-        let under: Vec<&PanelElement> = elements.iter().collect();
+        // The tracker has taken in this frame already: the whole texture is drawn again.
         tracker.render_output(renderer, &mut fb, 0, &under, [0.0; 4]).map_err(|e| format!("{e:?}"))?;
         Ok(())
     })();
     match drawn {
-        Ok(()) => Some(texture),
+        Ok(()) => { slot.commit.increment(); Some(texture) }
         Err(e) => { record::warn("screen", "under not drawn", &e, &[]); None }
     }
 }
 
 /// Puts a lens under each docking target: what lies under it, magnified towards the middle.
 fn lens_under(renderer: &mut GlesRenderer, sh: &mut Shaders, out: &mut Vec<PanelElement>, at: usize, lenses: &[Rect], screen: (f64, f64), strength: f64) {
-    let (w, h) = (screen.0.round().max(1.0) as i32, screen.1.round().max(1.0) as i32);
-    let Some(texture) = draw_under(renderer, &mut sh.under_lens, &out[at..], (w, h)) else { return };
-    let context = renderer.context_id();
+    let size = (screen.0.round().max(1.0) as i32, screen.1.round().max(1.0) as i32);
+    let Some(texture) = draw_under(renderer, &mut sh.lens_under, &out[at..], size) else { return };
     for r in lenses {
-        let src = Rectangle::new((r.x, r.y).into(), (r.w, r.h).into());
-        let e = TextureRenderElement::from_static_texture(Id::new(), context.clone(), (r.x.round(), r.y.round()), texture.clone(), 1, Transform::Normal, None, Some(src), Some((r.w.round() as i32, r.h.round() as i32).into()), None, Kind::Unspecified);
         let uniforms = vec![
             Uniform::new("area", ((r.x / screen.0) as f32, (r.y / screen.1) as f32, (r.w / screen.0) as f32, (r.h / screen.1) as f32)),
             Uniform::new("strength", (strength * 0.5) as f32),
         ];
-        out.insert(at, TextureShaderElement::new(e, sh.lens.clone(), uniforms).into());
+        // Each target its own id: they share the slot's texture but not its place.
+        let mut slot = Under { id: Some(Id::new()), commit: sh.lens_under.commit, ..Under::default() };
+        out.insert(at, steady(renderer, &mut slot, texture.clone(), *r, sh.lens.clone(), uniforms).into());
     }
 }
 
@@ -838,10 +883,11 @@ fn offer_gpu(state: &mut App, backend: &Rc<RefCell<winit::WinitGraphicsBackend<G
     }
 }
 
-pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(), Box<dyn std::error::Error>> {
+/// `own_frame`: the menu bar runs and serves as the title strip, so the desktop's frame is left out.
+pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: bool) -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = state.saved_window().map(|(w, h)| (w as f64, h as f64)).unwrap_or(FIRST_WINDOW);
     // No frame from the desktop: the menu bar is the title strip, with the window's buttons drawn at its right.
-    let attributes = WindowAttributes::default().with_decorations(false).with_transparent(true).with_title("Whaybench").with_surface_size(LogicalSize::new(w, h)).with_visible(true);
+    let attributes = WindowAttributes::default().with_decorations(!own_frame).with_transparent(true).with_title("Whaybench").with_surface_size(LogicalSize::new(w, h)).with_visible(true);
     let (backend, winit) = winit::init_from_attributes::<GlesRenderer>(attributes)?;
 
     let mode = Mode { size: backend.window_size(), refresh: 60_000 };
@@ -954,7 +1000,10 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App) -> Result<(
                 if !state.shots.is_empty() { take_shots(state, renderer, size); }
                 let elements = window_elements(state, renderer);
                 // Behind a see-through window the desktop shows: the surface's own colour only as opaque as the theme says.
-                let clear = premultiplied(state.theme.surface_top).map(|c| c * state.theme.window_opacity as f32);
+                // When the surface shader draws the see-through surface, the clear is fully transparent: both at the
+                // theme's opacity would lay it twice.
+                let see_through = state.theme.window_opacity < 1.0 && state.shaders.is_some();
+                let clear = if see_through { [0.0; 4] } else { premultiplied(state.theme.surface_top) };
                 damage_tracker.render_output(renderer, &mut framebuffer, age, &elements, clear).map(|r| r.damage.cloned().unwrap_or_default()).map_err(|e| format!("{e:?}"))
             };
             let drawn = drawn.and_then(|damage| if damage.is_empty() { Ok(false) } else { backend.submit(Some(&damage)).map(|_| true).map_err(|e| format!("{e:?}")) });

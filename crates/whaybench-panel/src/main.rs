@@ -24,8 +24,8 @@ mod view;
 
 use gtk::{gio, glib, prelude::*};
 
-/// Whether this WebKit puts WSL's GPU (/dev/dxg) in its web process sandbox: from 2.54.
-fn webkit_has_dxg(major: u32, minor: u32) -> bool { (major, minor) >= (2, 54) }
+/// Whether this WebKit puts WSL's GPU (/dev/dxg) in its web process sandbox: from 2.54.2.
+fn webkit_has_dxg(version: (u32, u32, u32)) -> bool { version >= (2, 54, 2) }
 
 fn main() -> glib::ExitCode {
     wb_core::paths::private_files();
@@ -34,7 +34,7 @@ fn main() -> glib::ExitCode {
     // Under WSL the compositor asks for d3d12 (the GPU is /dev/dxg). WebKit before 2.54 leaves /dev/dxg out of its web
     // process sandbox, where d3d12 then fails and the page stays blank: panels with web views draw on the CPU there.
     let web = matches!(kind.as_str(), "answer" | "view" | "project" | "map");
-    if web && std::env::var("GALLIUM_DRIVER").is_ok_and(|d| d == "d3d12") && !webkit_has_dxg(webkit6::functions::major_version(), webkit6::functions::minor_version()) {
+    if web && std::env::var("GALLIUM_DRIVER").is_ok_and(|d| d == "d3d12") && !webkit_has_dxg((webkit6::functions::major_version(), webkit6::functions::minor_version(), webkit6::functions::micro_version())) {
         // SAFETY: no other thread exists yet.
         unsafe { std::env::remove_var("GALLIUM_DRIVER") };
     }
@@ -106,9 +106,10 @@ fn main() -> glib::ExitCode {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn webkit_puts_the_wsl_gpu_in_its_sandbox_from_2_54() {
-        assert!(!super::webkit_has_dxg(2, 52));
-        assert!(super::webkit_has_dxg(2, 54));
-        assert!(super::webkit_has_dxg(3, 0));
+    fn webkit_puts_the_wsl_gpu_in_its_sandbox_from_2_54_2() {
+        assert!(!super::webkit_has_dxg((2, 52, 6)));
+        assert!(!super::webkit_has_dxg((2, 54, 1)));
+        assert!(super::webkit_has_dxg((2, 54, 2)));
+        assert!(super::webkit_has_dxg((2, 56, 0)));
     }
 }

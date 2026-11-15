@@ -173,8 +173,9 @@ impl App {
     fn pointer_pressed(&mut self, button: u32) -> bool {
         let (x, y) = self.pointer;
         self.close_popups_unless_at((x, y).into());
-        // The window's own frame: its edges, its buttons and its empty title strip.
-        if button == LEFT && let Some(cmd) = self.frame_press(x, y) { 
+        let on_popup = self.surface_under((x, y).into()).is_some_and(|(s, _)| self.popups.find_popup(&s).is_some());
+        // The window's own frame: its edges, its buttons and its empty title strip; an open menu there keeps its press.
+        if button == LEFT && !on_popup && let Some(cmd) = self.frame_press(x, y) {
             // Not Swallow: once the desktop takes the pointer to move or resize, the release may never come here.
             self.window_cmd = Some(cmd); self.act = Act::Idle; return false;
         }
@@ -184,7 +185,7 @@ impl App {
         if self.menu_under((x, y).into()).is_some() { return true; }
         // A press on an open menu is the menu's alone: raising the panel under it would take the keyboard from the
         // menu, and GTK then drops the menu before the item is chosen.
-        if self.surface_under((x, y).into()).is_some_and(|(s, _)| self.popups.find_popup(&s).is_some()) { return true; }
+        if on_popup { return true; }
         let Some(top) = self.surface.top_at(x, y).map(|p| p.pid) else { return true };
         if button == LEFT {
             if let Some((pid, edges)) = self.surface.edges_at(x, y) {

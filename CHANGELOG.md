@@ -4,6 +4,21 @@ All notable changes to Whaybench are written here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Under WSL, WebKit 2.54.0 and 2.54.1 kept the GPU out of their web sandbox too: the panels with web pages draw on
+  the GPU from WebKit 2.54.2, which first binds /dev/dxg, not from 2.54.0.
+- With glass on, a still window was drawn and sent again and again: the glass keeps what lies under it until that
+  changes, and the window's surface is no longer taken off between frames.
+- Each floating panel's glass shows what lies under that panel, lower floating panels included.
+- A see-through surface laid its opacity twice (50% showed as 75%), and a see-through panel had a second fill under
+  its app.
+- A press at the left edge of an open menu chose the item instead of starting to resize the window.
+- Two presses on the title strip far apart, quickly, no longer maximise the window.
+- `--no-session`, which runs without the menu bar, keeps the desktop's frame, so the window can still be moved and
+  closed.
+
 ## [0.8.0] - 2026-11-15
 
 Themes get light, depth, see-through panels and glass, the window draws its own frame, and under WSL the window

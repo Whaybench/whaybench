@@ -41,6 +41,24 @@ pub const CONTROL_W: f64 = 46.0;
 const WINDOW_EDGE: f64 = 5.0;
 const WINDOW_TOP_EDGE: f64 = 3.0;
 
+/// The window's button `CONTROL_W` wide from the right of a window `width` wide at x: close, maximise, minimise.
+fn control_in(width: f64, x: f64) -> Option<Control> {
+    let right = width - x;
+    [(Control::Close, 1.0), (Control::Maximize, 2.0), (Control::Minimize, 3.0)].into_iter().find(|(_, n)| right > (n - 1.0) * CONTROL_W && right <= n * CONTROL_W).map(|(c, _)| c)
+}
+
+/// The edge of a window `w` by `h` at (x, wy), window coordinates, to resize it from there.
+fn edge_in(w: f64, h: f64, x: f64, wy: f64) -> Option<smithay::reexports::winit::window::ResizeDirection> {
+    use smithay::reexports::winit::window::ResizeDirection as D;
+    let (l, r, t, b) = (x < WINDOW_EDGE, x > w - WINDOW_EDGE, wy < WINDOW_TOP_EDGE, wy > h - WINDOW_EDGE);
+    Some(match (l, r, t, b) {
+        (true, _, true, _) => D::NorthWest, (_, true, true, _) => D::NorthEast,
+        (true, _, _, true) => D::SouthWest, (_, true, _, true) => D::SouthEast,
+        (true, ..) => D::West, (_, true, ..) => D::East, (_, _, true, _) => D::North, (_, _, _, true) => D::South,
+        _ => return None,
+    })
+}
+
 /// What the window's own frame asks of the window.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowCmd { Move, Resize(smithay::reexports::winit::window::ResizeDirection), Minimize, Maximize, Close }
@@ -121,8 +139,8 @@ pub struct App {
     pub hover: Option<(u64, Edges, Vec<(u64, Side)>)>,
     /// What the window's own frame was asked to do (move, resize, minimise, maximise, close); the window does it.
     pub window_cmd: Option<WindowCmd>,
-    /// The last press on the window's empty title strip, for a double click.
-    pub strip_pressed: Option<Instant>,
+    /// The last press on the window's empty title strip and where, for a double click.
+    pub strip_pressed: Option<(Instant, f64, f64)>,
     pub maximized: bool,
     pub guides: Vec<Guide>,
     pub zone: Option<Zone>,
@@ -477,23 +495,13 @@ impl App {
     /// The window's button at this point (surface coordinates: the menu bar is at y < 0).
     pub fn control_at(&self, x: f64, y: f64) -> Option<Control> {
         if self.menu.is_none() || y >= 0.0 || y < -(MENU_H as f64) { return None; }
-        let right = self.window_size.0 as f64 - x;
-        [(Control::Close, 1.0), (Control::Maximize, 2.0), (Control::Minimize, 3.0)].into_iter().find(|(_, n)| right > (n - 1.0) * CONTROL_W && right <= n * CONTROL_W).map(|(c, _)| c)
+        control_in(self.window_size.0 as f64, x)
     }
 
     /// The window's edge at this point, to resize it from there.
     pub fn window_edge_at(&self, x: f64, y: f64) -> Option<smithay::reexports::winit::window::ResizeDirection> {
-        use smithay::reexports::winit::window::ResizeDirection as D;
         if self.maximized { return None; }
-        let (w, h) = (self.window_size.0 as f64, self.window_size.1 as f64);
-        let wy = y + self.menu_height() as f64;
-        let (l, r, t, b) = (x < WINDOW_EDGE, x > w - WINDOW_EDGE, wy < WINDOW_TOP_EDGE, wy > h - WINDOW_EDGE);
-        Some(match (l, r, t, b) {
-            (true, _, true, _) => D::NorthWest, (_, true, true, _) => D::NorthEast,
-            (true, _, _, true) => D::SouthWest, (_, true, _, true) => D::SouthEast,
-            (true, ..) => D::West, (_, true, ..) => D::East, (_, _, true, _) => D::North, (_, _, _, true) => D::South,
-            _ => return None,
-        })
+        edge_in(self.window_size.0 as f64, self.window_size.1 as f64, x, y + self.menu_height() as f64)
     }
 
     /// What a left press on the window's own frame does: resize from an edge, a button, or move from the empty strip
@@ -504,7 +512,8 @@ impl App {
             return Some(match c { Control::Minimize => WindowCmd::Minimize, Control::Maximize => WindowCmd::Maximize, Control::Close => WindowCmd::Close });
         }
         if self.menu.is_none() || y >= 0.0 || x < self.menu_width() as f64 { return None; }
-        let double = self.strip_pressed.replace(Instant::now()).is_some_and(|t| t.elapsed() < Duration::from_millis(400));
+        // Two presses close in time and place, as a double click; two far apart are two moves.
+        let double = self.strip_pressed.replace((Instant::now(), x, y)).is_some_and(|(t, px, py)| t.elapsed() < Duration::from_millis(400) && (px - x).hypot(py - y) < 6.0);
         if double { self.strip_pressed = None; }
         Some(if double { WindowCmd::Maximize } else { WindowCmd::Move })
     }
@@ -1048,6 +1057,26 @@ pub fn out_edge(w: f64, h: f64, band: f64, x: f64, y: f64) -> Option<Side> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_window_buttons_and_edges_meet_without_a_gap() {
+        use super::{Control, control_in, edge_in};
+        use smithay::reexports::winit::window::ResizeDirection as D;
+        // Each button is 46 pixels from the right: close, then maximise, then minimise; left of them, none.
+        assert_eq!(control_in(1000.0, 999.0), Some(Control::Close));
+        assert_eq!(control_in(1000.0, 954.0), Some(Control::Close));
+        assert_eq!(control_in(1000.0, 953.9), Some(Control::Maximize));
+        assert_eq!(control_in(1000.0, 908.0), Some(Control::Maximize));
+        assert_eq!(control_in(1000.0, 907.9), Some(Control::Minimize));
+        assert_eq!(control_in(1000.0, 862.0), Some(Control::Minimize));
+        assert_eq!(control_in(1000.0, 861.9), None);
+        // Corners take both sides; the middle and just inside the edges are no edge.
+        assert_eq!(edge_in(800.0, 600.0, 1.0, 1.0), Some(D::NorthWest));
+        assert_eq!(edge_in(800.0, 600.0, 799.0, 599.0), Some(D::SouthEast));
+        assert_eq!(edge_in(800.0, 600.0, 400.0, 599.0), Some(D::South));
+        assert_eq!(edge_in(800.0, 600.0, 400.0, 3.0), None, "the top edge is thin: the menu is there");
+        assert_eq!(edge_in(800.0, 600.0, 5.0, 300.0), None);
+    }
+
     use super::*;
 
     #[test]
