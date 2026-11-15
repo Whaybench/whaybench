@@ -4,7 +4,7 @@ All notable changes to Whaybench are written here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.9.0] - 2026-11-16
+## [0.8.3] - 2026-11-16
 
 Projects get a change proposal template and archived documents, and on Linux one command installs everything.
 
