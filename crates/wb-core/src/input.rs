@@ -139,6 +139,25 @@ fn encode(v: &Value, out: &mut Vec<String>) {
     }
 }
 
+/// The keys that switch the input method on and off (fcitx5's TriggerKeys), as people write them: `Ctrl+Space`.
+/// None when fcitx5 does not answer.
+pub fn switch_keys() -> Vec<String> {
+    let Ok(form) = config("fcitx://config/global") else { return Vec::new() };
+    let mut keys: Vec<(usize, String)> = form.values["Hotkey"]["TriggerKeys"].as_object()
+        .map(|m| m.iter().filter_map(|(i, k)| Some((i.parse().ok()?, readable_key(k.as_str()?)))).collect()).unwrap_or_default();
+    keys.sort();
+    keys.into_iter().map(|(_, k)| k).collect()
+}
+
+/// A key as fcitx5 writes it (`Control+space`), as people write it (`Ctrl+Space`).
+pub fn readable_key(key: &str) -> String {
+    key.split('+').map(|p| match p {
+        "Control" => "Ctrl".to_string(),
+        "Super" => "Win".to_string(),
+        p => { let mut c = p.chars(); c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default() }
+    }).collect::<Vec<_>>().join("+")
+}
+
 /// Whether fcitx5 lists the input method (its first field is the name a group uses).
 fn known(name: &str) -> Result<bool, String> {
     let all = busctl(&["AvailableInputMethods"])?;
@@ -299,5 +318,12 @@ mod tests {
         for no in ["fcitx5", "fcitx5-data", "fcitx5-zhuyin-data", "fcitx5-chinese-addons-bin", "fcitx5-frontend-gtk4", "fcitx5-module-lua-dev",
                    "fcitx5-qt6", "fcitx5-gtk3", "fcitx5-config-qt", "fcitx5-pinyin-gui", "fcitx5-skin-nord", "kcm-fcitx5"] { assert!(!engine_package(no), "{no}"); }
         assert_eq!("fcitx5-anthy-5.1.10-1.fc44.x86_64".rsplitn(3, '-').nth(2), Some("fcitx5-anthy"));
+    }
+    #[test]
+    fn keys_read_as_people_write_them() {
+        assert_eq!(readable_key("Control+space"), "Ctrl+Space");
+        assert_eq!(readable_key("Shift+space"), "Shift+Space");
+        assert_eq!(readable_key("Hangul"), "Hangul");
+        assert_eq!(readable_key("Super+Alt+k"), "Win+Alt+K");
     }
 }

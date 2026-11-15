@@ -6,6 +6,18 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The input panel's hint names the keys that switch the input language as fcitx5 has them (it said Shift+Space,
+  which the Windows setup no longer sets).
+- Under WSL the input method's own texts (its names, an engine's settings) come in Whaybench's language: the setup
+  makes the Windows display language's locale, and Whaybench starts fcitx5 with it.
+- Codex's sign-in opens in Whaybench's browser, as Claude Code's does: the apps inside get BROWSER set to the same
+  way to the panel's browser as xdg-open (under WSL Codex went to the Windows browser). One browser, the one the agent
+  sees too.
+
+### Changed
+- Input settings list the switch keys one per line under the + that adds one.
+
 ## [0.7.0] - 2026-11-15
 
 ### Added

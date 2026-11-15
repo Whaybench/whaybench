@@ -7,8 +7,10 @@
 # Whaybench release, Anthropic's Claude Code installer and OpenAI's Codex CLI installer (a standalone program, no Node). Running it again finishes what a failed run left.
 set -eu
 
-user="${1:?usage: setup-wsl.sh USER [LANGUAGE]}"
+user="${1:?usage: setup-wsl.sh USER [LANGUAGE [LOCALE]]}"
 lang="${2:-en}"
+# The Windows display language's locale (ko_KR): made here, so the input method speaks that language.
+locale="${3:-}"
 say() { printf 'whaybench-setup: %s\n' "$*"; }
 export DEBIAN_FRONTEND=noninteractive
 
@@ -44,6 +46,10 @@ apt-get install -y -q libwebkitgtk-6.0-4 wl-clipboard firefox fonts-noto-core fo
 # im-config. The apps inside Whaybench type through the compositor (Wayland text-input), and its link to fcitx5
 # (waylandim) is in fcitx5-modules, which fcitx5 depends on. The others keep their recommends (WebKit's GStreamer).
 apt-get install -y -q --no-install-recommends fcitx5
+# The rest of the distribution stays in C.UTF-8; Whaybench gives fcitx5 this one for its texts (start.rs).
+case "$locale" in
+    [a-z][a-z]_[A-Z][A-Z]|[a-z][a-z][a-z]_[A-Z][A-Z]) say "locale $locale.UTF-8"; locale-gen "$locale.UTF-8" >/dev/null || true ;;
+esac
 
 # Whaybench in the Windows display language: WSL's Ubuntu runs in C.UTF-8, which Whaybench would take for English.
 # A language Whaybench has no add-on for falls back to English by itself.

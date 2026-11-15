@@ -91,7 +91,15 @@ pub fn attach_input_method(socket: &OsStr) {
         // --keep: it outlives this display, so the next Whaybench (a restart starts it before this one ends) finds it.
         // Without it fcitx5 exits with its first display and the new one is left attached to nothing. The long form:
         // fcitx5 before 5.1.15 (Ubuntu 24.04 has 5.1.7) lists -k but its parser refuses it, and then does not start.
-        let start = |args: &[&str]| Command::new("fcitx5").args(args).env("WAYLAND_DISPLAY", &path).stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success());
+        // Its texts (input method names, engine settings) in Whaybench's language when a locale of it exists: under
+        // WSL everything runs in C.UTF-8, and in a C locale programs leave their translations out.
+        let messages = messages_locale(wb_core::i18n::lang());
+        let start = |args: &[&str]| {
+            let mut c = Command::new("fcitx5");
+            c.args(args).env("WAYLAND_DISPLAY", &path).stdout(quiet()).stderr(quiet());
+            if let Some(l) = &messages { c.env("LC_MESSAGES", l).env("LANGUAGE", wb_core::i18n::lang()); }
+            c.status().is_ok_and(|s| s.success())
+        };
         // One that knows no --keep at all still starts without it, so composed input works.
         if start(&["-d", "--keep"]) { record::decide("input", "fcitx5 started", "none was running", &[("keep", "yes".into())]); }
         else if start(&["-d"]) { record::decide("input", "fcitx5 started", "none was running; this fcitx5 has no --keep", &[("keep", "no".into())]); }
@@ -259,6 +267,18 @@ pub fn exec_line(args: &[String]) -> String {
     format!("exec {}", args.iter().map(|a| format!("'{}'", a.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" "))
 }
 
+/// A UTF-8 locale of the language (`ko` → `ko_KR.utf8`) among those the system has, for a program's texts.
+fn messages_locale(lang: &str) -> Option<String> {
+    if lang.is_empty() || lang == "en" { return None; }
+    let all = Command::new("locale").arg("-a").output().ok()?;
+    pick_locale(&String::from_utf8_lossy(&all.stdout), lang)
+}
+
+fn pick_locale(list: &str, lang: &str) -> Option<String> {
+    let base = lang.split(['-', '_']).next()?;
+    list.lines().map(str::trim).find(|l| l.split('_').next() == Some(base) && l.to_lowercase().replace('-', "").ends_with(".utf8")).map(String::from)
+}
+
 /// Panels moved out to the desktop, by process: they end with Whaybench, or its next start would show them twice.
 static OUTSIDE: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
 
@@ -292,6 +312,10 @@ fn start_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) -> Op
     let bins = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())).map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
     let shims = open_shim(data, &bins);
     let path = format!("{shims}{bins}:{}", std::env::var("PATH").unwrap_or_default());
+    // Programs that pick a browser by BROWSER first (Codex's sign-in, through the webbrowser crate, which under WSL
+    // would otherwise go to the Windows browser) get the same way to the panel's browser as xdg-open: one browser,
+    // the one the agent sees too.
+    let browser = data.cache().join("bin").join("xdg-open");
     let umask = wb_core::paths::user_umask();
     let mut sh = Command::new("sh");
     // The apps write in the person's folders: their umask, not Whaybench's private one.
@@ -300,6 +324,7 @@ fn start_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) -> Op
     let started = sh.arg("-c").arg(command)
         .env("PATH", path)
         .env("WAYLAND_DISPLAY", socket)
+        .envs((!shims.is_empty()).then(|| ("BROWSER", browser.as_os_str())))
         // Inside, Korean and other input methods come through this compositor's text input; a GTK or Qt module of
         // the desktop's input method would talk past it and the apps would get no composed text.
         .env_remove("GTK_IM_MODULE").env_remove("QT_IM_MODULE")
@@ -333,6 +358,14 @@ mod panel_tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert!(!is_outside(pid), "its number is not kept to be ended later: another program may have it by then");
+    }
+
+    #[test]
+    fn a_locale_of_the_language_is_picked_among_the_systems() {
+        let list = "C\nC.utf8\nen_US.utf8\nko_KR.utf8\nPOSIX\n";
+        assert_eq!(pick_locale(list, "ko").as_deref(), Some("ko_KR.utf8"));
+        assert_eq!(pick_locale(list, "ja"), None, "none made for it");
+        assert_eq!(pick_locale("ko_KR.UTF-8\n", "ko").as_deref(), Some("ko_KR.UTF-8"));
     }
 
     #[test]

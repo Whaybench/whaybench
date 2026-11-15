@@ -1,6 +1,6 @@
 //! The input panel: text to the chosen session. Enter sends. Shift+Enter is a new line, also when the
 //! input method re-sends the Enter that ends a syllable without Shift: Shift is tracked here.
-use std::{cell::Cell, rc::Rc};
+use std::{cell::{Cell, RefCell}, rc::Rc};
 
 use gtk::{gdk, glib, prelude::*};
 use wb_core::{paths::Data, sessions, status};
@@ -47,10 +47,19 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let sent_at: Rc<Cell<i64>> = Rc::default();
     {
         let (d, hint, sent_at) = (d.clone(), hint.clone(), sent_at.clone());
+        // The keys that switch the input language, as fcitx5 has them now (they are set in Settings → Input…): asked
+        // every ten seconds, not every second (each ask is a process).
+        let (switch, asked): (Rc<RefCell<String>>, Rc<Cell<i64>>) = Default::default();
         every(1000, move || {
             let now = glib::monotonic_time();
+            if now - asked.get() > 10_000_000 || asked.get() == 0 {
+                asked.set(now);
+                let keys = wb_core::input::switch_keys();
+                *switch.borrow_mut() = if keys.is_empty() { String::new() } else { wb_core::i18n::f("input-switch", &[("keys", keys.join(" / "))]) };
+            }
             if now - sent_at.get() < 1_500_000 { hint.set_text(wb_core::i18n::t("sent")); return; }
-            hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", sessions::focus(&d).map(|s| wb_core::agents::session_label(&d.root, &s)).unwrap_or_else(|| wb_core::i18n::t("none").into()))]));
+            let who = sessions::focus(&d).map(|s| wb_core::agents::session_label(&d.root, &s)).unwrap_or_else(|| wb_core::i18n::t("none").into());
+            hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", who), ("switch", switch.borrow().clone())]));
         });
     }
     let shift = Rc::new(Cell::new(false));

@@ -47,6 +47,9 @@ if (-not $have) {
 $user = ($env:USERNAME.ToLower() -replace '[^a-z0-9_-]', '')
 if ($user -notmatch '^[a-z_]') { $user = "whaybench" }
 $lang = (Get-UICulture).TwoLetterISOLanguageName
+# Its locale as Linux names it (ko-KR: ko_KR): the input method's own texts come in that language.
+$locale = (Get-UICulture).Name -replace '-', '_'
+if ($locale -notmatch '^[a-z]{2,3}_[A-Z]{2}$') { $locale = "" }
 Say "setting up $Distro for $user (packages, Firefox, Claude Code, Whaybench; this takes a while)"
 $script = Join-Path $env:TEMP "whaybench-setup-wsl.sh"
 if (Test-Path (Join-Path $PSScriptRoot "setup-wsl.sh")) { Copy-Item (Join-Path $PSScriptRoot "setup-wsl.sh") $script -Force }
@@ -55,7 +58,7 @@ else { Invoke-WebRequest -UseBasicParsing -Uri $Setup -OutFile $script }
 # path): text piped from PowerShell gets a Windows line end added, which the shell would run as a command, and
 # Windows PowerShell breaks quotes inside arguments to wsl.exe.
 [IO.File]::WriteAllText($script, ([IO.File]::ReadAllText($script) -replace "`r`n", "`n"))
-& $wsl -d $Distro -u root --cd (Split-Path $script) -- sh (Split-Path -Leaf $script) $user $lang
+& $wsl -d $Distro -u root --cd (Split-Path $script) -- sh (Split-Path -Leaf $script) $user $lang $locale
 if ($LASTEXITCODE -ne 0) { Fail "the setup inside $Distro stopped. Run this again to continue." }
 # systemd and the default account apply from the next start of the distribution.
 & $wsl --terminate $Distro *> $null

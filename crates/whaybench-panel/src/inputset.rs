@@ -315,40 +315,47 @@ fn key_button(now: &str, set: Rc<dyn Fn(String)>) -> gtk::Button {
     b
 }
 
-/// A list of keys: each with a remove button, and a button that adds the next key pressed.
-fn key_list(now: &Value, save: Rc<dyn Fn(Value)>) -> gtk::FlowBox {
-    let flow = gtk::FlowBox::builder().selection_mode(gtk::SelectionMode::None).max_children_per_line(6).build();
+/// A list of keys: the button that adds the next key pressed, and under it each key on its own line, with a remove
+/// button.
+fn key_list(now: &Value, save: Rc<dyn Fn(Value)>) -> gtk::Box {
+    let list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    list.set_halign(gtk::Align::Start);
     let keys: Vec<String> = ordered(now).into_iter().filter_map(|v| v.as_str().map(String::from)).collect();
-    fill_keys(&flow, Rc::new(RefCell::new(keys)), save);
-    flow
+    fill_keys(&list, Rc::new(RefCell::new(keys)), save);
+    list
 }
 
-fn fill_keys(flow: &gtk::FlowBox, keys: Rc<RefCell<Vec<String>>>, save: Rc<dyn Fn(Value)>) {
-    while let Some(c) = flow.first_child() { flow.remove(&c); }
+fn fill_keys(list: &gtk::Box, keys: Rc<RefCell<Vec<String>>>, save: Rc<dyn Fn(Value)>) {
+    while let Some(c) = list.first_child() { list.remove(&c); }
     let changed = {
-        let (flow, keys, save) = (flow.clone(), keys.clone(), save.clone());
+        let (list, keys, save) = (list.clone(), keys.clone(), save.clone());
         Rc::new(move || {
-            let list: Map<String, Value> = keys.borrow().iter().enumerate().map(|(i, k)| (i.to_string(), json!(k))).collect();
-            save(Value::Object(list));
-            let (flow, keys, save) = (flow.clone(), keys.clone(), save.clone());
+            let all: Map<String, Value> = keys.borrow().iter().enumerate().map(|(i, k)| (i.to_string(), json!(k))).collect();
+            save(Value::Object(all));
+            let (list, keys, save) = (list.clone(), keys.clone(), save.clone());
             // Rebuilt after the click that asked for it has finished with its button.
-            glib::idle_add_local_once(move || fill_keys(&flow, keys, save));
+            glib::idle_add_local_once(move || fill_keys(&list, keys, save));
         })
     };
+    let add = key_button("", { let (keys, changed) = (keys.clone(), changed.clone()); Rc::new(move |k| { keys.borrow_mut().push(k); changed(); }) });
+    add.set_label("+");
+    add.set_halign(gtk::Align::Start);
+    add.set_tooltip_text(Some(t("inputset-add")));
+    list.append(&add);
     for (i, k) in keys.borrow().iter().enumerate() {
-        let chip = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        chip.append(&gtk::Label::new(Some(k)));
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let name = gtk::Label::new(Some(&wb_core::input::readable_key(k)));
+        name.set_halign(gtk::Align::Start);
+        name.set_xalign(0.0);
+        name.set_width_chars(16);
+        row.append(&name);
         let x = gtk::Button::with_label("×");
         x.set_tooltip_text(Some(t("inputset-remove")));
         let (keys, changed) = (keys.clone(), changed.clone());
         x.connect_clicked(move |_| { keys.borrow_mut().remove(i); changed(); });
-        chip.append(&x);
-        flow.insert(&chip, -1);
+        row.append(&x);
+        list.append(&row);
     }
-    let add = key_button("", { let (keys, changed) = (keys.clone(), changed.clone()); Rc::new(move |k| { keys.borrow_mut().push(k); changed(); }) });
-    add.set_label("+");
-    add.set_tooltip_text(Some(t("inputset-add")));
-    flow.insert(&add, -1);
 }
 
 #[cfg(test)]
