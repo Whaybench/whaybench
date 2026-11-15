@@ -309,14 +309,16 @@ fn new_project_id(st: &Store, name: &str) -> String {
 /// The documents to show: those added as add-ons. Older ones without a template stay on file, out of sight.
 /// Every document of the project gets a tab: it is Markdown whatever made it (a template add-on, or a format the
 /// program no longer has).
-fn shown_docs(project: &Value) -> Vec<Value> { list(project, "docs").to_vec() }
+/// An archived one (a finished change proposal) has none; it is opened from the + menu.
+fn shown_docs(project: &Value) -> Vec<Value> { list(project, "docs").iter().filter(|d| !archived(d)).cloned().collect() }
+fn archived(d: &Value) -> bool { d["archived"] == true }
 
 fn page_for(p: &mut P) -> String {
     let Some(pid) = p.pid.clone() else { return String::new() };
     if let Some((target, event)) = &p.over { return change_page(&p.st, &pid, target, event); }
     if p.tab == RECENT { return recent_page(&p.st, &pid, p.range); }
     let project = p.st.get_project(&pid).unwrap_or_default();
-    match shown_docs(&project).into_iter().find(|d| s(d, "id") == p.tab) {
+    match list(&project, "docs").iter().find(|d| s(d, "id") == p.tab).cloned() {
         Some(d) => { let st = p.st.clone(); doc_page(&st, &pid, &d, &mut p.anchors) }
         None => { p.tab = MAP.to_string(); map_page(&p.st, &pid) }
     }
@@ -356,9 +358,9 @@ fn add_doc_menu(s_: &Shared, on: &gtk::Button) {
     let p = s_.borrow();
     let Some(pid) = p.pid.clone() else { p.path.set_text(wb_core::i18n::t("no-project-create-a-new-project")); return };
     let project = p.st.get_project(&pid).unwrap_or_default();
-    let have: Vec<&str> = list(&project, "docs").iter().map(|d| s(d, "id")).collect();
-    let free: Vec<docaddons::DocAddon> = docaddons::list(&p.d).into_iter().filter(|a| !have.contains(&a.id.as_str())).collect();
-    if free.is_empty() { p.path.set_text(wb_core::i18n::t("no-document-template-to-add-install")); return; }
+    let free = docaddons::list(&p.d);
+    let old: Vec<Value> = list(&project, "docs").iter().filter(|d| archived(d)).cloned().collect();
+    if free.is_empty() && old.is_empty() { p.path.set_text(wb_core::i18n::t("no-document-template-to-add-install")); return; }
     let menu = gtk::gio::Menu::new();
     let group = gtk::gio::SimpleActionGroup::new();
     for (i, a) in free.into_iter().enumerate() {
@@ -371,9 +373,9 @@ fn add_doc_menu(s_: &Shared, on: &gtk::Button) {
             glib::idle_add_local_once(move || {
                 let result = s3.borrow().st.add_doc(&pid3, &a2);
                 match result {
-                    Ok(()) => {
-                        record::decide("project", "document added", "the person chose a template", &[("project", pid3.clone()), ("template", a2.id.clone())]);
-                        { let mut p = s3.borrow_mut(); p.tab = a2.id.clone(); p.over = None; p.stamp.clear(); }
+                    Ok(id) => {
+                        record::decide("project", "document added", "the person chose a template", &[("project", pid3.clone()), ("template", a2.id.clone()), ("document", id.clone())]);
+                        { let mut p = s3.borrow_mut(); p.tab = id; p.over = None; p.stamp.clear(); }
                         tick(&s3);
                     }
                     Err(e) => s3.borrow().path.set_text(&wb_core::i18n::f("adding-the-document-failed", &[("e", (e).to_string())])),
@@ -381,6 +383,22 @@ fn add_doc_menu(s_: &Shared, on: &gtk::Button) {
             });
         });
         group.add_action(&act);
+    }
+    // Archived documents in a submenu at the end: there only when there are some.
+    if !old.is_empty() {
+        let sub = gtk::gio::Menu::new();
+        for (i, d) in old.iter().enumerate() {
+            let name = format!("o{i}");
+            let act = gtk::gio::SimpleAction::new(&name, None);
+            sub.append(Some(s(d, "name")), Some(&format!("d.{name}")));
+            let (s2, did) = (s_.clone(), s(d, "id").to_string());
+            act.connect_activate(move |_, _| {
+                let (s3, did) = (s2.clone(), did.clone());
+                glib::idle_add_local_once(move || { { let mut p = s3.borrow_mut(); p.tab = did; p.over = None; } redraw(&s3); });
+            });
+            group.add_action(&act);
+        }
+        menu.append_submenu(Some(wb_core::i18n::t("archived-documents")), &sub);
     }
     let pop = gtk::PopoverMenu::from_model_full(&menu, gtk::PopoverMenuFlags::NESTED);
     pop.set_parent(on);

@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::{log as record, paths::Data};
 
 /// The add-ons the program brings: where, file, content.
-const BUNDLED: [(&str, &str, &str); 21] = [
+const BUNDLED: [(&str, &str, &str); 22] = [
     ("languages/ko", "messages.ftl", include_str!("../../../addons/languages/ko/messages.ftl")),
     ("languages/ko", "language.json", include_str!("../../../addons/languages/ko/language.json")),
     ("map-styles/ibis", "style.json", include_str!("../../../addons/map-styles/ibis/style.json")),
@@ -25,6 +25,7 @@ const BUNDLED: [(&str, &str, &str); 21] = [
     ("themes/wada-dream", "theme.json", include_str!("../../../addons/themes/wada-dream/theme.json")),
     ("themes/wada-jasper", "theme.json", include_str!("../../../addons/themes/wada-jasper/theme.json")),
     ("project-docs/wbs", "WBS.md", include_str!("../../../addons/project-docs/wbs/WBS.md")),
+    ("project-docs/change-proposal", "Change proposal.md", include_str!("../../../addons/project-docs/change-proposal/Change proposal.md")),
     ("agents/codex", "agent.json", include_str!("../../../addons/agents/codex/agent.json")),
     ("agents/codex", "config.toml", include_str!("../../../addons/agents/codex/config.toml")),
     ("agents/codex", "hooks.json", include_str!("../../../addons/agents/codex/hooks.json")),

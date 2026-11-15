@@ -25,6 +25,7 @@ const HELP: &str = r#"Project store command. Only the AI writes projects, and on
   whaybench-project put ID DOC --what "one line on what changed" the working copy becomes the document; fails if the document changed
                                                    since checkout
   whaybench-project recent ID [N]                  changes by place
+  whaybench-project archive ID DOC                 take a finished document out of the tabs; it stays whole and readable
   whaybench-project change-items ID EVENT          before/after of each map item a recorded change touched
   whaybench-project change ID DOC EVENT            before/after of each section a recorded change touched
   whaybench-project take ID WORK                   take a work item the program sent ([Project work WORK]): prints
@@ -123,6 +124,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         }
         "done" => { let note = opt(&mut rest, "--note").unwrap_or_default(); st.queue_done(arg(&rest, 0)?, arg(&rest, 1)?, &session, &note)?; out(json!("done")); }
         "queue" => out(json!(st.queue(arg(&rest, 0)?, None))),
+        "archive" => { st.archive_doc(arg(&rest, 0)?, arg(&rest, 1)?)?; out(json!("archived")); }
         "recent" => { let d = rest.get(1).and_then(|x| x.parse().ok()).unwrap_or(30); out(json!(st.recent(arg(&rest, 0)?, Some(d)))); }
         _ => { println!("{HELP}"); return Ok(2); }
     }

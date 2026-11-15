@@ -6,6 +6,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- A document template "Change proposal" for projects: one change agreed before the code, with the requirements it
+  adds, changes or removes as WHEN/THEN scenarios, the design, the tasks and the checks, merged into the
+  specification when done (after OpenSpec's change folder).
+- A document template can be added to a project again: the copies after the first get a number ("Change proposal
+  2"). Each document records the template version it started from.
+- A finished document can be archived (`whaybench-project archive`): it leaves the tabs and opens from
+  **+ Document → Archived documents**, shown only when there are some.
+
 ### Changed
 - On Linux, install.sh finds the distribution and installs the system packages it needs with sudo once you answer
   `y`, so the README starts with the one install command. Without a terminal (the update at start), without sudo or on

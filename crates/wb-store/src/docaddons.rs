@@ -139,20 +139,35 @@ pub fn note_failure(original: &Path, why: &str) {
 
 impl Store {
     /// Puts a template in the project as one of its documents. From here on only the AI writes it.
-    pub fn add_doc(&self, pid: &str, addon: &DocAddon) -> Res<()> {
+    /// Adds a copy of the template and gives its id. A template can be added again (a change proposal per change):
+    /// the copies after the first get a number, in the id and the name.
+    pub fn add_doc(&self, pid: &str, addon: &DocAddon) -> Res<String> {
         let mut p = self.get_project(pid).ok_or("no project")?;
-        if arr(&p, "docs").iter().any(|d| s(d, "id") == addon.id) { return Err(wb_core::i18n::f("document-already-exists", &[("a1", (addon.name).to_string())])); }
+        let n = (1..).find(|n| { let id = numbered(&addon.id, "-", *n); !arr(&p, "docs").iter().any(|d| s(d, "id") == id) }).unwrap_or(1);
+        let (id, name) = (numbered(&addon.id, "-", n), numbered(&addon.name, " ", n));
         let text = fs::read_to_string(&addon.md).map_err(|e| e.to_string())?;
-        let mut doc = json!({"id": addon.id, "addon": addon.id, "name": addon.name});
+        // The template changes with the program and the document does not: which version this one started from.
+        let mut doc = json!({"id": id, "addon": addon.id, "name": name, "template": crate::sha(&text), "version": env!("CARGO_PKG_VERSION")});
         if let Some(o) = &addon.original { doc["original"] = json!(o.to_string_lossy()); }
         let mut docs = arr(&p, "docs").to_vec();
         docs.push(doc);
         p["docs"] = json!(docs);
         write_json(&self.pdir(pid).join("project.json"), &p)?;
-        self.commit_docs(pid, vec![json!({"doc": addon.id, "what": wb_core::i18n::f("document-added", &[("a1", (addon.name).to_string())]), "text": text})], "", Some(json!({"system": "add-doc"})), "")?;
-        Ok(())
+        self.commit_docs(pid, vec![json!({"doc": id, "what": wb_core::i18n::f("document-added", &[("a1", name)]), "text": text})], "", Some(json!({"system": "add-doc"})), "")?;
+        Ok(id)
+    }
+
+    /// Takes a finished document out of the tabs. It stays whole, with its history; the panel lists it under its
+    /// + menu.
+    pub fn archive_doc(&self, pid: &str, did: &str) -> Res<()> {
+        let mut p = self.get_project(pid).ok_or("no project")?;
+        let d = p["docs"].as_array_mut().and_then(|v| v.iter_mut().find(|d| s(d, "id") == did)).ok_or("no such document")?;
+        d["archived"] = json!(true);
+        write_json(&self.pdir(pid).join("project.json"), &p)
     }
 }
+
+fn numbered(base: &str, sep: &str, n: usize) -> String { if n == 1 { base.to_string() } else { format!("{base}{sep}{n}") } }
 
 #[cfg(test)]
 mod tests {
@@ -192,10 +207,20 @@ mod tests {
         assert_eq!(arr(&p, "docs").len(), 1);
         assert_eq!(s(&arr(&p, "docs")[0], "name"), "WBS");
         assert!(st.document("p", "wbs").contains("## 1. Scope"));
-        assert!(st.add_doc("p", &a).is_err(), "only once");
+        let p0 = st.get_project("p").unwrap();
+        assert_eq!(s(&arr(&p0, "docs")[0], "template"), crate::sha("# WBS\n\n## 1. Scope\n"), "the template version it started from");
+        assert_eq!(st.add_doc("p", &a).unwrap(), "wbs-2", "added again, with a number");
+        let p2 = st.get_project("p").unwrap();
+        assert_eq!(s(&arr(&p2, "docs")[1], "name"), "WBS 2");
+        assert!(st.document("p", "wbs-2").contains("## 1. Scope"));
+        st.archive_doc("p", "wbs-2").unwrap();
+        let p3 = st.get_project("p").unwrap();
+        assert_eq!(arr(&p3, "docs")[1]["archived"], true);
+        assert!(st.document("p", "wbs-2").contains("## 1. Scope"), "an archived document stays whole");
+        assert!(st.archive_doc("p", "nope").is_err());
         fs::remove_dir_all(a.md.parent().unwrap()).unwrap();
         assert!(st.document("p", "wbs").contains("## 1. Scope"), "the document stays when its template goes");
-        assert_eq!(st.recent("p", None).len(), 1);
+        assert_eq!(st.recent("p", None).len(), 2);
     }
     #[test]
     fn sheets_become_tables() {
