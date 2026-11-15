@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions are numbered as [AGENTS.md](AGENTS.md#versions-and-releases) says: a patch unless the maintainer
 names another step.
 
+## [Unreleased]
+
+### Fixed
+- A restart with several Claude tabs no longer hides a conversation. Claude Code could note one session as carried on
+  in another conversation's background number; Whaybench now ignores that note when the number already holds another
+  conversation, or when the conversation went on under the old number after it.
+
 ## [0.8.3] - 2026-11-16
 
 Projects get a change proposal template and archived documents, and on Linux one command installs everything.

@@ -126,8 +126,22 @@ fn opened_short(text: &str, now: chrono::DateTime<chrono::Utc>) -> Option<String
 /// The session a conversation carried on in, by Claude Code's own record. Needed when /background came right
 /// after /resume: the new session has no transcript yet, so the mod takes it for a spare process and does not
 /// take the conversation over.
+/// A note followed by the person's or the tools' rows does not hold: the conversation went on under this number.
 pub fn continued_in(d: &Data, id: &str) -> Option<String> {
-    continued_in_text(&crate::paths::read_tail(&transcript_of(d, id)?, 256 * 1024).ok()?).filter(|n| n != id)
+    carried_on(&crate::paths::read_tail(&transcript_of(d, id)?, 256 * 1024).ok()?).filter(|n| n != id)
+}
+
+fn carried_on(text: &str) -> Option<String> {
+    let id = continued_in_text(text)?;
+    let after = &text[text.rfind("\"continuedInSessionId\":\"")?..];
+    (!after.lines().skip(1).any(|l| l.contains("\"type\":\"user\"") || l.contains("\"type\":\"assistant\""))).then_some(id)
+}
+
+/// A number that already holds another conversation: its record moved on, or another record moved into it. Claude
+/// Code has named such a number as the continuation of a different session handed to the background at the same time.
+fn taken(d: &Data, n: &str, from: &str) -> bool {
+    record_of(d, n).and_then(|r| r.get("movedTo")?.as_str().map(|m| !m.is_empty())).unwrap_or(false)
+        || all(d).iter().any(|r| r.get("movedTo").and_then(Value::as_str) == Some(n) && r.get("id").and_then(Value::as_str) != Some(from))
 }
 
 /// Whether Claude Code keeps a conversation under this number (its transcript). An add-on agent keeps its own, elsewhere.
@@ -201,7 +215,7 @@ pub fn locate(d: &Data, id: &str) -> String {
     }
     for from in way.iter().rev() {
         // A carried-on conversation's own transcript names itself too: that is not a move.
-        if let Some(next) = continued_in(d, from).filter(|n| n != from && agent(n).is_some()) { adopt(d, from, &next); return next; }
+        if let Some(next) = continued_in(d, from).filter(|n| n != from && agent(n).is_some() && !taken(d, n, from)) { adopt(d, from, &next); return next; }
     }
     now
 }
@@ -445,6 +459,19 @@ mod tests {
         assert_eq!(opened_short(&row("user", 5), now), None, "the same words in the conversation do not count");
         assert_eq!(opened_short(&row("system", 200), now), None, "an old opening does not count");
         assert_eq!(continued_in_text("\"continuedInSessionId\":\"short\""), None);
+        assert_eq!(carried_on(&text).as_deref(), Some(id));
+        assert_eq!(carried_on(&format!("{text}\n{{\"type\":\"user\"}}")), None, "the conversation went on here after the note");
+    }
+    #[test]
+    fn a_number_holding_another_conversation_is_not_taken_over() {
+        let d = data("taken");
+        rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b"}));
+        rec(&d, "b", serde_json::json!({"id":"b"}));
+        rec(&d, "c", serde_json::json!({"id":"c","movedTo":"d"}));
+        assert!(!taken(&d, "b", "a"), "its own continuation");
+        assert!(taken(&d, "b", "x"), "another conversation moved into it");
+        assert!(taken(&d, "c", "x"), "it moved on itself");
+        assert!(!taken(&d, "new", "x"));
     }
     #[test]
     fn a_missed_take_over_is_finished() {
