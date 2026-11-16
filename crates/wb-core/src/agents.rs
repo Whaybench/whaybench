@@ -284,29 +284,44 @@ impl Fill<'_> {
 }
 
 /// A file the agent shares with the person's own folder, such as its login: a link to the person's, so signing in or
-/// out on either side holds on both. The agent signing out here removes only the link, and the file it pointed to is
-/// that same login, now revoked: it goes too, or the next start would link it again.
+/// out on either side holds on both. Signing out here removes only the link; the person's file is then that same,
+/// revoked login, or a new one from a sign-in there since: it is never removed, and linked again only once it is newer
+/// than the sign-out. A file written here in the meantime (signing in here) is moved to the person's folder and linked.
 fn link_shared(source: &Path, home: &Path, file: &str) -> Result<()> {
     let (here, there) = (home.join(file), source.join(file));
-    let mark = home.join(format!(".{file}.linked"));
     fs::DirBuilder::new().recursive(true).mode(0o700).create(source)?;
+    // The person's folder is this one: the file is already theirs.
+    if fs::canonicalize(source)? == fs::canonicalize(home)? { return Ok(()); }
+    let (mark, out) = (home.join(format!(".{file}.linked")), home.join(format!(".{file}.signed-out")));
     match fs::symlink_metadata(&here) {
         Ok(m) if m.file_type().is_symlink() => {
             if fs::read_link(&here)? == there { return Ok(()); }
             fs::remove_file(&here)?;
         }
-        // A copy from before the link: the newer of it and the person's file is kept, in the person's folder.
         Ok(m) => {
             let theirs = fs::metadata(&there).and_then(|t| t.modified()).ok();
-            if theirs.is_none_or(|t| m.modified().is_ok_and(|ours| ours > t)) { fs::rename(&here, &there)?; } else { fs::remove_file(&here)?; }
+            if theirs.is_none_or(|t| m.modified().is_ok_and(|ours| ours > t)) { move_file(&here, &there)?; } else { fs::remove_file(&here)?; }
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            if mark.exists() && let Err(e) = fs::remove_file(&there) && e.kind() != io::ErrorKind::NotFound { return Err(e.into()); }
+            // Noticed now: anything the person's file got before this is older than the sign-out.
+            if mark.exists() { create_private(&out, b"")?; fs::remove_file(&mark)?; }
+            let since = fs::metadata(&out).and_then(|o| o.modified()).ok();
+            let newer = |since| fs::metadata(&there).and_then(|t| t.modified()).is_ok_and(|t| t > since);
+            if since.is_some_and(|since| !newer(since)) { return Ok(()); }
         }
         Err(e) => return Err(e.into()),
     }
     std::os::unix::fs::symlink(&there, &here)?;
+    if let Err(e) = fs::remove_file(&out) && e.kind() != io::ErrorKind::NotFound { return Err(e.into()); }
     create_private(&mark, b"")
+}
+
+/// A rename, or a copy where the two are on different file systems.
+fn move_file(from: &Path, to: &Path) -> Result<()> {
+    if fs::rename(from, to).is_ok() { return Ok(()); }
+    fs::copy(from, to)?;
+    fs::remove_file(from)?;
+    Ok(())
 }
 
 fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -379,10 +394,42 @@ mod tests {
         assert_eq!(fs::read_to_string(source.join("auth.json"))?, "refreshed-login");
         fs::remove_file(source.join("auth.json"))?;
         assert!(fs::read(home.join("auth.json")).is_err(), "signed out outside: no revoked login stays here");
-        fs::write(source.join("auth.json"), "signed-in-again")?;
+        fs::write(source.join("auth.json"), "revoked-login")?;
+        codex.prepare_with(&data, &exe, Some(source.clone()))?;
+        // Signed out here: the link goes. The person's file, the same revoked login, is kept but not linked again.
         fs::remove_file(home.join("auth.json"))?;
         codex.prepare_with(&data, &exe, Some(source.clone()))?;
-        assert!(!source.join("auth.json").exists(), "signed out here (the link went): the same, revoked login is not linked again");
+        assert!(fs::symlink_metadata(home.join("auth.json")).is_err(), "no link: the agent asks to sign in");
+        assert_eq!(fs::read_to_string(source.join("auth.json"))?, "revoked-login", "the person's file is never removed");
+        codex.prepare_with(&data, &exe, Some(source.clone()))?;
+        assert!(fs::symlink_metadata(home.join("auth.json")).is_err(), "still not linked at the next start");
+        // Signed in outside after that: linked again.
+        let later = fs::metadata(home.join(".auth.json.signed-out"))?.modified()? + std::time::Duration::from_secs(1);
+        fs::write(source.join("auth.json"), "signed-in-outside")?;
+        fs::File::options().write(true).open(source.join("auth.json"))?.set_modified(later)?;
+        codex.prepare_with(&data, &exe, Some(source.clone()))?;
+        assert_eq!(fs::read_to_string(home.join("auth.json"))?, "signed-in-outside");
+        // Signed out here again, then in here: the new login goes to the person's folder and is linked.
+        fs::remove_file(home.join("auth.json"))?;
+        codex.prepare_with(&data, &exe, Some(source.clone()))?;
+        fs::write(home.join("auth.json"), "signed-in-here")?;
+        fs::File::options().write(true).open(home.join("auth.json"))?.set_modified(later + std::time::Duration::from_secs(1))?;
+        codex.prepare_with(&data, &exe, Some(source.clone()))?;
+        assert_eq!(fs::read_link(home.join("auth.json"))?, source.join("auth.json"));
+        assert_eq!(fs::read_to_string(source.join("auth.json"))?, "signed-in-here");
+        Ok(())
+    }
+
+    #[test]
+    fn the_persons_folder_being_the_agents_own_is_left_alone() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let data = dir.path().join("data");
+        with_addons(&data);
+        fs::create_dir_all(data.join("codex"))?;
+        fs::write(data.join("codex/auth.json"), "login")?;
+        load(&data, "codex")?.prepare_with(&data, &dir.path().join("whaybench"), Some(data.join("codex")))?;
+        assert_eq!(fs::read_to_string(data.join("codex/auth.json"))?, "login");
+        assert!(!fs::symlink_metadata(data.join("codex/auth.json"))?.file_type().is_symlink());
         Ok(())
     }
 

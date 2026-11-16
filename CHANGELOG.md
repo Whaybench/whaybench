@@ -18,8 +18,9 @@ names another step.
 
 ### Fixed
 - Codex in Whaybench no longer keeps a login of its own: signed out in Codex elsewhere, it said the token was revoked
-  and showed no sign-in. Its login is now a link to `~/.codex/auth.json` (an agent add-on's `home.link`), so signing in
-  or out on either side holds on both.
+  and showed no sign-in. Its login is now a link to `~/.codex/auth.json` (an agent add-on's `home.link`): signing in or
+  out there holds here, and signing in here holds there. Signing out here asks to sign in again here and leaves the
+  file there alone.
 - `whaybench ctl session type` and `session end` refused a conversation that had carried on under a new number (after
   a restart, for one) with "No conversation tab": they follow the move now, as `session show` and `session wait` do.
 - A settings window that grew wider ran past the right edge of the screen: it is kept centred and on the screen.
