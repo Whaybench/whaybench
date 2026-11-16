@@ -7,6 +7,13 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- The conversation map tool tells the agent what its own call left against the record rules: a question closed
+  without its answer, a conclusion without a reason, a "question → answer" filed as a task, options left open under a
+  closed question, a topic or task with nothing open under it. A clean call still answers only "Map updated."; what
+  the person closed, dropped or approved is never questioned. The tool's text also asks to settle the question node
+  itself, to read an approval as a decision, and to leave the person's decisions as they are.
+
 ### Fixed
 - Conversation map: a `resolves` link to another conversation's node (by its memory id) now settles that node; a link
   to a node that exists nowhere is refused instead of dropped without a word. Links an agent sends are added to the

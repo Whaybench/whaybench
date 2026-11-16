@@ -1,10 +1,10 @@
 //! The conversation map tool every agent calls, `context_map`: its name, description and input, what a call does,
 //! and the map as the text a call with `show` returns. `whaybench mcp` serves it over MCP.
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use serde_json::{Value, json};
 
-use crate::map::{self, Result};
+use crate::{i18n, map::{self, Result}};
 
 pub const NAME: &str = "context_map";
 
@@ -59,11 +59,60 @@ pub fn call(data: &Path, sid: &str, input: &Value) -> Result<String> {
     for key in ["nodes", "upsert", "remove", "current"] {
         if let Some(v) = input.get(key).filter(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty())) { change.insert(key.into(), v.clone()); }
     }
+    let mut notes = Vec::new();
     if !change.is_empty() {
-        map::command(data, sid, Some(Value::Object(change))).map_err(|e| format!("Map not updated: {e}. Send the change again, fixed."))?;
+        let before = map::command(data, sid, None)?;
+        let sent: HashSet<String> = ["upsert", "nodes"].iter().filter_map(|k| change.get(*k).and_then(Value::as_array)).flatten()
+            .filter_map(|n| n["id"].as_str().map(String::from)).collect();
+        let after = map::command(data, sid, Some(Value::Object(change))).map_err(|e| format!("Map not updated: {e}. Send the change again, fixed."))?;
+        notes = checks(&before, &after, &sent);
     }
     if input.get("show") == Some(&json!(true)) { return Ok(as_text(&map::command(data, sid, None)?)); }
-    Ok("Map updated.".into())
+    if notes.is_empty() { return Ok("Map updated.".into()); }
+    Ok(format!("{}\n{}", i18n::ai("map-check"), notes.join("\n")))
+}
+
+/// What a call left that the record rules say otherwise, told back so the agent can fix it in its next call.
+/// Only about the nodes this call sent or closed: what the person closed, dropped or approved is not questioned.
+fn checks(before: &Value, after: &Value, sent: &HashSet<String>) -> Vec<String> {
+    let nodes = |m: &Value| m["nodes"].as_array().cloned().unwrap_or_default();
+    let (old, new) = (nodes(before), nodes(after));
+    let was_open = |id: &str| old.iter().find(|n| n["id"] == id).is_none_or(map::is_open);
+    let s = |n: &Value, k: &str| n[k].as_str().unwrap_or("").to_string();
+    let closed_now: Vec<&Value> = new.iter().filter(|n| !map::is_open(n) && n["state"] != "removed" && was_open(&s(n, "id"))).collect();
+    let mut out = Vec::new();
+    let tell = |key: &str, id: &str| i18n::ai_f(key, &[("id", id.to_string())]);
+    for n in new.iter().filter(|n| sent.contains(&s(n, "id"))) {
+        let (id, kind, label) = (s(n, "id"), s(n, "kind"), s(n, "label"));
+        if kind == "question" && n["state"] == "done" { out.push(tell("map-check-question", &id)); }
+        if kind == "conclusion" && s(n, "detail").chars().count() < 10 { out.push(tell("map-check-reason", &id)); }
+        if label.contains('→') && ["task", "question", "option", "problem"].contains(&kind.as_str()) { out.push(tell("map-check-kind", &id)); }
+    }
+    for n in &closed_now {
+        let id = s(n, "id");
+        if new.iter().any(|c| c["parent"] == id.as_str() && c["kind"] == "option" && map::is_open(c)) { out.push(tell("map-check-options", &id)); }
+    }
+    // A task or topic above a node this call closed, with nothing open under it any more.
+    let mut parents: HashSet<String> = HashSet::new();
+    for n in &closed_now {
+        let mut p = s(n, "parent");
+        while !p.is_empty() && parents.insert(p.clone()) { p = new.iter().find(|x| x["id"] == p.as_str()).map(|x| s(x, "parent")).unwrap_or_default(); }
+    }
+    for p in new.iter().filter(|n| parents.contains(&s(n, "id"))) {
+        // Everything under it, not only its children: an open option under a closed question keeps the topic open.
+        let mut under: Vec<String> = vec![s(p, "id")];
+        let mut i = 0;
+        while i < under.len() {
+            let here = under[i].clone();
+            under.extend(new.iter().filter(|c| c["parent"] == here.as_str()).map(|c| s(c, "id")));
+            i += 1;
+        }
+        let open_below = new.iter().any(|c| under[1..].contains(&s(c, "id")) && c["state"] != "removed" && map::is_open(c));
+        if map::is_open(p) && p["state"] != "postponed" && ["", "task"].contains(&s(p, "kind").as_str()) && !open_below {
+            out.push(tell("map-check-parent", &s(p, "id")));
+        }
+    }
+    out
 }
 
 /// The mark before a node: where the conversation is, else its state, else open or settled.
@@ -106,12 +155,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_call_tells_what_the_record_rules_say_otherwise_about_its_own_nodes() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        call(d, "s", &json!({"upsert": [{"id": "t", "label": "Topic"}, {"id": "q", "label": "Which?", "kind": "question", "parent": "t"},
+            {"id": "o1", "label": "option: A", "kind": "option", "parent": "q"}, {"id": "o2", "label": "option: B", "kind": "option", "parent": "q"}]})).unwrap();
+        assert_eq!(call(d, "s", &json!({"upsert": [{"id": "x", "label": "Side", "parent": "t"}]})).unwrap(), "Map updated.", "a clean call says only that");
+        let told = call(d, "s", &json!({"upsert": [{"id": "q", "state": "done"}, {"id": "x", "state": "done"}]})).unwrap();
+        for id in ["- q: closed as a question", "- q: closed, but options"] { assert!(told.contains(id), "{told}"); }
+        assert!(!told.contains("- t:"), "options still open under q keep t open: {told}");
+        let told = call(d, "s", &json!({"upsert": [{"id": "q", "label": "Which? → A", "kind": "conclusion", "detail": "A is the only one that fits"},
+            {"id": "o1", "state": "done"}, {"id": "o2", "state": "dropped"}]})).unwrap();
+        assert!(told.contains("- t: everything under it") && !told.contains("- q:"), "{told}");
+        assert_eq!(call(d, "s", &json!({"upsert": [{"id": "t", "state": "done"}]})).unwrap(), "Map updated.");
+        // What the person changes is not questioned.
+        let t = map::view(d, "s").unwrap()["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "t").unwrap()["nid"].clone();
+        map::person(d, json!([{"id": t, "state": ""}])).unwrap();
+        assert!(map::is_open(&map::view(d, "s").unwrap()["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "t").unwrap().clone()));
+        let told = call(d, "s", &json!({"upsert": [{"id": "y", "label": "Done? → yes", "kind": "task"}]})).unwrap();
+        assert!(told.contains("- y: its label reads") && !told.contains("- t:"), "{told}");
+    }
+
+    #[test]
     fn a_call_changes_the_map_and_shows_it_as_the_plugin_did() {
         let dir = tempfile::tempdir().unwrap();
         let up = json!({"upsert": [{"id": "t", "label": "Topic"}, {"id": "q", "parent": "t", "label": "Which?", "kind": "question"},
             {"id": "x", "parent": "t", "label": "Old", "state": "dropped"}], "current": "q", "show": true});
         assert_eq!(call(dir.path(), "s", &up).unwrap(), "◇ Topic [t]\n├ ● Which? [q]\n└ ✕ Old [x]");
-        assert_eq!(call(dir.path(), "s", &json!({"upsert": [{"id": "q", "state": "done"}]})).unwrap(), "Map updated.");
+        assert!(call(dir.path(), "s", &json!({"upsert": [{"id": "q", "state": "done"}]})).unwrap().starts_with("Map updated."));
         assert!(call(dir.path(), "s", &json!({"upsert": [{"id": "z", "parent": "nowhere", "label": "z"}]})).unwrap_err().to_string().starts_with("Map not updated"));
         assert!(definition()["description"].as_str().unwrap().starts_with("Updates the conversation map"));
         call(dir.path(), "s2", &json!({"inherit": "s"})).unwrap();
