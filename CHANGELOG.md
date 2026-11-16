@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-17
+
+Menus close when they should and take the item chosen, and small Hangul keeps its strokes.
+
 ### Fixed
 - Small Hangul in the panels (the menu bar at 10 pt, for one) lost the flat bottom stroke of a final consonant (rieul):
   the panels now fit glyphs to the pixel grid (slight hinting) instead of leaving it to GTK.
