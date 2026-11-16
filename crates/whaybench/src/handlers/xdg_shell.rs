@@ -47,6 +47,9 @@ impl XdgShellHandler for App {
     // A menu that asked for the pointer closes when the person presses anywhere outside it. Only those: a tooltip or
     // other popup told to close that never asked comes out wrong in GTK.
     fn grab(&mut self, surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
+        // GTK opens a menu again on the same surface, and popups compare by surface: the closed one must go first,
+        // or the open menu is never noted and a press outside leaves it on the screen.
+        self.grabbed_popups.retain(|p| p.alive());
         if !self.grabbed_popups.contains(&surface) { self.grabbed_popups.push(surface); }
     }
 }

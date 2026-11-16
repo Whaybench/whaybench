@@ -13,6 +13,11 @@ use wb_core::log as record;
 
 use crate::{layout::{How, title}, render::{BarHit, bar_hit}, state::{Act, App}};
 
+/// The time of a test press or move. A fixed time made GTK count every test click as one more of a double click,
+/// so a list that acts on a single click never did.
+fn test_time() -> InputTime {
+    InputTime::from_micros(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as u64))
+}
 
 /// The left mouse button: only it picks up panels.
 const LEFT: u32 = 0x110;
@@ -118,7 +123,7 @@ impl App {
         self.pointer_moved(x, y);
         let under = if matches!(self.act, Act::Idle) { self.surface_under((x, y).into()) } else { None };
         let pointer = self.seat.get_pointer().unwrap();
-        pointer.motion(self, under, &MotionEvent { location: (x, y).into(), serial: SERIAL_COUNTER.next_serial(), time: InputTime::from_micros(0) });
+        pointer.motion(self, under, &MotionEvent { location: (x, y).into(), serial: SERIAL_COUNTER.next_serial(), time: test_time() });
         pointer.frame(self);
     }
 
@@ -128,7 +133,7 @@ impl App {
         if forward {
             let pointer = self.seat.get_pointer().unwrap();
             let state = if down { ButtonState::Pressed } else { ButtonState::Released };
-            pointer.button(self, &ButtonEvent { button, state, serial: SERIAL_COUNTER.next_serial(), time: InputTime::from_micros(0) });
+            pointer.button(self, &ButtonEvent { button, state, serial: SERIAL_COUNTER.next_serial(), time: test_time() });
             pointer.frame(self);
         }
     }

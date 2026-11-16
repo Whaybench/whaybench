@@ -7,6 +7,13 @@ names another step.
 
 ## [Unreleased]
 
+### Fixed
+- A menu opened again quickly (clicking a submenu such as Theme ▸ closes and reopens it) was not noted as open: a
+  press outside left it on the screen, and a press on one of its items closed the menus before the item was
+  chosen, so the choice did nothing until tried again.
+- `whaybench ctl press|release|pointer` gave every event the same time and could hand a press and its release over
+  in the wrong order, so apps saw test clicks as double clicks or a button held down.
+
 ## [0.8.5] - 2026-11-16
 
 Easier first steps: the first layout puts the browser in the middle, where the sign-in page opens, and a Windows help

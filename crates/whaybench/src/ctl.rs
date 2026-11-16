@@ -392,7 +392,11 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
             smithay::wayland::selection::data_device::set_data_device_selection(&state.display_handle, &state.seat, types, ());
         }
         if let Ok(files) = fs::read_dir(&dir) {
-            for f in files.flatten().filter(|f| f.path().extension().is_some_and(|e| e == "json")) {
+            // In the order they were left (names are the time): a press and its release read the other way round
+            // left the app holding the button.
+            let mut files: Vec<_> = files.flatten().filter(|f| f.path().extension().is_some_and(|e| e == "json")).collect();
+            files.sort_by_key(|f| f.file_name());
+            for f in files {
                 let parsed = fs::read(f.path()).ok().and_then(|b| serde_json::from_slice::<Request>(&b).ok());
                 let _ = fs::remove_file(f.path());
                 match parsed {
