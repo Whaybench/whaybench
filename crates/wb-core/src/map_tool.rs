@@ -8,7 +8,7 @@ use crate::{i18n, map::{self, Result}};
 
 pub const NAME: &str = "context_map";
 
-/// One node of a change; `nodes` (a whole regrouping) and `upsert` share it.
+/// One node of a change, as `upsert` lists it; `nodes` (a whole regrouping) points to it instead of repeating it.
 fn node_schema(required: &[&str]) -> Value {
     let rels = json!(["cause", "leads", "replaces", "related", "resolves"]);
     json!({"type": "object", "required": required, "properties": {
@@ -30,15 +30,14 @@ fn node_schema(required: &[&str]) -> Value {
     }})
 }
 
-/// The tool as an MCP client lists it.
+/// The tool as an MCP client lists it. `inherit` is left out: only Whaybench's own callers use it.
 pub fn definition() -> Value {
     json!({"name": NAME, "description": crate::i18n::ai("map-tool-description"), "inputSchema": {"type": "object", "properties": {
-        "nodes": {"type": "array", "items": node_schema(&["id", "label"])},
+        "nodes": {"type": "array", "items": {"type": "object", "required": ["id", "label"]}, "description": "the whole map: nodes with the same fields as in upsert"},
         "upsert": {"type": "array", "items": node_schema(&["id"])},
         "remove": {"type": "array", "items": {"type": "string"}},
         "current": {"type": "string", "description": "id of the node the conversation is on now"},
-        "show": {"type": "boolean"},
-        "inherit": {"type": "string", "description": "a session id whose map this session takes over, replacing its own"}
+        "show": {"type": "boolean"}
     }}})
 }
 

@@ -78,7 +78,8 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         if a.name != crate::agents::CLAUDE {
             parts.extend(crate::agents::load(data, a.name)?.context(sid)?);
         } else {
-            parts.push(i18n::ai("map-note").to_string());
+            // The whole note when the conversation starts, resumes or was compacted; on a prompt, one line: the rules are in the tool's text.
+            parts.push(i18n::ai(if name == "SessionStart" { "map-note" } else { "map-short" }).to_string());
         }
         if a.inside { parts.push(i18n::ai(if name == "SessionStart" { "view-note" } else { "view-short" }).to_string()); }
         // How to ask another conversation, told once: an agent knows of it only from here.

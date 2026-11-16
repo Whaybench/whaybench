@@ -120,6 +120,26 @@ fn seen_at(data: &Path, sid: &str) -> i64 { fs::read_to_string(seen_file(data, s
 
 fn after(e: &Value, since: i64) -> bool { chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since) }
 
+/// Who made a change, as the memory list names sessions: `person`, or the first 4 characters of the session id.
+fn by_whom(source: &str) -> String {
+    match source.strip_prefix("session/") { Some(id) => id.chars().take(4).collect(), None => source.to_string() }
+}
+
+/// An event's data in a few words: the label, state and kind as they are now, the other changed fields by name only
+/// (the agent reads a detail with `whaybench memory show` if it needs it), a link or a file as it is.
+fn what_changed(data: &Value) -> String {
+    let Some(o) = data.as_object() else { return String::new() };
+    let now = |v: &Value| -> String {
+        let v = v.as_array().and_then(|a| a.last()).unwrap_or(v);
+        match v { Value::Null => "none".into(), Value::String(s) => s.chars().take(60).collect(), v => v.to_string() }
+    };
+    if o.contains_key("to") || o.contains_key("path") {
+        return o.iter().map(|(k, v)| format!("{k} {}", now(v))).collect::<Vec<_>>().join(", ");
+    }
+    o.iter().map(|(k, v)| if ["label", "state", "kind", "suggest", "mark"].contains(&k.as_str()) { format!("{k}→{}", now(v)) } else { k.clone() })
+        .collect::<Vec<_>>().join(", ")
+}
+
 /// What changed for this session since it last saw the memory: other sessions' and the person's events on its
 /// nodes, on its memory ids, or on the files it touched. Marks them seen.
 pub fn delta(data: &Path, sid: &str) -> Vec<String> {
@@ -132,12 +152,24 @@ pub fn delta(data: &Path, sid: &str) -> Vec<String> {
         let mine = by_file(&conn, sid)?.0;
         // Only what came after the session last looked is read (the store keeps times as RFC 3339 in UTC, which sort as text).
         let from = chrono::DateTime::from_timestamp_millis(since).map(|t| t.to_rfc3339()).unwrap_or_default();
-        Ok(db::events(&conn, "source != ? AND time >= ?", &[&format!("session/{sid}"), &from])?.iter().filter(|e| after(e, since))
-            .filter(|e| e["nid"].as_str().is_some_and(|n| ids.contains_key(n)) || e["memid"].as_str().is_some_and(|m| own_mem.contains(m)) || e["path"].as_str().is_some_and(|p| mine.contains(p)))
+        let events = db::events(&conn, "source != ? AND time >= ?", &[&format!("session/{sid}"), &from])?;
+        let mut out = Vec::new();
+        // Another map taking this session's nodes on asks nothing of it: one line per session, not one per node.
+        let mut linked: Vec<(String, usize)> = Vec::new();
+        for e in events.iter().filter(|e| after(e, since))
+            .filter(|e| e["nid"].as_str().is_some_and(|n| ids.contains_key(n)) || e["memid"].as_str().is_some_and(|m| own_mem.contains(m)) || e["path"].as_str().is_some_and(|p| mine.contains(p))) {
+            let kind = e["type"].as_str().unwrap_or("");
+            let by = by_whom(e["source"].as_str().unwrap_or(""));
+            if kind == "session.linked" || kind == "session.unlinked" {
+                match linked.iter_mut().find(|(b, _)| *b == format!("{kind} · {by}")) { Some(l) => l.1 += 1, None => linked.push((format!("{kind} · {by}"), 1)) }
+                continue;
+            }
             // The node as this session knows it: its id on this map, else its memory id.
-            .map(|e| { let node = e["nid"].as_str().and_then(|n| ids.get(n).copied()).or(e["memid"].as_str()).unwrap_or("");
-                format!("{} · {} · {node} · {}", e["type"].as_str().unwrap_or(""), e["source"].as_str().unwrap_or(""), e["data"]) })
-            .collect())
+            let node = e["nid"].as_str().and_then(|n| ids.get(n).copied()).or(e["memid"].as_str()).unwrap_or("");
+            out.push(format!("{kind} · {by} · {node} · {}", what_changed(&e["data"])));
+        }
+        out.extend(linked.into_iter().map(|(l, n)| format!("{l} · {n} of your nodes")));
+        Ok(out)
     };
     let out = inner().unwrap_or_else(|e| unread("changes", e));
     mark_seen(data, sid);
@@ -284,7 +316,13 @@ mod tests {
         let d = delta(dir.path(), me);
         assert_eq!(d.len(), 2, "the change on its memory id and the person's mark, not an unrelated node: {d:?}");
         assert!(d.iter().any(|l| l.contains("person · q ·")), "its own node by the id it knows: {d:?}");
+        assert!(d.iter().any(|l| l == "node.changed · bbbb · m1 · state→done"), "who by 4 characters, the new state only: {d:?}");
+        assert!(d.iter().any(|l| l == "node.changed · person · q · mark→important"), "{d:?}");
         assert!(delta(dir.path(), me).is_empty(), "seen once");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let mine_now = map::view(dir.path(), me).unwrap();
+        map::take_over(dir.path(), "cccccccc-0000-0000-0000-000000000003", &mine_now).unwrap();
+        assert_eq!(delta(dir.path(), me), vec!["session.linked · cccc · 2 of your nodes".to_string()], "one line for a whole map taken on");
         assert_eq!(search(dir.path(), &["store".into()], 5).len(), 3);
         assert_eq!(search(dir.path(), &["warehouse".into()], 5).len(), 1, "the detail is searched too");
         assert_eq!(show(dir.path(), "m1")["nodes"].as_array().unwrap().len(), 3);

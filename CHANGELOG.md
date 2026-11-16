@@ -14,6 +14,13 @@ names another step.
   the person closed, dropped or approved is never questioned. The tool's text also asks to settle the question node
   itself, to read an approval as a decision, and to leave the person's decisions as they are.
 
+### Changed
+- Less text rides on every prompt: the full conversation map note goes in when a conversation starts, resumes or is
+  compacted, and each prompt gets one line, since the rules are in the tool's text. Memory change lines say who by
+  4 characters and only the new label, state or kind (other fields by name), and another map taking this
+  conversation's nodes on is one line per session instead of one per node. The tool's input no longer repeats the
+  node fields for `nodes` nor lists `inherit`, and the note on asking other conversations is shorter.
+
 ### Fixed
 - Conversation map: a `resolves` link to another conversation's node (by its memory id) now settles that node; a link
   to a node that exists nowhere is refused instead of dropped without a word. Links an agent sends are added to the
