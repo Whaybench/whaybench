@@ -5,7 +5,7 @@ Claude Code (Codex CLI experimental) with its conversation map, sessions, answer
 side by side in one window.</p>
 
 <p align="center">
-  <img src="docs/images/whaybench.png" alt="Whaybench: a Claude Code conversation in a terminal panel, with its conversation map, sessions, answer, input and view panels around it" width="900">
+  <img src="docs/images/whaybench.png" alt="Whaybench: the view panel in the middle showing what the agent made, with the conversation map, input, conversation and answer panels around it" width="900">
 </p>
 
 > Whaybench is an independent project. It is not affiliated with or endorsed by Anthropic or OpenAI.
