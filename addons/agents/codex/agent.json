@@ -7,7 +7,7 @@
   "home": {
     "env": "CODEX_HOME",
     "from": "~/.codex",
-    "copy": ["auth.json"],
+    "link": ["auth.json"],
     "copy_keys": { "config.toml": ["model", "model_reasoning_effort"] }
   },
   "merge": { "config.toml": "config.toml" },

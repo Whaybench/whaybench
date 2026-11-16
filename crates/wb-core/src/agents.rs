@@ -55,6 +55,8 @@ struct Home {
     copy: Vec<String>,
     #[serde(default)]
     copy_keys: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    link: Vec<String>,
 }
 
 /// The add-on agent this run was started with; none is Claude Code.
@@ -197,6 +199,7 @@ impl Agent {
                 Err(e) => return Err(e.into()),
             }
         }
+        for file in &h.link { link_shared(&source, &home, file)?; }
         for (file, keys) in &h.copy_keys {
             if !home.join(file).exists() { create_private(&home.join(file), picked(&source.join(file), keys)?.as_bytes())?; }
         }
@@ -280,6 +283,32 @@ impl Fill<'_> {
     }
 }
 
+/// A file the agent shares with the person's own folder, such as its login: a link to the person's, so signing in or
+/// out on either side holds on both. The agent signing out here removes only the link, and the file it pointed to is
+/// that same login, now revoked: it goes too, or the next start would link it again.
+fn link_shared(source: &Path, home: &Path, file: &str) -> Result<()> {
+    let (here, there) = (home.join(file), source.join(file));
+    let mark = home.join(format!(".{file}.linked"));
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(source)?;
+    match fs::symlink_metadata(&here) {
+        Ok(m) if m.file_type().is_symlink() => {
+            if fs::read_link(&here)? == there { return Ok(()); }
+            fs::remove_file(&here)?;
+        }
+        // A copy from before the link: the newer of it and the person's file is kept, in the person's folder.
+        Ok(m) => {
+            let theirs = fs::metadata(&there).and_then(|t| t.modified()).ok();
+            if theirs.is_none_or(|t| m.modified().is_ok_and(|ours| ours > t)) { fs::rename(&here, &there)?; } else { fs::remove_file(&here)?; }
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            if mark.exists() && let Err(e) = fs::remove_file(&there) && e.kind() != io::ErrorKind::NotFound { return Err(e.into()); }
+        }
+        Err(e) => return Err(e.into()),
+    }
+    std::os::unix::fs::symlink(&there, &here)?;
+    create_private(&mark, b"")
+}
+
 fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
     match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
         Ok(mut file) => { file.write_all(bytes)?; Ok(()) },
@@ -333,8 +362,7 @@ mod tests {
         let (var, home) = codex.prepare_with(&data, &exe, Some(source.clone()))?.unwrap();
         assert_eq!((var.as_str(), &home), ("CODEX_HOME", &data.join("codex")));
         assert_eq!(fs::metadata(&home)?.permissions().mode() & 0o777, 0o700);
-        assert_eq!(fs::metadata(home.join("auth.json"))?.permissions().mode() & 0o777, 0o600);
-        let config: toml::Table = fs::read_to_string(home.join("config.toml"))?.parse()?;
+                let config: toml::Table = fs::read_to_string(home.join("config.toml"))?.parse()?;
         assert_eq!(config["model"].as_str(), Some("chosen-model"));
         let mcp = &config["mcp_servers"]["whaybench"];
         assert_eq!(mcp["command"].as_str(), exe.to_str(), "a path with a quote stays one value");
@@ -345,9 +373,42 @@ mod tests {
         assert!(!roots.iter().any(|r| *r == data.to_str().unwrap() || r.ends_with("/codex") || r.ends_with("/addons") || r.ends_with("/cache")), "not its own settings, the add-ons or other tabs' input");
         assert_eq!(fs::metadata(home.join("config.toml"))?.permissions().mode() & 0o777, 0o600, "still private after the server is added");
         assert_eq!(config.len(), 4, "model, effort, the MCP server and the sandbox; nothing else is copied");
+        // The login is the person's file, linked: a refresh, a sign-out or a sign-in on either side holds on both.
+        assert_eq!(fs::read_link(home.join("auth.json"))?, source.join("auth.json"));
         fs::write(home.join("auth.json"), "refreshed-login")?;
+        assert_eq!(fs::read_to_string(source.join("auth.json"))?, "refreshed-login");
+        fs::remove_file(source.join("auth.json"))?;
+        assert!(fs::read(home.join("auth.json")).is_err(), "signed out outside: no revoked login stays here");
+        fs::write(source.join("auth.json"), "signed-in-again")?;
+        fs::remove_file(home.join("auth.json"))?;
         codex.prepare_with(&data, &exe, Some(source.clone()))?;
-        assert_eq!(fs::read_to_string(home.join("auth.json"))?, "refreshed-login");
+        assert!(!source.join("auth.json").exists(), "signed out here (the link went): the same, revoked login is not linked again");
+        Ok(())
+    }
+
+    #[test]
+    fn a_login_copied_before_the_link_is_kept() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let data = dir.path().join("data");
+        with_addons(&data);
+        let source = dir.path().join("source");
+        fs::create_dir_all(data.join("codex"))?;
+        fs::write(data.join("codex/auth.json"), "copied-login")?;
+        let codex = load(&data, "codex")?;
+        codex.prepare_with(&data, &dir.path().join("whaybench"), Some(source.clone()))?;
+        assert_eq!(fs::read_to_string(source.join("auth.json"))?, "copied-login", "moved to the person's folder, which did not exist");
+        assert_eq!(fs::read_to_string(data.join("codex/auth.json"))?, "copied-login", "and read through the link");
+        Ok(())
+    }
+
+    #[test]
+    fn preparation_writes_hooks() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let data = dir.path().join("data");
+        with_addons(&data);
+        let exe = dir.path().join("bin/whaybench");
+        let codex = load(&data, "codex")?;
+        let (_, home) = codex.prepare_with(&data, &exe, Some(dir.path().join("source")))?.unwrap();
         let hooks = read_json(&home.join("hooks.json"), Value::Null)?;
         let events = hooks["hooks"].as_object().unwrap();
         assert_eq!(events.len(), 8);
