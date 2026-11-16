@@ -115,7 +115,9 @@ enum Refused { Rule(String), Write(String) }
 /// Types text in the tab that shows session `id`. From another conversation tab, that is from its agent: said so, and
 /// never a command or a shell line; when the answer comes, the person is taken back to the tab that asked.
 fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool) -> Result<(), Refused> {
-    let tab = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(id));
+    // A conversation that carried on (a restart, /background) has a new number: the one it was given is followed.
+    let now = sessions::current_id(data, id);
+    let tab = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(now.as_str()));
     let Some(tab) = tab else {
         let head = text.split_whitespace().next().unwrap_or(text);
         return Err(Refused::Rule(wb_core::i18n::f("not-run-no-conversation-tab-open", &[("head", (head).to_string())])));
@@ -225,7 +227,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
         }
         Some("end") => {
             // A background session is stopped, one the tab runs gets /exit; then the tab goes.
-            let id = words.get(1).ok_or("session end needs an id")?;
+            let id = &sessions::current_id(data, words.get(1).ok_or("session end needs an id")?);
             let tab = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(id.as_str()));
             if sessions::background(id) {
                 sessions::stop(id);
@@ -461,6 +463,16 @@ mod tests {
             .map(|f| serde_json::from_slice::<serde_json::Value>(&fs::read(f.path()).unwrap()).unwrap()["text"].as_str().unwrap().to_string()).collect();
         assert_eq!(typed.len(), 1, "the shell line and the spoofed /exit are refused: {typed:?}");
         assert!(typed[0].ends_with("what do you think?") && typed[0] != "what do you think?", "marked as from another conversation: {}", typed[0]);
+    }
+    #[test]
+    fn text_for_a_conversation_that_moved_goes_to_the_tab_it_is_in_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = Data::new(dir.path().to_path_buf());
+        fs::create_dir_all(sessions::sessions_dir(&data)).unwrap();
+        write_atomic(&sessions::sessions_dir(&data).join("s-old.json"), br#"{"id":"s-old","movedTo":"s-new"}"#).unwrap();
+        sessions::write_tab(&data, "t-new", Some("s-new"), false);
+        assert!(deliver(&data, "s-old", "hello", None, false).is_ok());
+        assert_eq!(fs::read_dir(sessions::tab_inbox(&data, "t-new")).unwrap().count(), 1);
     }
     fn w(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
 
