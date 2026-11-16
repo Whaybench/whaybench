@@ -58,17 +58,58 @@ pub fn call(data: &Path, sid: &str, input: &Value) -> Result<String> {
     for key in ["nodes", "upsert", "remove", "current"] {
         if let Some(v) = input.get(key).filter(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty())) { change.insert(key.into(), v.clone()); }
     }
-    let mut notes = Vec::new();
+    let (mut notes, mut similar) = (Vec::new(), Vec::new());
     if !change.is_empty() {
         let before = map::command(data, sid, None)?;
         let sent: HashSet<String> = ["upsert", "nodes"].iter().filter_map(|k| change.get(*k).and_then(Value::as_array)).flatten()
             .filter_map(|n| n["id"].as_str().map(String::from)).collect();
+        let sent_memid: HashSet<String> = ["upsert", "nodes"].iter().filter_map(|k| change.get(*k).and_then(Value::as_array)).flatten()
+            .filter(|n| n.get("memid").is_some()).filter_map(|n| n["id"].as_str().map(String::from)).collect();
         let after = map::command(data, sid, Some(Value::Object(change))).map_err(|e| format!("Map not updated: {e}. Send the change again, fixed."))?;
         notes = checks(&before, &after, &sent);
+        similar = alike(data, sid, &before, &after, &sent_memid);
     }
     if input.get("show") == Some(&json!(true)) { return Ok(as_text(&map::command(data, sid, None)?)); }
-    if notes.is_empty() { return Ok("Map updated.".into()); }
-    Ok(format!("{}\n{}", i18n::ai("map-check"), notes.join("\n")))
+    let mut out = if notes.is_empty() { "Map updated.".to_string() } else { format!("{}\n{}", i18n::ai("map-check"), notes.join("\n")) };
+    for l in similar { out.push('\n'); out.push_str(&l); }
+    Ok(out)
+}
+
+/// Nodes of other sessions that may be about the same thing as a node this call added without a memory id: told
+/// as a hint, never linked here, since whether two are the same problem is a judgement. Label trigram overlap of
+/// 0.4 or more (measured on the store: below that most pairs were only alike in words such as "commit"); records
+/// such as conclusions and facts are left out on both sides. At most 3 lines.
+fn alike(data: &Path, sid: &str, before: &Value, after: &Value, sent_memid: &HashSet<String>) -> Vec<String> {
+    fn grams(s: &str) -> HashSet<String> {
+        let c: Vec<char> = s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+        if c.len() < 3 { return std::iter::once(c.iter().collect()).collect(); }
+        c.windows(3).map(|w| w.iter().collect()).collect()
+    }
+    const RECORDS: [&str; 4] = ["conclusion", "fact", "note", "rule"];
+    let had: HashSet<&str> = before["nodes"].as_array().into_iter().flatten().filter_map(|n| n["id"].as_str()).collect();
+    let here: Vec<&Value> = after["nodes"].as_array().into_iter().flatten().collect();
+    let on_map: HashSet<&str> = here.iter().filter_map(|n| n["nid"].as_str()).collect();
+    let Ok(conn) = crate::db::open(data) else { return Vec::new() };
+    let mut out = Vec::new();
+    for n in here.iter().filter(|n| n["id"].as_str().is_some_and(|i| !had.contains(i) && !sent_memid.contains(i)) && !RECORDS.contains(&n["kind"].as_str().unwrap_or(""))) {
+        let label = n["label"].as_str().unwrap_or("");
+        let mine = grams(label);
+        let words: Vec<String> = label.split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 2).map(String::from).collect();
+        // Many recent nodes share common words, so the window is wide: the trigram score picks among them.
+        let found = crate::db::search(&conn, &words, 300).unwrap_or_default();
+        let best = found.iter()
+            .filter(|c| c["origin"].as_str().is_some_and(|o| o != sid) && c["state"] != "removed" && c["memid"] != n["memid"]
+                && c["nid"].as_str().is_some_and(|i| !on_map.contains(i)) && !RECORDS.contains(&c["kind"].as_str().unwrap_or("")))
+            .map(|c| { let g = grams(c["label"].as_str().unwrap_or("")); (mine.intersection(&g).count() as f64 / mine.union(&g).count().max(1) as f64, c) })
+            .filter(|(score, _)| *score >= 0.4).max_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, c)) = best {
+            let state = c["state"].as_str().filter(|s| !s.is_empty()).unwrap_or(if map::is_open(c) { "open" } else { "closed" });
+            out.push(i18n::ai_f("map-similar", &[("id", n["id"].as_str().unwrap_or("").into()), ("memid", c["memid"].as_str().unwrap_or("").into()),
+                ("label", c["label"].as_str().unwrap_or("").into()), ("state", state.into()), ("session", c["origin"].as_str().unwrap_or("").chars().take(4).collect())]));
+        }
+        if out.len() == 3 { break; }
+    }
+    out
 }
 
 /// What a call left that the record rules say otherwise, told back so the agent can fix it in its next call.
@@ -173,6 +214,21 @@ mod tests {
         assert!(map::is_open(&map::view(d, "s").unwrap()["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "t").unwrap().clone()));
         let told = call(d, "s", &json!({"upsert": [{"id": "y", "label": "Done? → yes", "kind": "task"}]})).unwrap();
         assert!(told.contains("- y: its label reads") && !told.contains("- t:"), "{told}");
+    }
+
+    #[test]
+    fn a_new_node_like_one_of_another_session_gets_a_hint_not_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        call(d, "other", &json!({"upsert": [{"id": "p", "label": "The current node drops out of focus", "kind": "problem"}]})).unwrap();
+        let memid = map::view(d, "other").unwrap()["nodes"][0]["memid"].as_str().unwrap().to_string();
+        let told = call(d, "s", &json!({"upsert": [{"id": "q", "label": "Current node drops out of the focus?", "kind": "question"}]})).unwrap();
+        assert!(told.starts_with("Map updated.\n- q may be about the same thing as ") && told.contains(&memid), "{told}");
+        assert_ne!(map::view(d, "s").unwrap()["nodes"][0]["memid"].as_str(), Some(memid.as_str()), "not linked by the program");
+        for up in [json!({"id": "a", "label": "Current node drops out of focus", "memid": memid}), json!({"id": "b", "label": "Current node drops out of focus → fixed", "kind": "conclusion", "detail": "the focus now follows the current node"}),
+            json!({"id": "c", "label": "Pick a theme colour"})] {
+            assert_eq!(call(d, "s", &json!({"upsert": [up]})).unwrap(), "Map updated.", "a memid given, a record, or nothing alike: no hint");
+        }
     }
 
     #[test]

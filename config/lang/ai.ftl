@@ -43,6 +43,7 @@ map-check-reason = - { $id }: a conclusion keeps why it was chosen in detail, no
 map-check-kind = - { $id }: its label reads "question → answer": kind conclusion (a check or test result is a fact).
 map-check-options = - { $id }: closed, but options under it are still open: close the chosen one and drop the others; if none was chosen, reopen it.
 map-check-parent = - { $id }: everything under it is closed: close it too, or give it suggest.
+map-similar = - { $id } may be about the same thing as { $memid } "{ $label }" ({ $state }, session { $session }): give it that memid only if it clearly is the same problem; else leave it.
 # What every turn of every agent is told (whaybench hook). Kept short: they ride on each prompt.
 map-note = Conversation map: if this turn brings a new topic or task, returns to an earlier one, or settles a question, call the context_map tool in this turn before answering. An empty map gets its first topic in the first turn. A settled question is labelled "question → conclusion" with the reason in detail, closed, and given kind conclusion. Every item of a list you give becomes a child node. Put-off work has state plan; an idea or question thought about and paused stays open with no state. No call when nothing changed.
 map-short = Conversation map: before answering, call context_map in this turn if a topic, task or decision changed; none if nothing did.

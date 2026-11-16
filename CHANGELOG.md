@@ -8,6 +8,9 @@ names another step.
 ## [Unreleased]
 
 ### Added
+- When an agent adds a node without a memory id and another conversation has a node with a much like label, the map
+  tool's reply names it (at most 3 a call), so the agent can give the same memory id if it clearly is the same
+  problem. Nothing is linked by the program.
 - After Claude Code compacts a conversation, the agent gets this map's open nodes (with what is above them) and
   where it stands once, so it keeps using the ids it gave instead of adding the same nodes again.
 - The conversation map tool tells the agent what its own call left against the record rules: a question closed
