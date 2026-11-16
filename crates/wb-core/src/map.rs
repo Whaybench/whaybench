@@ -420,6 +420,7 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
     let mut conn = crate::db::open(data)?;
     // Reading the nodes and writing them back is one step in the store: another program's change cannot fall between.
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let input = numbered(&tx, input)?;
     let (sid, session) = match &scope {
         Scope::Session(sid) => (Some(*sid), session_read(data, sid)?),
         Scope::Nodes(nids) => (None, json!({"nodes": nids.iter().map(|n| json!({"id": n, "nid": n})).collect::<Vec<_>>(), "current": null, "turn": 0})),
@@ -484,6 +485,22 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
     let Some(sid) = sid else { return Ok(json!({"nodes": view_nodes(&conn, &entries)?})) };
     let file = session_write(data, sid, &entries, &current, stamp["turn"].as_u64().unwrap_or(0), latest)?;
     view_of(&conn, &file, sid)
+}
+
+/// A memory id given as its number (`#n`, as the memory list shows it), in `memid` or a link's `to`, is written as
+/// the id itself; a number no id has is an error.
+fn numbered(conn: &rusqlite::Connection, mut input: Value) -> Result<Value> {
+    let id_of = |key: &str| -> Result<String> { crate::db::by_alias(conn, key)?.ok_or_else(|| format!("{key}: a memory id number is # and digits").into()) };
+    for key in ["upsert", "nodes"] {
+        let Some(list) = input.get_mut(key).and_then(Value::as_array_mut) else { continue };
+        for n in list {
+            if let Some(m) = n.get("memid").and_then(Value::as_str).filter(|m| m.starts_with('#')) { n["memid"] = json!(id_of(m)?); }
+            for l in n.get_mut("links").and_then(Value::as_array_mut).into_iter().flatten() {
+                if let Some(t) = l["to"].as_str().filter(|t| t.starts_with('#')) { l["to"] = json!(id_of(t)?); }
+            }
+        }
+    }
+    Ok(input)
 }
 
 /// Links the agent sent to a node that is not on this map, named by its memory id or node number (a node of

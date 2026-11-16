@@ -1,7 +1,7 @@
 //! The memory's store: one SQLite file, `memory/memory.db`. A node is stored once, as it is now (`nodes`); what
 //! ties two nodes is in `node_links`; how a node came to be what it is, in time order, is in `events`.
 //! A session keeps no node: its map file lists the nodes it shows.
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use serde_json::{Map, Value, json};
@@ -102,7 +102,33 @@ fn open_once(data: &Path) -> Result<Connection> {
     if found > VERSION {
         return Err(format!("memory.db was written by a newer Whaybench (schema {found}, this program knows {VERSION})").into());
     }
+    // The memory ids' short numbers came later: a table of its own, made once, so an older program still reads the file.
+    let has = |c: &Connection| c.query_row("SELECT count(*) FROM sqlite_master WHERE name = 'memids'", [], |r| r.get::<_, i64>(0));
+    if has(&conn)? == 0 {
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if has(&tx)? == 0 { tx.execute_batch(ALIASES)?; }
+        tx.commit()?;
+    }
     Ok(conn)
+}
+
+/// Each memory id's short number, shown as `#n`: given once, in the order the ids came, never given again (also
+/// after a node is deleted for good), so the same number means the same thing in every session and every year.
+const ALIASES: &str = "CREATE TABLE memids (num INTEGER PRIMARY KEY AUTOINCREMENT, memid TEXT NOT NULL UNIQUE);
+INSERT INTO memids (memid) SELECT memid FROM nodes GROUP BY memid ORDER BY min(rowid);";
+
+/// Every memory id's number.
+pub fn aliases(conn: &Connection) -> Result<HashMap<String, i64>> {
+    let mut st = conn.prepare("SELECT memid, num FROM memids")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<HashMap<_, _>>>()?;
+    Ok(rows)
+}
+
+/// The memory id a `#n` (or a bare number) names; None when the key is not a number, Err when no id has it.
+pub fn by_alias(conn: &Connection, key: &str) -> Result<Option<String>> {
+    let Ok(num) = key.strip_prefix('#').unwrap_or(key).parse::<i64>() else { return Ok(None) };
+    let memid: Option<String> = conn.query_row("SELECT memid FROM memids WHERE num = ?", [num], |r| r.get(0)).optional()?;
+    memid.map(Some).ok_or_else(|| format!("no memory id has the number #{num}").into())
 }
 
 fn column(key: &str, v: &Value) -> Option<String> {
@@ -125,6 +151,7 @@ pub fn node_put(conn: &Connection, node: &Value) -> Result<()> {
         cols.join(", "), vec!["?"; cols.len()].join(", "),
         cols.iter().skip(1).map(|c| format!("{c} = excluded.{c}")).collect::<Vec<_>>().join(", "));
     conn.execute(&sql, params_from_iter(values))?;
+    conn.execute("INSERT OR IGNORE INTO memids (memid) VALUES (?)", [node["memid"].as_str()])?;
     Ok(())
 }
 

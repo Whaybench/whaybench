@@ -23,12 +23,18 @@ pub fn file_touched(data: &Path, sid: &str, op: &str, path: &str, node: Option<&
     db::event_add(&db::open(data)?, &e)
 }
 
+/// A node's memory id as the agent is shown it: `#n`, else (a store an older program wrote to) the id itself.
+pub fn short(n: &Value, aliases: &HashMap<String, i64>) -> String {
+    let memid = n.get("memid").or_else(|| n.get("nid")).and_then(Value::as_str).unwrap_or("");
+    aliases.get(memid).map(|k| format!("#{k}")).unwrap_or_else(|| memid.to_string())
+}
+
 fn when(n: &Value) -> i64 { ["changed", "opened"].iter().find_map(|k| n.get(*k)?.get("at")?.as_i64()).unwrap_or(0) }
 
-/// One node in one line: `memory id · label · state or kind · the session it came from · last change`.
-pub fn line(n: &Value) -> String {
+/// One node in one line: `#number of its memory id · label · state or kind · the session it came from · last change`.
+pub fn line(n: &Value, aliases: &HashMap<String, i64>) -> String {
     let from = n["origin"].as_str().unwrap_or("");
-    let key = n.get("memid").or_else(|| n.get("nid")).and_then(Value::as_str).unwrap_or("");
+    let key = short(n, aliases);
     let what = n.get("state").or_else(|| n.get("kind")).and_then(Value::as_str).unwrap_or(if is_open(n) { "open" } else { "closed" });
     let day = chrono::DateTime::from_timestamp_millis(when(n)).map(|t| t.with_timezone(&chrono::Local).format("%m-%d").to_string()).unwrap_or_default();
     let due = n.get("due").or_else(|| n.get("at")).and_then(Value::as_str).map(|d| format!(" · due {d}")).unwrap_or_default();
@@ -83,7 +89,8 @@ pub fn list(data: &Path, sid: &str, limit: usize) -> Vec<String> {
         let mut seen: HashSet<String> = own.iter().filter(|n| !is_open(n)).filter_map(|n| n["nid"].as_str().map(String::from)).collect();
         let mut out = Vec::new();
         let cap = limit + own.len();
-        let mut push = |n: &Value, out: &mut Vec<String>| if out.len() < limit && n["state"] != "removed" && seen.insert(n["nid"].as_str().unwrap_or("").to_string()) { out.push(line(n)); };
+        let aliases = db::aliases(&conn).unwrap_or_default();
+        let mut push = |n: &Value, out: &mut Vec<String>| if out.len() < limit && n["state"] != "removed" && seen.insert(n["nid"].as_str().unwrap_or("").to_string()) { out.push(line(n, &aliases)); };
         for n in own.iter().filter(|n| is_open(n)) { push(n, &mut out); }
         let own_mem: HashSet<&str> = own.iter().filter_map(|n| n.get("memid")?.as_str()).collect();
         for m in &own_mem { for n in db::nodes(&conn, "memid = ?", &[m])? { push(&n, &mut out); } }
@@ -153,6 +160,7 @@ pub fn delta(data: &Path, sid: &str) -> Vec<String> {
         // Only what came after the session last looked is read (the store keeps times as RFC 3339 in UTC, which sort as text).
         let from = chrono::DateTime::from_timestamp_millis(since).map(|t| t.to_rfc3339()).unwrap_or_default();
         let events = db::events(&conn, "source != ? AND time >= ?", &[&format!("session/{sid}"), &from])?;
+        let aliases = db::aliases(&conn).unwrap_or_default();
         let mut out = Vec::new();
         // Another map taking this session's nodes on asks nothing of it: one line per session, not one per node.
         let mut linked: Vec<(String, usize)> = Vec::new();
@@ -164,8 +172,9 @@ pub fn delta(data: &Path, sid: &str) -> Vec<String> {
                 match linked.iter_mut().find(|(b, _)| *b == format!("{kind} · {by}")) { Some(l) => l.1 += 1, None => linked.push((format!("{kind} · {by}"), 1)) }
                 continue;
             }
-            // The node as this session knows it: its id on this map, else its memory id.
-            let node = e["nid"].as_str().and_then(|n| ids.get(n).copied()).or(e["memid"].as_str()).unwrap_or("");
+            // The node as this session knows it: its id on this map, else its memory id's number.
+            let node = e["nid"].as_str().and_then(|n| ids.get(n).map(|i| i.to_string()))
+                .or_else(|| e["memid"].as_str().map(|m| aliases.get(m).map(|k| format!("#{k}")).unwrap_or_else(|| m.to_string()))).unwrap_or_default();
             out.push(format!("{kind} · {by} · {node} · {}", what_changed(&e["data"])));
         }
         out.extend(linked.into_iter().map(|(l, n)| format!("{l} · {n} of your nodes")));
@@ -181,7 +190,8 @@ pub fn show(data: &Path, key: &str) -> Value {
     let inner = || -> Result<Value> {
         let conn = db::open(data)?;
         let on_map = key.split_once('/').and_then(|(s, id)| map::session_entries(data, s).into_iter().find(|e| e.0 == id)).map(|e| e.1);
-        let key = on_map.as_deref().unwrap_or(key);
+        let numbered = db::by_alias(&conn, key)?;
+        let key = on_map.as_deref().or(numbered.as_deref()).unwrap_or(key);
         let (mut nodes, mut evs) = (Vec::new(), Vec::new());
         for n in db::nodes(&conn, "memid = ?1 OR nid = ?1", &[key])? {
             let nid = n["nid"].as_str().unwrap_or("");
@@ -195,7 +205,9 @@ pub fn show(data: &Path, key: &str) -> Value {
 
 /// Nodes whose label or detail holds any of the words (any case), most recent first.
 pub fn search(data: &Path, words: &[String], limit: usize) -> Vec<String> {
-    db::open(data).and_then(|c| db::search(&c, words, limit)).unwrap_or_default().iter().map(line).collect()
+    let Ok(conn) = db::open(data) else { return Vec::new() };
+    let aliases = db::aliases(&conn).unwrap_or_default();
+    db::search(&conn, words, limit).unwrap_or_default().iter().map(|n| line(n, &aliases)).collect()
 }
 
 /// One node as the person reads it: `label · state · due · session name` (no ids).
@@ -296,7 +308,7 @@ mod tests {
         put(dir.path(), other, json!([{"id":"a","label":"Store choice","memid":"m1"},{"id":"b","label":"unrelated","detail":"the long sentence about a Warehouse","memid":"m9"}]));
         put(dir.path(), third, json!([{"id":"d","label":"Store → SQLite","kind":"conclusion","state":"done","detail":"One file is enough. Postgres was too much.","memid":"m1"}]));
         let lines = list(dir.path(), me, 10);
-        assert!(lines[0].starts_with("m1 · Pick a store"), "own open node first: {lines:?}");
+        assert!(lines[0].starts_with("#1 · Pick a store"), "own open node first, its memory id by number: {lines:?}");
         assert!(lines.iter().any(|l| l.contains("Store choice")), "another node on the same problem is shown");
         assert!(lines.iter().any(|l| l.ends_with("· why: One file is enough")), "a decision carries its first reason: {lines:?}");
         assert_eq!(lines.iter().filter(|l| l.contains("Pick a store")).count(), 1, "a node two sessions show: one line");
@@ -316,7 +328,7 @@ mod tests {
         let d = delta(dir.path(), me);
         assert_eq!(d.len(), 2, "the change on its memory id and the person's mark, not an unrelated node: {d:?}");
         assert!(d.iter().any(|l| l.contains("person · q ·")), "its own node by the id it knows: {d:?}");
-        assert!(d.iter().any(|l| l == "node.changed · bbbb · m1 · state→done"), "who by 4 characters, the new state only: {d:?}");
+        assert!(d.iter().any(|l| l == "node.changed · bbbb · #1 · state→done"), "who by 4 characters, the new state only: {d:?}");
         assert!(d.iter().any(|l| l == "node.changed · person · q · mark→important"), "{d:?}");
         assert!(delta(dir.path(), me).is_empty(), "seen once");
         std::thread::sleep(std::time::Duration::from_millis(5));

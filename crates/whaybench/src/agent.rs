@@ -54,7 +54,7 @@ pub fn record(data: &Data, words: &[String]) -> Result<(), String> {
 
 /// `whaybench memory ...`: what the memory holds for a session (3.19).
 pub fn memory(data: &Data, words: &[String]) -> Result<(), String> {
-    let usage = "memory list SESSION | changes SESSION | show MEMID|SESSION/NODE | search WORD...";
+    let usage = "memory list SESSION | changes SESSION | show NUMBER|MEMID|SESSION/NODE (a #number without the #) | search WORD...";
     let root = &data.root;
     let lines = match words {
         [op, id] if op == "list" => { let l = wb_core::memory::list(root, id, 100); wb_core::memory::mark_seen(root, id); l }

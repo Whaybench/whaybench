@@ -18,7 +18,7 @@ fn node_schema(required: &[&str]) -> Value {
         "state": {"type": "string", "enum": ["", "plan", "doing", "done", "changed", "dropped", "postponed"], "description": "open or closed comes from this alone. plan = work put off for later, doing, done = finished or settled (closes), changed, dropped = given up (closes), postponed = put on hold by the person, empty = open again with no state. An open idea or question has no state"},
         "kind": {"type": "string", "enum": ["question", "option", "pro", "con", "conclusion", "task", "appointment", "problem", "idea", "fact", "rule", "note"], "description": "what the node is: question, option (pro and con under it), conclusion (a settled decision), task, appointment (with at), problem (what goes wrong; a decision resolves it), idea, fact, rule (a standing rule or preference), note. A topic has no kind"},
         "detail": {"type": "string", "description": "what does not fit the short label: the full sentence, a decision's reason, a problem's symptoms. For a task or problem about files: where (path:line), what, and the next step, so a later session need not look it up again. Omit when the label says it all"},
-        "memid": {"type": "string", "description": "the memory id of an existing node in the memory list that is about the same problem; omit for a new problem"},
+        "memid": {"type": "string", "description": "the #number (as the memory list shows it) of a node about the same problem; omit for a new problem"},
         "suggest": {"type": "object", "required": ["state", "why"], "properties": {"state": {"type": "string", "enum": ["done", "dropped"]}, "why": {"type": "string"}}, "description": "when you are not sure a node is finished or no longer needed: leave it open and suggest the state with a short reason; the person approves or declines"},
         "at": {"type": "string", "description": "when it happens: YYYY-MM-DD or YYYY-MM-DD HH:MM (an appointment)"},
         "due": {"type": "string", "description": "by when: YYYY-MM-DD or YYYY-MM-DD HH:MM"},
@@ -63,16 +63,40 @@ pub fn call(data: &Path, sid: &str, input: &Value) -> Result<String> {
         let before = map::command(data, sid, None)?;
         let sent: HashSet<String> = ["upsert", "nodes"].iter().filter_map(|k| change.get(*k).and_then(Value::as_array)).flatten()
             .filter_map(|n| n["id"].as_str().map(String::from)).collect();
+        let numbers = numbers_used(&change);
         let sent_memid: HashSet<String> = ["upsert", "nodes"].iter().filter_map(|k| change.get(*k).and_then(Value::as_array)).flatten()
             .filter(|n| n.get("memid").is_some()).filter_map(|n| n["id"].as_str().map(String::from)).collect();
         let after = map::command(data, sid, Some(Value::Object(change))).map_err(|e| format!("Map not updated: {e}. Send the change again, fixed."))?;
         notes = checks(&before, &after, &sent);
         similar = alike(data, sid, &before, &after, &sent_memid);
+        similar.splice(0..0, echo(data, &numbers));
     }
     if input.get("show") == Some(&json!(true)) { return Ok(as_text(&map::command(data, sid, None)?)); }
     let mut out = if notes.is_empty() { "Map updated.".to_string() } else { format!("{}\n{}", i18n::ai("map-check"), notes.join("\n")) };
     for l in similar { out.push('\n'); out.push_str(&l); }
     Ok(out)
+}
+
+/// The `#n` memory id numbers a change uses, with the node that uses each.
+fn numbers_used(change: &serde_json::Map<String, Value>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for n in ["upsert", "nodes"].iter().filter_map(|k| change.get(*k).and_then(Value::as_array)).flatten() {
+        let id = n["id"].as_str().unwrap_or("").to_string();
+        let to = n["links"].as_array().into_iter().flatten().filter_map(|l| l["to"].as_str());
+        for k in n["memid"].as_str().into_iter().chain(to).filter(|k| k.starts_with('#')) { out.push((id.clone(), k.to_string())); }
+    }
+    out
+}
+
+/// Each number used, told back with the label it stands for: one wrong digit names another thing, and the label shows it.
+fn echo(data: &Path, numbers: &[(String, String)]) -> Vec<String> {
+    let Ok(conn) = crate::db::open(data) else { return Vec::new() };
+    numbers.iter().filter_map(|(id, k)| {
+        let memid = crate::db::by_alias(&conn, k).ok()??;
+        let n = // The first node that had the id: the call may itself have just given the number to a node of its own.
+        crate::db::nodes(&conn, "memid = ? ORDER BY rowid LIMIT 1", &[&memid]).ok()?.into_iter().next()?;
+        Some(i18n::ai_f("map-number", &[("id", id.clone()), ("number", k.clone()), ("label", n["label"].as_str().unwrap_or("").into())]))
+    }).collect()
 }
 
 /// Nodes of other sessions that may be about the same thing as a node this call added without a memory id: told
@@ -90,6 +114,7 @@ fn alike(data: &Path, sid: &str, before: &Value, after: &Value, sent_memid: &Has
     let here: Vec<&Value> = after["nodes"].as_array().into_iter().flatten().collect();
     let on_map: HashSet<&str> = here.iter().filter_map(|n| n["nid"].as_str()).collect();
     let Ok(conn) = crate::db::open(data) else { return Vec::new() };
+    let aliases = crate::db::aliases(&conn).unwrap_or_default();
     let mut out = Vec::new();
     for n in here.iter().filter(|n| n["id"].as_str().is_some_and(|i| !had.contains(i) && !sent_memid.contains(i)) && !RECORDS.contains(&n["kind"].as_str().unwrap_or(""))) {
         let label = n["label"].as_str().unwrap_or("");
@@ -104,7 +129,7 @@ fn alike(data: &Path, sid: &str, before: &Value, after: &Value, sent_memid: &Has
             .filter(|(score, _)| *score >= 0.4).max_by(|a, b| a.0.total_cmp(&b.0));
         if let Some((_, c)) = best {
             let state = c["state"].as_str().filter(|s| !s.is_empty()).unwrap_or(if map::is_open(c) { "open" } else { "closed" });
-            out.push(i18n::ai_f("map-similar", &[("id", n["id"].as_str().unwrap_or("").into()), ("memid", c["memid"].as_str().unwrap_or("").into()),
+            out.push(i18n::ai_f("map-similar", &[("id", n["id"].as_str().unwrap_or("").into()), ("memid", crate::memory::short(c, &aliases)),
                 ("label", c["label"].as_str().unwrap_or("").into()), ("state", state.into()), ("session", c["origin"].as_str().unwrap_or("").chars().take(4).collect())]));
         }
         if out.len() == 3 { break; }
@@ -223,12 +248,28 @@ mod tests {
         call(d, "other", &json!({"upsert": [{"id": "p", "label": "The current node drops out of focus", "kind": "problem"}]})).unwrap();
         let memid = map::view(d, "other").unwrap()["nodes"][0]["memid"].as_str().unwrap().to_string();
         let told = call(d, "s", &json!({"upsert": [{"id": "q", "label": "Current node drops out of the focus?", "kind": "question"}]})).unwrap();
-        assert!(told.starts_with("Map updated.\n- q may be about the same thing as ") && told.contains(&memid), "{told}");
+        assert!(told.starts_with("Map updated.\n- q may be about the same thing as #1 "), "named by its number: {told}");
         assert_ne!(map::view(d, "s").unwrap()["nodes"][0]["memid"].as_str(), Some(memid.as_str()), "not linked by the program");
-        for up in [json!({"id": "a", "label": "Current node drops out of focus", "memid": memid}), json!({"id": "b", "label": "Current node drops out of focus → fixed", "kind": "conclusion", "detail": "the focus now follows the current node"}),
+        for up in [json!({"id": "a", "label": "Current node drops out of focus", "memid": memid.clone()}), json!({"id": "b", "label": "Current node drops out of focus → fixed", "kind": "conclusion", "detail": "the focus now follows the current node"}),
             json!({"id": "c", "label": "Pick a theme colour"})] {
             assert_eq!(call(d, "s", &json!({"upsert": [up]})).unwrap(), "Map updated.", "a memid given, a record, or nothing alike: no hint");
         }
+    }
+
+    #[test]
+    fn a_memory_id_number_is_taken_and_told_back_with_its_label() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        call(d, "other", &json!({"upsert": [{"id": "p", "label": "Store choice", "kind": "problem"}, {"id": "x", "label": "Unrelated"}]})).unwrap();
+        let memid = |sid: &str, id: &str| map::view(d, sid).unwrap()["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).unwrap()["memid"].clone();
+        let told = call(d, "s", &json!({"upsert": [{"id": "q", "label": "Which store?", "kind": "question", "memid": "#1"}]})).unwrap();
+        assert!(told.contains("- q → #1 \"Store choice\""), "{told}");
+        assert_eq!(memid("s", "q"), memid("other", "p"), "stored as the memory id itself");
+        call(d, "s", &json!({"upsert": [{"id": "c", "label": "Which store? → SQLite", "kind": "conclusion", "detail": "one file is enough", "links": [{"to": "#1", "rel": "resolves"}]}]})).unwrap();
+        assert_eq!(map::view(d, "other").unwrap()["nodes"][0]["state"], "done", "a link by number settles it too");
+        let err = call(d, "s", &json!({"upsert": [{"id": "z", "label": "Z", "memid": "#99"}]})).unwrap_err();
+        assert!(err.to_string().contains("#99"), "{err}");
+        assert_eq!(crate::memory::show(d, "2")["nodes"][0]["label"], "Unrelated", "show takes the bare number");
     }
 
     #[test]
