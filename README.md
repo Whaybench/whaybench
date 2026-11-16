@@ -20,7 +20,8 @@ side by side in one window.</p>
 4. Start **Whaybench** from the Start menu and sign in to Claude in the browser that opens.
 
 Needs Windows 11, or Windows 10 21H2 or newer (64-bit). The setup puts a Linux of its own in WSL with Claude Code and
-Codex CLI; your other WSL systems are not touched. If it stops, run it again and it goes on where it stopped.
+Codex CLI; your other WSL systems are not touched. If it stops, run it again and it goes on where it stopped. If it
+stops with an error, [docs/windows.md](docs/windows.md) shows how to fix it step by step.
 
 Programs in WSL can reach your Windows files with your rights, so check what an agent wants to run before you allow
 it.

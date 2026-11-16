@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- A Windows install help page, `docs/windows.md`: turning on virtualization in the BIOS and the WSL features, and
+  what the common WSL error codes mean. Both READMEs link to it.
+
 ### Fixed
 - A settings window that grew wider ran past the right edge of the screen: it is kept centred and on the screen.
 

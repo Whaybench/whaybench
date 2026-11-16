@@ -26,7 +26,8 @@ which session did what, and everything the agent showed you.</p>
 3. Wait while it installs everything. Windows may restart once; the setup goes on by itself.
 4. Start **Whaybench** from the Start menu and sign in to Claude in the browser that opens.
 
-Needs Windows 11, or Windows 10 21H2 or newer (64-bit).
+Needs Windows 11, or Windows 10 21H2 or newer (64-bit). Setup stopped with an error? See
+[Installing on Windows: when the setup stops](/docs/windows.md).
 
 ### Linux
 
