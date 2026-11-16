@@ -82,6 +82,13 @@ pub fn hook(data: &Data, words: &[String]) -> Result<(), String> {
     // Add-on agents run only inside Whaybench; Claude Code's plugin hooks also run in plain Claude Code sessions.
     let inside = name != agents::CLAUDE || std::env::var("WHAYBENCH").is_ok_and(|v| v == "1");
     let agent = wb_core::hook::Agent { name, tab: tab.as_deref(), inside };
-    println!("{}", wb_core::hook::run(&data.root, &agent, &event).map_err(|e| e.to_string())?);
+    match wb_core::hook::run(&data.root, &agent, &event) {
+        Ok(out) => println!("{out}"),
+        // A failed start or prompt still gives the map note (an agent ignores the output of a failed hook); the error goes to stderr.
+        Err(e) => match wb_core::hook::fallback(&event) {
+            Some(note) => { eprintln!("whaybench: {e}"); println!("{note}"); }
+            None => return Err(e.to_string()),
+        },
+    }
     Ok(())
 }

@@ -137,7 +137,13 @@ fn upsert(nodes: &mut Vec<Value>, changes: &Value, stamp: &Value, person: bool) 
         let mut merged = before.clone().unwrap_or_else(|| json!({"id":id,"label":id}));
         for (key, value) in raw.as_object().ok_or("node must be an object")? {
             if STAMPED.contains(&key.as_str()) || PROGRAM.contains(&key.as_str()) || (!person && PERSON_ONLY.contains(&key.as_str())) { continue; }
-            if value.is_null() && (person || PERSON_ONLY.contains(&key.as_str())) { merged.as_object_mut().unwrap().shift_remove(key); } else { merged[key] = value.clone(); }
+            if value.is_null() && (person || PERSON_ONLY.contains(&key.as_str())) { merged.as_object_mut().unwrap().shift_remove(key); }
+            // An agent sends only what changed, so its links are added to the node's; null clears them. The person's list is the whole list.
+            else if key == "links" && !person && let (Some(new), Some(old)) = (value.as_array(), merged.get("links").and_then(Value::as_array)) {
+                let mut all = old.clone();
+                for l in new { if !all.contains(l) { all.push(l.clone()); } }
+                merged[key] = json!(all);
+            } else { merged[key] = value.clone(); }
         }
         // Open or closed is the state's. An agent that still says isOpen (an older adapter) is read as a state:
         // closing without one means done, reopening drops a closing state; isOpen itself is not kept.
@@ -446,6 +452,7 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
         upsert(&mut nodes, changes, &stamp, person)?;
         resolve(&mut nodes, changes, &stamp);
     }
+    let outside = outside_links(&tx, &mut nodes, &input)?;
     let mut gone = HashSet::new();
     if let Some(remove) = input.get("remove") {
         for id in remove.as_array().ok_or("remove must be an array")? {
@@ -472,10 +479,79 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
     // shortcut: every write counts as the session's own; a side worker's fill is not told apart yet.
     let source = if person { "person".to_string() } else { format!("session/{}", sid.unwrap_or("")) };
     let entries = store(&tx, &source, sid, &stamp, action, &before, &nodes)?;
+    link_outside(&tx, &source, sid, &stamp, &entries, &outside)?;
     tx.commit()?;
     let Some(sid) = sid else { return Ok(json!({"nodes": view_nodes(&conn, &entries)?})) };
     let file = session_write(data, sid, &entries, &current, stamp["turn"].as_u64().unwrap_or(0), latest)?;
     view_of(&conn, &file, sid)
+}
+
+/// Links the agent sent to a node that is not on this map, named by its memory id or node number (a node of
+/// another session): taken out of the nodes, given back as (local id, target nid, rel). A `to` found nowhere is an
+/// error, so a link is never dropped without a word.
+fn outside_links(conn: &rusqlite::Connection, nodes: &mut [Value], input: &Value) -> Result<Vec<(String, String, String)>> {
+    let ids: HashSet<String> = nodes.iter().filter_map(|n| n["id"].as_str().map(String::from)).collect();
+    let sent: HashSet<String> = ["upsert", "nodes"].iter().filter_map(|k| input.get(*k).and_then(Value::as_array)).flatten()
+        .filter_map(|n| n["id"].as_str().map(String::from)).collect();
+    let mut out = Vec::new();
+    for n in nodes.iter_mut().filter(|n| n["id"].as_str().is_some_and(|i| sent.contains(i))) {
+        let id = n["id"].as_str().unwrap_or("").to_string();
+        let Some(links) = n.get_mut("links").and_then(Value::as_array_mut) else { continue };
+        let mut keep = Vec::new();
+        for l in links.drain(..) {
+            let to = l["to"].as_str().ok_or("a link needs to")?;
+            if ids.contains(to) { keep.push(l); continue; }
+            let rel = l["rel"].as_str().ok_or("a link needs rel")?.to_string();
+            let found: Vec<String> = if crate::db::node_get(conn, to)?.is_some() { vec![to.to_string()] } else {
+                crate::db::nodes(conn, "memid = ? AND coalesce(state, '') != 'removed'", &[to])?.iter().filter_map(|x| x["nid"].as_str().map(String::from)).collect()
+            };
+            if found.is_empty() { return Err(format!("links: {to} is not a node id of this map, a node number or a memory id").into()); }
+            out.extend(found.into_iter().map(|t| (id.clone(), t, rel.clone())));
+        }
+        *links = keep;
+    }
+    Ok(out)
+}
+
+/// Stores the links to nodes of other sessions; a `resolves` one settles its target there, and what is still open
+/// under it, as on this map.
+fn link_outside(conn: &rusqlite::Connection, source: &str, sid: Option<&str>, stamp: &Value, entries: &[(String, String)], outside: &[(String, String, String)]) -> Result<()> {
+    use crate::db;
+    let at = stamp["at"].as_i64().unwrap_or(0);
+    let here: HashSet<&str> = entries.iter().map(|(_, nid)| nid.as_str()).collect();
+    let mut events = Vec::new();
+    for (id, to, rel) in outside {
+        let Some((_, from)) = entries.iter().find(|(i, _)| i == id) else { continue };
+        let memid_of = |nid: &str| -> Result<Value> { Ok(db::node_get(conn, nid)?.and_then(|n| n.get("memid").cloned()).unwrap_or(Value::Null)) };
+        let mut links = db::links_of(conn, from)?;
+        let link = (to.clone(), rel.clone());
+        if !links.contains(&link) {
+            links.push(link);
+            db::links_set(conn, from, &links)?;
+            let mut e = event(source, "link.added", Some(from), sid, at, json!({"to": to, "rel": rel}));
+            e["memid"] = memid_of(from)?;
+            events.push(e);
+        }
+        if rel != "resolves" { continue; }
+        let mut settle = vec![to.clone()];
+        let mut i = 0;
+        while i < settle.len() { for c in db::children(conn, &settle[i])? { if !settle.contains(&c) { settle.push(c); } } i += 1; }
+        for nid in settle.iter().filter(|n| !here.contains(n.as_str())) {
+            let Some(mut n) = db::node_get(conn, nid)? else { continue };
+            if !is_open(&n) { continue; }
+            let prior = n.get("state").cloned().unwrap_or(Value::Null);
+            n["state"] = json!("done");
+            n["changed"] = stamp.clone();
+            n["closed"] = stamp.clone();
+            n.as_object_mut().unwrap().shift_remove("suggest");
+            db::node_put(conn, &n)?;
+            let mut e = event(source, "node.changed", Some(nid), sid, at, json!({"state": [prior, "done"]}));
+            e["memid"] = n.get("memid").cloned().unwrap_or(Value::Null);
+            events.push(e);
+        }
+    }
+    for e in &events { db::event_add(conn, e)?; }
+    Ok(())
 }
 
 /// Writes what changed between two views of the same nodes into the store, with the events of it, and gives the
@@ -554,16 +630,17 @@ fn map_nodes(data: &Path, sid: &str) -> Result<Vec<Value>> {
 /// shortcut: recorded as the session's own change, like before; a worker source is not told apart yet.
 pub fn fill(data: &Path, sid: &str, items: &[Value]) -> Result<usize> {
     const KINDS: [&str; 12] = ["question", "option", "pro", "con", "conclusion", "task", "appointment", "problem", "idea", "fact", "rule", "note"];
-    const RELS: [&str; 5] = ["cause", "leads", "replaces", "related", "resolves"];
+    // No resolves: a worker's guess must not settle a node and what is under it.
+    const RELS: [&str; 4] = ["cause", "leads", "replaces", "related"];
     let nodes = map_nodes(data, sid)?;
     let ids: HashSet<&str> = nodes.iter().filter_map(|n| n["id"].as_str()).collect();
     let ups: Vec<Value> = items.iter().filter(|p| p["id"].as_str().is_some_and(|i| ids.contains(i))).map(|p| {
         let mut c = json!({"id": p["id"]});
         if let Some(k) = p["kind"].as_str().filter(|k| KINDS.contains(k)) { c["kind"] = json!(k); }
         if let Some(r) = p["reason"].as_str().map(str::trim).filter(|r| !r.is_empty()) { c["reason"] = json!(r.chars().take(80).collect::<String>()); }
-        if let Some(links) = p["links"].as_array() {
-            c["links"] = json!(links.iter().filter(|l| l["to"].as_str().is_some_and(|t| ids.contains(t)) && l["rel"].as_str().is_some_and(|r| RELS.contains(&r))).cloned().collect::<Vec<_>>());
-        }
+        let links: Vec<Value> = p["links"].as_array().into_iter().flatten()
+            .filter(|l| l["to"].as_str().is_some_and(|t| ids.contains(t)) && l["rel"].as_str().is_some_and(|r| RELS.contains(&r))).cloned().collect();
+        if !links.is_empty() { c["links"] = json!(links); }
         c
     }).collect();
     if ups.is_empty() { return Ok(0); }
@@ -690,6 +767,45 @@ mod tests {
             json!({"id": "gone", "kind": "task"}), json!({"id": "b", "kind": "nonsense"})]).unwrap();
         let a = get(dir.path(), "s", "a").unwrap();
         assert_eq!((n, a["kind"].as_str(), a["label"].as_str(), a["links"].as_array().unwrap().len()), (2, Some("task"), Some("A"), 1));
+    }
+
+    #[test]
+    fn a_fill_neither_settles_nor_clears_links() -> Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        command(dir.path(), "s", Some(json!({"upsert": [{"id": "q", "label": "Q?"}, {"id": "c", "label": "Q → A", "links": [{"to": "q", "rel": "related"}]}]})))?;
+        fill(dir.path(), "s", &[json!({"id": "c", "links": [{"to": "q", "rel": "resolves"}]})])?;
+        assert!(is_open(&get(dir.path(), "s", "q").unwrap()), "a worker's resolves is not taken");
+        assert_eq!(get(dir.path(), "s", "c").unwrap()["links"].as_array().map(Vec::len), Some(1), "the link stays");
+        Ok(())
+    }
+
+    #[test]
+    fn links_sent_by_the_agent_are_added_and_null_clears_them() -> Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        command(dir.path(), "s", Some(json!({"upsert": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}, {"id": "c", "label": "C", "links": [{"to": "a", "rel": "related"}]}]})))?;
+        command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "links": [{"to": "b", "rel": "leads"}]}]})))?;
+        assert_eq!(get(dir.path(), "s", "c").unwrap()["links"].as_array().map(Vec::len), Some(2));
+        command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "links": null}]})))?;
+        assert!(get(dir.path(), "s", "c").unwrap().get("links").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn a_resolves_link_by_memory_id_settles_the_node_of_another_session() -> Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        command(dir.path(), "other", Some(json!({"upsert": [{"id": "p", "label": "It fails"}, {"id": "p1", "label": "Try X", "parent": "p", "state": "plan"}]})))?;
+        let memid = get(dir.path(), "other", "p").unwrap()["memid"].as_str().unwrap().to_string();
+        command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "label": "Why? → Y", "kind": "conclusion", "links": [{"to": memid, "rel": "resolves"}]}]})))?;
+        assert_eq!(get(dir.path(), "other", "p").unwrap()["state"], "done");
+        assert_eq!(get(dir.path(), "other", "p1").unwrap()["state"], "done", "what is open under it is settled too");
+        let conn = crate::db::open(dir.path())?;
+        assert_eq!(crate::db::links_of(&conn, &nid(dir.path(), "s", "c"))?, vec![(nid(dir.path(), "other", "p"), "resolves".to_string())]);
+        // A later change to the node keeps the link it cannot show.
+        command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "detail": "because"}]})))?;
+        assert_eq!(crate::db::links_of(&conn, &nid(dir.path(), "s", "c"))?.len(), 1);
+        let err = command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "links": [{"to": "nowhere", "rel": "related"}]}]}))).unwrap_err();
+        assert!(err.to_string().contains("nowhere"), "an unknown target is an error, not dropped");
+        Ok(())
     }
 
     #[test]

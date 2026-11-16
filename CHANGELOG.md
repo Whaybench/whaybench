@@ -8,6 +8,11 @@ names another step.
 ## [Unreleased]
 
 ### Fixed
+- Conversation map: a `resolves` link to another conversation's node (by its memory id) now settles that node; a link
+  to a node that exists nowhere is refused instead of dropped without a word. Links an agent sends are added to the
+  node's (`links: null` clears them), so adding one no longer erases the others. The map-filling worker can no longer
+  settle nodes or empty a node's links. A start or prompt whose hook fails still gives the agent the map note.
+  The tool's text now tells every agent, Codex too, to turn a settled question into its conclusion.
 - A restart with several Claude tabs no longer hides a conversation. Claude Code could note one session as carried on
   in another conversation's background number; Whaybench now ignores that note when the number already holds another
   conversation, or when the conversation went on under the old number after it.

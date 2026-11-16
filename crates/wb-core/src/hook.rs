@@ -101,6 +101,12 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     Ok(json!({}))
 }
 
+/// What a start or a prompt still gives the agent when its hook failed: the map note, so the turn's guidance is not lost.
+pub fn fallback(event: &Value) -> Option<Value> {
+    let name = event["hook_event_name"].as_str().filter(|n| ["SessionStart", "UserPromptSubmit"].contains(n))?;
+    Some(context_out(name, i18n::ai("map-note")))
+}
+
 fn context_out(name: &str, context: &str) -> Value { json!({"hookSpecificOutput": {"hookEventName": name, "additionalContext": context}}) }
 
 fn is_shell(tool: &str) -> bool { ["Bash", "shell", "local_shell", "exec_command"].contains(&tool) }
@@ -481,6 +487,13 @@ mod tests {
         let mut e = json!({"session_id": sid, "hook_event_name": name, "cwd": "/w"});
         for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); }
         e
+    }
+
+    #[test]
+    fn a_failed_start_or_prompt_still_has_the_map_note() {
+        let note = fallback(&ev("s", "UserPromptSubmit", json!({}))).unwrap();
+        assert_eq!(note["hookSpecificOutput"]["additionalContext"], i18n::ai("map-note").to_string());
+        assert!(fallback(&ev("s", "Stop", json!({}))).is_none());
     }
 
     #[test]
