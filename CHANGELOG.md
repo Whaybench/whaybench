@@ -7,6 +7,11 @@ names another step.
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-16
+
+Easier first steps: the first layout puts the browser in the middle, where the sign-in page opens, and a Windows help
+page covers a WSL setup that stops. Codex in Whaybench shares its login with `~/.codex`.
+
 ### Added
 - A Windows install help page, `docs/windows.md`: turning on virtualization in the BIOS and the WSL features, and
   what the common WSL error codes mean. Both READMEs link to it.
