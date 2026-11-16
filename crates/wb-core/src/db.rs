@@ -291,6 +291,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_store_without_numbers_gets_them_in_the_order_its_ids_came() -> Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open(dir.path())?;
+        conn.execute_batch("DROP TABLE memids")?;
+        for (nid, memid) in [("n1", "mb"), ("n2", "ma"), ("n3", "mb")] { conn.execute("INSERT INTO nodes (nid, memid, label) VALUES (?, ?, 'x')", [nid, memid])?; }
+        drop(conn);
+        let a = aliases(&open(dir.path())?)?;
+        assert_eq!((a["mb"], a["ma"], a.len()), (1, 2, 2), "first come, first numbered, one number per id");
+        Ok(())
+    }
+
+    #[test]
     fn new_tables_are_in_the_file_while_the_maker_still_holds_it() {
         let dir = tempfile::tempdir().unwrap();
         let _held = open(dir.path()).unwrap();

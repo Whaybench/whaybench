@@ -25,7 +25,7 @@ fn node_schema(required: &[&str]) -> Value {
         "requires": {"type": "string", "description": "what must be done first: node ids of this map with ∧ (and), ∨ (or), ¬ (not), parentheses"},
         "assumes": {"type": "string", "description": "what must hold for it to make sense: node ids with ∧ ∨ ¬"},
         "reason": {"type": "string", "description": "one short line: why the conversation moved to this node; give it when a map style asks for it"},
-        "links": {"type": "array", "items": {"type": "object", "required": ["to", "rel"], "properties": {"to": {"type": "string"}, "rel": {"type": "string", "enum": rels}}}, "description": "ties to nodes in other branches. resolves: this decision settles that problem (it closes, with what is open under it); replaces: this takes the place of that"},
+        "links": {"type": ["array", "null"], "items": {"type": "object", "required": ["to", "rel"], "properties": {"to": {"type": "string"}, "rel": {"type": "string", "enum": rels}}}, "description": "ties to nodes in other branches. resolves: this decision settles that problem (it closes, with what is open under it); replaces: this takes the place of that"},
         "source": {"type": "object", "required": ["file", "node"], "properties": {"file": {"type": "string"}, "node": {"type": "string"}, "title": {"type": "string"}, "path": {"type": "array", "items": {"type": "string"}}}, "description": "for a node taken up from an imported map: that map file and node; give it when Whaybench asks"}
     }})
 }
@@ -147,11 +147,15 @@ fn checks(before: &Value, after: &Value, sent: &HashSet<String>) -> Vec<String> 
     let closed_now: Vec<&Value> = new.iter().filter(|n| !map::is_open(n) && n["state"] != "removed" && was_open(&s(n, "id"))).collect();
     let mut out = Vec::new();
     let tell = |key: &str, id: &str| i18n::ai_f(key, &[("id", id.to_string())]);
+    // Only what this call did: a node it closed, or whose label or kind it set. A node the person closed and the
+    // agent only adds a detail to is left as the person left it.
+    let closed_ids: HashSet<String> = closed_now.iter().map(|n| s(n, "id")).collect();
     for n in new.iter().filter(|n| sent.contains(&s(n, "id"))) {
         let (id, kind, label) = (s(n, "id"), s(n, "kind"), s(n, "label"));
-        if kind == "question" && n["state"] == "done" { out.push(tell("map-check-question", &id)); }
-        if kind == "conclusion" && s(n, "detail").chars().count() < 10 { out.push(tell("map-check-reason", &id)); }
-        if label.contains('→') && ["task", "question", "option", "problem"].contains(&kind.as_str()) { out.push(tell("map-check-kind", &id)); }
+        let renamed = old.iter().find(|o| o["id"] == id.as_str()).is_none_or(|o| o["label"] != n["label"] || o["kind"] != n["kind"]);
+        if closed_ids.contains(&id) && kind == "question" && n["state"] == "done" { out.push(tell("map-check-question", &id)); }
+        if (closed_ids.contains(&id) || renamed) && kind == "conclusion" && s(n, "detail").chars().count() < 10 { out.push(tell("map-check-reason", &id)); }
+        if renamed && label.contains('→') && ["task", "question", "option", "problem"].contains(&kind.as_str()) { out.push(tell("map-check-kind", &id)); }
     }
     for n in &closed_now {
         let id = s(n, "id");
@@ -233,6 +237,10 @@ mod tests {
             {"id": "o1", "state": "done"}, {"id": "o2", "state": "dropped"}]})).unwrap();
         assert!(told.contains("- t: everything under it") && !told.contains("- q:"), "{told}");
         assert_eq!(call(d, "s", &json!({"upsert": [{"id": "t", "state": "done"}]})).unwrap(), "Map updated.");
+        // A question the person closed: the agent adding a detail is not told to reopen it.
+        let p = map::view(d, "s").unwrap()["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "x").unwrap()["nid"].clone();
+        map::person(d, json!([{"id": p, "kind": "question", "state": "done"}])).unwrap();
+        assert_eq!(call(d, "s", &json!({"upsert": [{"id": "x", "detail": "more"}]})).unwrap(), "Map updated.");
         // What the person changes is not questioned.
         let t = map::view(d, "s").unwrap()["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "t").unwrap()["nid"].clone();
         map::person(d, json!([{"id": t, "state": ""}])).unwrap();

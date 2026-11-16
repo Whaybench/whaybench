@@ -174,7 +174,7 @@ pub fn delta(data: &Path, sid: &str) -> Vec<String> {
             }
             // The node as this session knows it: its id on this map, else its memory id's number.
             let node = e["nid"].as_str().and_then(|n| ids.get(n).map(|i| i.to_string()))
-                .or_else(|| e["memid"].as_str().map(|m| aliases.get(m).map(|k| format!("#{k}")).unwrap_or_else(|| m.to_string()))).unwrap_or_default();
+                .or_else(|| e["memid"].as_str().map(|m| short(&json!({"memid": m}), &aliases))).unwrap_or_default();
             out.push(format!("{kind} · {by} · {node} · {}", what_changed(&e["data"])));
         }
         out.extend(linked.into_iter().map(|(l, n)| format!("{l} · {n} of your nodes")));

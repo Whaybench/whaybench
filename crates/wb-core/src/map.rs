@@ -453,7 +453,7 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
         upsert(&mut nodes, changes, &stamp, person)?;
         resolve(&mut nodes, changes, &stamp);
     }
-    let outside = outside_links(&tx, &mut nodes, &input)?;
+    let outside = outside_links(&tx, &mut nodes, &input, latest)?;
     let mut gone = HashSet::new();
     if let Some(remove) = input.get("remove") {
         for id in remove.as_array().ok_or("remove must be an array")? {
@@ -505,9 +505,12 @@ fn numbered(conn: &rusqlite::Connection, mut input: Value) -> Result<Value> {
 
 /// Links the agent sent to a node that is not on this map, named by its memory id or node number (a node of
 /// another session): taken out of the nodes, given back as (local id, target nid, rel). A `to` found nowhere is an
-/// error, so a link is never dropped without a word.
-fn outside_links(conn: &rusqlite::Connection, nodes: &mut [Value], input: &Value) -> Result<Vec<(String, String, String)>> {
+/// error in the agent's own call (`strict`), so a link is never dropped without a word; a map brought in (a file, a
+/// map taken over) only loses that link, as before.
+fn outside_links(conn: &rusqlite::Connection, nodes: &mut [Value], input: &Value, strict: bool) -> Result<Vec<(String, String, String)>> {
     let ids: HashSet<String> = nodes.iter().filter_map(|n| n["id"].as_str().map(String::from)).collect();
+    // A node of this map that shares the memory id is not linked to: it may be the node itself.
+    let here: HashSet<String> = nodes.iter().filter_map(|n| n["nid"].as_str().map(String::from)).collect();
     let sent: HashSet<String> = ["upsert", "nodes"].iter().filter_map(|k| input.get(*k).and_then(Value::as_array)).flatten()
         .filter_map(|n| n["id"].as_str().map(String::from)).collect();
     let mut out = Vec::new();
@@ -520,9 +523,9 @@ fn outside_links(conn: &rusqlite::Connection, nodes: &mut [Value], input: &Value
             if ids.contains(to) { keep.push(l); continue; }
             let rel = l["rel"].as_str().ok_or("a link needs rel")?.to_string();
             let found: Vec<String> = if crate::db::node_get(conn, to)?.is_some() { vec![to.to_string()] } else {
-                crate::db::nodes(conn, "memid = ? AND coalesce(state, '') != 'removed'", &[to])?.iter().filter_map(|x| x["nid"].as_str().map(String::from)).collect()
+                crate::db::nodes(conn, "memid = ? AND coalesce(state, '') != 'removed'", &[to])?.iter().filter_map(|x| x["nid"].as_str().map(String::from)).filter(|n| !here.contains(n)).collect()
             };
-            if found.is_empty() { return Err(format!("links: {to} is not a node id of this map, a node number or a memory id").into()); }
+            if found.is_empty() && strict { return Err(format!("links: {to} is not a node id of this map, a node number or a memory id").into()); }
             out.extend(found.into_iter().map(|t| (id.clone(), t, rel.clone())));
         }
         *links = keep;
@@ -535,7 +538,6 @@ fn outside_links(conn: &rusqlite::Connection, nodes: &mut [Value], input: &Value
 fn link_outside(conn: &rusqlite::Connection, source: &str, sid: Option<&str>, stamp: &Value, entries: &[(String, String)], outside: &[(String, String, String)]) -> Result<()> {
     use crate::db;
     let at = stamp["at"].as_i64().unwrap_or(0);
-    let here: HashSet<&str> = entries.iter().map(|(_, nid)| nid.as_str()).collect();
     let mut events = Vec::new();
     for (id, to, rel) in outside {
         let Some((_, from)) = entries.iter().find(|(i, _)| i == id) else { continue };
@@ -553,7 +555,7 @@ fn link_outside(conn: &rusqlite::Connection, source: &str, sid: Option<&str>, st
         let mut settle = vec![to.clone()];
         let mut i = 0;
         while i < settle.len() { for c in db::children(conn, &settle[i])? { if !settle.contains(&c) { settle.push(c); } } i += 1; }
-        for nid in settle.iter().filter(|n| !here.contains(n.as_str())) {
+        for nid in &settle {
             let Some(mut n) = db::node_get(conn, nid)? else { continue };
             if !is_open(&n) { continue; }
             let prior = n.get("state").cloned().unwrap_or(Value::Null);
@@ -812,16 +814,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         command(dir.path(), "other", Some(json!({"upsert": [{"id": "p", "label": "It fails"}, {"id": "p1", "label": "Try X", "parent": "p", "state": "plan"}]})))?;
         let memid = get(dir.path(), "other", "p").unwrap()["memid"].as_str().unwrap().to_string();
-        command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "label": "Why? → Y", "kind": "conclusion", "links": [{"to": memid, "rel": "resolves"}]}]})))?;
+        // The child is shown on this map too: it is settled all the same.
+        let mut p1 = get(dir.path(), "other", "p1").unwrap();
+        p1.as_object_mut().unwrap().shift_remove("parent");
+        take_over(dir.path(), "s", &json!({"nodes": [p1]}))?;
+        command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "label": "Why? → Y", "kind": "conclusion", "memid": memid, "links": [{"to": memid, "rel": "resolves"}]}]})))?;
         assert_eq!(get(dir.path(), "other", "p").unwrap()["state"], "done");
         assert_eq!(get(dir.path(), "other", "p1").unwrap()["state"], "done", "what is open under it is settled too");
         let conn = crate::db::open(dir.path())?;
-        assert_eq!(crate::db::links_of(&conn, &nid(dir.path(), "s", "c"))?, vec![(nid(dir.path(), "other", "p"), "resolves".to_string())]);
+        assert_eq!(get(dir.path(), "s", "p1").unwrap()["state"], "done", "the same node on this map");
+        assert_eq!(crate::db::links_of(&conn, &nid(dir.path(), "s", "c"))?, vec![(nid(dir.path(), "other", "p"), "resolves".to_string())], "not to itself, though it shares the memory id");
         // A later change to the node keeps the link it cannot show.
         command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "detail": "because"}]})))?;
         assert_eq!(crate::db::links_of(&conn, &nid(dir.path(), "s", "c"))?.len(), 1);
         let err = command(dir.path(), "s", Some(json!({"upsert": [{"id": "c", "links": [{"to": "nowhere", "rel": "related"}]}]}))).unwrap_err();
         assert!(err.to_string().contains("nowhere"), "an unknown target is an error, not dropped");
+        // A map brought in only loses such a link.
+        start_from(dir.path(), "t", &json!({"nodes": [{"id": "a", "label": "A", "links": [{"to": "gone", "rel": "related"}]}]}))?;
+        assert!(get(dir.path(), "t", "a").unwrap().get("links").is_none());
         Ok(())
     }
 

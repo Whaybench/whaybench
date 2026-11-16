@@ -98,7 +98,7 @@ pub fn load(data: &Path, id: &str) -> Result<Agent> {
     let mut agent: Agent = serde_json::from_str(&text).map_err(|e| format!("agent add-on {id}: {e}"))?;
     // Files an add-on names stay inside its folder and its settings folder.
     let names = agent.merge.iter().chain(&agent.write).flat_map(|(a, b)| [a, b])
-        .chain(&agent.context).chain(agent.home.iter().flat_map(|h| h.copy.iter().chain(h.copy_keys.keys())));
+        .chain(&agent.context).chain(&agent.prompt_context).chain(agent.home.iter().flat_map(|h| h.copy.iter().chain(h.copy_keys.keys())));
     for n in names {
         if n.is_empty() || n.contains('/') || n.starts_with('.') { return Err(format!("agent add-on {id}: bad file name {n}").into()); }
     }
@@ -118,7 +118,7 @@ impl Agent {
     /// Every file the add-on brings, in a fixed order: what the person confirms before it runs.
     fn fingerprint(&self) -> Result<String> {
         use sha1::{Digest, Sha1};
-        let mut names: Vec<&String> = self.merge.values().chain(self.write.values()).chain(&self.context).collect();
+        let mut names: Vec<&String> = self.merge.values().chain(self.write.values()).chain(&self.context).chain(&self.prompt_context).collect();
         names.sort();
         let mut h = Sha1::new();
         for n in std::iter::once(&"agent.json".to_string()).chain(names) {
@@ -147,7 +147,8 @@ impl Agent {
     pub fn summary(&self) -> (String, Vec<String>, String) {
         let program = std::iter::once(self.command.as_str()).chain(self.args.iter().map(String::as_str)).collect::<Vec<_>>().join(" ");
         let files = self.merge.keys().chain(self.write.keys()).cloned().collect();
-        let told = self.context.as_ref().and_then(|c| fs::read_to_string(self.dir.join(c)).ok()).unwrap_or_default();
+        // Both texts the agent is told: at the start, and with each prompt.
+        let told = self.context.iter().chain(&self.prompt_context).filter_map(|c| fs::read_to_string(self.dir.join(c)).ok()).collect::<Vec<_>>().join("\n\n");
         (program, files, told)
     }
 
@@ -379,6 +380,11 @@ mod tests {
         assert!(codex.context("sid", true)?.unwrap().contains("Its description has the rules"), "the whole note at the start");
         let each = codex.context("sid", false)?.unwrap();
         assert!(each.starts_with("Whaybench session sid.") && each.len() < 200, "one line with each prompt: {each}");
+        // The person confirms the per-prompt text too: changing it asks again.
+        let before = codex.fingerprint()?;
+        assert!(codex.summary().2.contains("Whaybench session {session}. Conversation map"));
+        fs::write(codex.folder().join("prompt.md"), "something else")?;
+        assert_ne!(codex.fingerprint()?, before);
         Ok(())
     }
 

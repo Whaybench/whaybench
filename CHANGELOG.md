@@ -20,7 +20,7 @@ names another step.
 - The conversation map tool tells the agent what its own call left against the record rules: a question closed
   without its answer, a conclusion without a reason, a "question → answer" filed as a task, options left open under a
   closed question, a topic or task with nothing open under it. A clean call still answers only "Map updated."; what
-  the person closed, dropped or approved is never questioned. The tool's text also asks to settle the question node
+  the person closed, dropped or approved is never questioned: only what the call itself closed, named or relabelled. The tool's text also asks to settle the question node
   itself, to read an approval as a decision, and to leave the person's decisions as they are.
 
 ### Changed
@@ -30,12 +30,14 @@ names another step.
   conversation's nodes on is one line per session instead of one per node. The tool's input no longer repeats the
   node fields for `nodes` nor lists `inherit`, and the note on asking other conversations is shorter.
 - An agent add-on can name a one-line `prompt_context` file for each prompt, its `context` then going only at session
-  start; Codex now gets its whole note once and one line with each prompt.
+  start; the person confirms both before the add-on runs. Codex now gets its whole note once and one line with each
+  prompt.
 
 ### Fixed
-- Conversation map: a `resolves` link to another conversation's node (by its memory id) now settles that node; a link
-  to a node that exists nowhere is refused instead of dropped without a word. Links an agent sends are added to the
-  node's (`links: null` clears them), so adding one no longer erases the others. The map-filling worker can no longer
+- Conversation map: a `resolves` link to another conversation's node (by its memory id) now settles that node and what is
+  open under it; in the agent's own call a link to a node that exists nowhere is refused instead of dropped without a
+  word. Links an agent sends are added to the
+  node's (`links: null` clears its links on this map), so adding one no longer erases the others. The map-filling worker can no longer
   settle nodes or empty a node's links. A start or prompt whose hook fails still gives the agent the map note.
   The tool's text now tells every agent, Codex too, to turn a settled question into its conclusion.
 - A restart with several Claude tabs no longer hides a conversation. Claude Code could note one session as carried on
