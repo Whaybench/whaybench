@@ -288,10 +288,12 @@ impl Fill<'_> {
 /// revoked login, or a new one from a sign-in there since: it is never removed, and linked again only once it is newer
 /// than the sign-out. A file written here in the meantime (signing in here) is moved to the person's folder and linked.
 fn link_shared(source: &Path, home: &Path, file: &str) -> Result<()> {
-    let (here, there) = (home.join(file), source.join(file));
     fs::DirBuilder::new().recursive(true).mode(0o700).create(source)?;
+    // Whole paths: a link is read from its own folder, so a relative CODEX_HOME would point elsewhere.
+    let source = fs::canonicalize(source)?;
     // The person's folder is this one: the file is already theirs.
-    if fs::canonicalize(source)? == fs::canonicalize(home)? { return Ok(()); }
+    if source == fs::canonicalize(home)? { return Ok(()); }
+    let (here, there) = (home.join(file), source.join(file));
     let (mark, out) = (home.join(format!(".{file}.linked")), home.join(format!(".{file}.signed-out")));
     match fs::symlink_metadata(&here) {
         Ok(m) if m.file_type().is_symlink() => {
@@ -311,15 +313,20 @@ fn link_shared(source: &Path, home: &Path, file: &str) -> Result<()> {
         }
         Err(e) => return Err(e.into()),
     }
+    // The mark first: a link without it would make a later sign-out here go unnoticed.
+    create_private(&mark, b"")?;
     std::os::unix::fs::symlink(&there, &here)?;
     if let Err(e) = fs::remove_file(&out) && e.kind() != io::ErrorKind::NotFound { return Err(e.into()); }
-    create_private(&mark, b"")
+    Ok(())
 }
 
-/// A rename, or a copy where the two are on different file systems.
+/// A rename, or where the two are on different file systems a copy beside `to` renamed over it: a copy cut short (a
+/// full disk) never takes the place of a whole file.
 fn move_file(from: &Path, to: &Path) -> Result<()> {
     if fs::rename(from, to).is_ok() { return Ok(()); }
-    fs::copy(from, to)?;
+    let part = to.with_file_name(format!(".{}.part", to.file_name().and_then(|n| n.to_str()).unwrap_or("file")));
+    fs::copy(from, &part)?;
+    fs::rename(&part, to)?;
     fs::remove_file(from)?;
     Ok(())
 }
@@ -417,6 +424,21 @@ mod tests {
         codex.prepare_with(&data, &exe, Some(source.clone()))?;
         assert_eq!(fs::read_link(home.join("auth.json"))?, source.join("auth.json"));
         assert_eq!(fs::read_to_string(source.join("auth.json"))?, "signed-in-here");
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_move_keeps_the_source() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (from, to) = (dir.path().join("a"), dir.path().join("b/auth.json"));
+        fs::write(&from, "login")?;
+        // The folder of `to` is missing, so the rename and then the copy fail: the source stays.
+        assert!(move_file(&from, &to).is_err());
+        assert_eq!(fs::read_to_string(&from)?, "login");
+        fs::create_dir_all(dir.path().join("b"))?;
+        move_file(&from, &to)?;
+        assert_eq!(fs::read_to_string(&to)?, "login");
+        assert!(!dir.path().join("b/.auth.json.part").exists() && !from.exists());
         Ok(())
     }
 
