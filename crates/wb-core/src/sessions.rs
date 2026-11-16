@@ -82,6 +82,23 @@ fn continued_in_text(text: &str) -> Option<String> {
     (id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).then(|| id.to_string())
 }
 
+/// Whether the transcript at `path` carries on `from`'s conversation: Claude Code copies the messages a session goes
+/// on from, each with its uuid, so the two share some. A session that only started near it in time shares none.
+pub fn shares_messages(d: &Data, from: &str, path: &Path) -> bool {
+    let (Some(old), Ok(new)) = (transcript_of(d, from).and_then(|p| fs::read_to_string(p).ok()), fs::read_to_string(path)) else { return false };
+    share_uuids(&old, &new)
+}
+
+/// Whether two transcripts hold a message of the same uuid.
+fn share_uuids(old: &str, new: &str) -> bool {
+    fn uuids(text: &str) -> std::collections::HashSet<&str> {
+        const KEY: &str = "\"uuid\":\"";
+        text.match_indices(KEY).filter_map(|(i, _)| text.get(i + KEY.len()..i + KEY.len() + 36)).collect()
+    }
+    let old = uuids(old);
+    uuids(new).iter().any(|u| old.contains(u))
+}
+
 fn transcript_of(d: &Data, id: &str) -> Option<PathBuf> {
     let cwd = record_of(d, id)?.get("cwd")?.as_str()?.to_string();
     let home = std::env::var("HOME").ok()?;
@@ -395,6 +412,17 @@ pub fn target(d: &Data) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_carries_on_another_only_when_they_share_messages() {
+        let line = |u: &str| format!("{{\"type\":\"user\",\"uuid\":\"{u}\",\"sessionId\":\"x\"}}\n");
+        // 36 characters, as a uuid is; not shaped like one, so no real number is mistaken for it.
+        let (a, b, c) = (&"ma".repeat(18), &"mb".repeat(18), &"mc".repeat(18));
+        let old = line(a) + &line(b);
+        assert!(share_uuids(&old, &(line(b) + &line(c))), "a resumed or backgrounded copy keeps the messages it goes on from");
+        assert!(!share_uuids(&old, &line(c)), "another conversation resumed in the same minute shares none");
+        assert!(!share_uuids("", &line(c)));
+    }
     pub(crate) fn data(name: &str) -> Data {
         let d = std::env::temp_dir().join(format!("wb-s-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);

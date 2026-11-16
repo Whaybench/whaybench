@@ -452,6 +452,10 @@ fn adopt_fork(data: &Path, sid: &str, a: &Agent, event: &Value) -> Option<String
     if from == sid || now_ms().saturating_sub(note["at"].as_u64().unwrap_or(0)) > 60_000 || !near(note["cwd"].as_str().unwrap_or(""), cwd) { return None; }
     let talked = event["transcript_path"].as_str().and_then(|p| fs::metadata(p).ok()).is_some_and(|m| m.len() > 0);
     if !talked { return None; }
+    // When Whaybench restarts, every tab closes (each noting itself) and every conversation is resumed within the
+    // minute, in the same folder: only the one that shares messages with the noted session carries it on.
+    let transcript = Path::new(event["transcript_path"].as_str().unwrap_or(""));
+    if !crate::sessions::shares_messages(&crate::paths::Data::new(data.to_path_buf()), &from, transcript) { return None; }
     let _ = write_json(&fork_note(data), &json!({}));
     crate::map_tool::call(data, sid, &json!({"inherit": from})).ok()?;
     crate::session_record::carry_from(data, sid, &from).ok()?;
