@@ -146,6 +146,15 @@ pub fn follow_theme(d: &Data) {
             // GTK's own theme, never the desktop's: a desktop GTK theme (Breeze on KDE) styles menus its own way, and a
             // menu now and then came out in its colours with a frame around it.
             if s.gtk_theme_name().as_deref() != Some("Default") { s.set_gtk_theme_name(Some("Default")); }
+            // Glyphs fitted to the pixel grid: left to GTK, small Hangul lost the bottom stroke of a final consonant
+            // (rieul at 10 pt) while a round one (ieung) kept it. GTK 4.16 and later: set by name.
+            const RENDERING: &str = "gtk-font-rendering";
+            if let Some(class) = s.find_property(RENDERING).and_then(|p| glib::EnumClass::with_type(p.value_type()))
+                && glib::EnumValue::from_value(&s.property_value(RENDERING)).map(|(_, v)| v.nick()) != Some("manual")
+                && let Some(v) = class.to_value_by_nick("manual") { s.set_property_from_value(RENDERING, &v); }
+            if s.gtk_xft_antialias() != 1 { s.set_gtk_xft_antialias(1); }
+            if s.gtk_xft_hinting() != 1 { s.set_gtk_xft_hinting(1); }
+            if s.gtk_xft_hintstyle().as_deref() != Some("hintslight") { s.set_gtk_xft_hintstyle(Some("hintslight")); }
         }
         let css = style_sheet(&t);
         if *shown.borrow() != css {

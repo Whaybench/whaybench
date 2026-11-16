@@ -8,6 +8,8 @@ names another step.
 ## [Unreleased]
 
 ### Fixed
+- Small Hangul in the panels (the menu bar at 10 pt, for one) lost the flat bottom stroke of a final consonant (rieul):
+  the panels now fit glyphs to the pixel grid (slight hinting) instead of leaving it to GTK.
 - A menu opened again quickly (clicking a submenu such as Theme ▸ closes and reopens it) was not noted as open: a
   press outside left it on the screen, and a press on one of its items closed the menus before the item was
   chosen, so the choice did nothing until tried again.
