@@ -85,6 +85,10 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         // How to ask another conversation, told once: an agent knows of it only from here.
         if a.inside && name == "SessionStart" { parts.push(i18n::ai("sessions-note").to_string()); }
         if let Some(c) = carried { parts.push(c); }
+        // After a compaction the agent no longer has the ids it gave: its open nodes and where it stands, once.
+        if name == "SessionStart" && event["source"] == "compact" && let Some(m) = map::view(data, sid).ok().as_ref().and_then(open_part) {
+            parts.push(i18n::ai_f("map-after-compact", &[("map", m)]));
+        }
         // The relay saw /rewind typed: the map did not roll back with the conversation.
         if name == "UserPromptSubmit" && fs::remove_file(state_file(data, "rewound", sid)).is_ok() { parts.push(i18n::ai("rewind-note").to_string()); }
         // The whole memory list when the conversation starts, resumes or was compacted; on a prompt, what changed.
@@ -100,6 +104,23 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         return Ok(context_out(name, &parts.join("\n\n")));
     }
     Ok(json!({}))
+}
+
+/// The open nodes of a map with what is above them, and the node it is on, as the tool's `show` text; None when
+/// nothing is open. shortcut: cut at 6000 characters, about 1500 tokens; page it if maps grow that large open.
+fn open_part(m: &Value) -> Option<String> {
+    let nodes = m["nodes"].as_array()?;
+    let parent = |id: &str| nodes.iter().find(|n| n["id"] == id).and_then(|n| n["parent"].as_str()).map(String::from);
+    let mut keep: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let starts = nodes.iter().filter(|n| map::is_open(n) || n["id"] == m["current"]).filter_map(|n| n["id"].as_str());
+    for id in starts {
+        let mut at = Some(id.to_string());
+        while let Some(i) = at { if !keep.insert(i.clone()) { break; } at = parent(&i); }
+    }
+    if !nodes.iter().any(|n| map::is_open(n) && n["state"] != "removed") { return None; }
+    let part = json!({"nodes": nodes.iter().filter(|n| n["id"].as_str().is_some_and(|i| keep.contains(i))).collect::<Vec<_>>(), "current": m["current"]});
+    let text = crate::map_tool::as_text(&part);
+    Some(if text.chars().count() > 6000 { text.chars().take(6000).collect::<String>() + "\n…" } else { text })
 }
 
 /// What a start or a prompt still gives the agent when its hook failed: the map note, so the turn's guidance is not lost.
@@ -488,6 +509,18 @@ mod tests {
         let mut e = json!({"session_id": sid, "hook_event_name": name, "cwd": "/w"});
         for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); }
         e
+    }
+
+    #[test]
+    fn a_compacted_conversation_gets_its_open_nodes_back_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
+        map::command(dir.path(), "s", Some(json!({"upsert": [{"id": "t", "label": "Topic"}, {"id": "q", "label": "Which?", "parent": "t"},
+            {"id": "old", "label": "Settled", "parent": "t", "state": "done"}], "current": "q"}))).unwrap();
+        let ctx = |source: &str| run(dir.path(), &a, &ev("s", "SessionStart", json!({"source": source}))).unwrap()["hookSpecificOutput"]["additionalContext"].as_str().unwrap().to_string();
+        let after = ctx("compact");
+        assert!(after.contains("◇ Topic [t]") && after.contains("● Which? [q]") && !after.contains("Settled"), "{after}");
+        assert!(!ctx("resume").contains("Which? [q]"), "a resumed conversation still has its ids");
     }
 
     #[test]

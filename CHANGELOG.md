@@ -8,6 +8,8 @@ names another step.
 ## [Unreleased]
 
 ### Added
+- After Claude Code compacts a conversation, the agent gets this map's open nodes (with what is above them) and
+  where it stands once, so it keeps using the ids it gave instead of adding the same nodes again.
 - The conversation map tool tells the agent what its own call left against the record rules: a question closed
   without its answer, a conclusion without a reason, a "question → answer" filed as a task, options left open under a
   closed question, a topic or task with nothing open under it. A clean call still answers only "Map updated."; what
