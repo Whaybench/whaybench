@@ -7,6 +7,11 @@ names another step.
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-16
+
+The conversation map keeps a truer record with less text: the map tool tells the agent its record slips and like
+nodes of other conversations, memory ids get short numbers, and less rides on every prompt.
+
 ### Added
 - Memory ids have short numbers (`#12`), given once in the order the ids came and never again. The memory list,
   change lines and hints show them, which takes about a fifth off the list a conversation starts with; `memid`, a
