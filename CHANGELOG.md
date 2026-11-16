@@ -11,7 +11,7 @@ names another step.
 - Memory ids have short numbers (`#12`), given once in the order the ids came and never again. The memory list,
   change lines and hints show them, which takes about a fifth off the list a conversation starts with; `memid`, a
   link's `to` and `whaybench memory show` take a number or the full id, and a call that uses a number is told the
-  label it stands for, so one wrong digit is seen.
+  label it stands for, so one wrong digit is seen; ids an older program wrote get their numbers when a conversation starts.
 - When an agent adds a node without a memory id and another conversation has a node with a much like label, the map
   tool's reply names it (at most 3 a call), so the agent can give the same memory id if it clearly is the same
   problem. Nothing is linked by the program.

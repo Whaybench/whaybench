@@ -89,6 +89,8 @@ pub fn list(data: &Path, sid: &str, limit: usize) -> Vec<String> {
         let mut seen: HashSet<String> = own.iter().filter(|n| !is_open(n)).filter_map(|n| n["nid"].as_str().map(String::from)).collect();
         let mut out = Vec::new();
         let cap = limit + own.len();
+        // Best effort: a store read only (an agent's sandbox) keeps the long ids of those.
+        let _ = db::number_missing(&conn);
         let aliases = db::aliases(&conn).unwrap_or_default();
         let mut push = |n: &Value, out: &mut Vec<String>| if out.len() < limit && n["state"] != "removed" && seen.insert(n["nid"].as_str().unwrap_or("").to_string()) { out.push(line(n, &aliases)); };
         for n in own.iter().filter(|n| is_open(n)) { push(n, &mut out); }

@@ -117,6 +117,12 @@ fn open_once(data: &Path) -> Result<Connection> {
 const ALIASES: &str = "CREATE TABLE memids (num INTEGER PRIMARY KEY AUTOINCREMENT, memid TEXT NOT NULL UNIQUE);
 INSERT INTO memids (memid) SELECT memid FROM nodes GROUP BY memid ORDER BY min(rowid);";
 
+/// Numbers for memory ids an older program wrote without one, in the order they came. Run when a conversation starts.
+pub fn number_missing(conn: &Connection) -> Result<()> {
+    conn.execute("INSERT OR IGNORE INTO memids (memid) SELECT memid FROM nodes WHERE memid NOT IN (SELECT memid FROM memids) GROUP BY memid ORDER BY min(rowid)", [])?;
+    Ok(())
+}
+
 /// Every memory id's number.
 pub fn aliases(conn: &Connection) -> Result<HashMap<String, i64>> {
     let mut st = conn.prepare("SELECT memid, num FROM memids")?;
@@ -297,8 +303,13 @@ mod tests {
         conn.execute_batch("DROP TABLE memids")?;
         for (nid, memid) in [("n1", "mb"), ("n2", "ma"), ("n3", "mb")] { conn.execute("INSERT INTO nodes (nid, memid, label) VALUES (?, ?, 'x')", [nid, memid])?; }
         drop(conn);
-        let a = aliases(&open(dir.path())?)?;
+        let conn = open(dir.path())?;
+        let a = aliases(&conn)?;
         assert_eq!((a["mb"], a["ma"], a.len()), (1, 2, 2), "first come, first numbered, one number per id");
+        // An older program adds a node without its number: the next start gives it the next one.
+        conn.execute("INSERT INTO nodes (nid, memid, label) VALUES ('n4', 'mc', 'x')", [])?;
+        number_missing(&conn)?;
+        assert_eq!(aliases(&conn)?["mc"], 3);
         Ok(())
     }
 
