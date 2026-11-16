@@ -17,7 +17,7 @@ side by side in one window.</p>
 1. Download **[WhaybenchSetup.exe](https://github.com/Whaybench/whaybench/releases/latest/download/WhaybenchSetup.exe)**.
 2. Run it. Windows warns about an unknown app: click **More info**, then **Run anyway**.
 3. Wait while it installs everything. Windows may restart once; the setup goes on by itself.
-4. Start **Whaybench** from the Start menu and sign in to Claude in the browser that opens.
+4. Start **Whaybench** from the Start menu and sign in to Claude in the browser that opens in the middle of its window.
 
 Needs Windows 11, or Windows 10 21H2 or newer (64-bit). The setup puts a Linux of its own in WSL with Claude Code and
 Codex CLI; your other WSL systems are not touched. If it stops, run it again and it goes on where it stopped. If it

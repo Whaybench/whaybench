@@ -11,6 +11,11 @@ names another step.
 - A Windows install help page, `docs/windows.md`: turning on virtualization in the BIOS and the WSL features, and
   what the common WSL error codes mean. Both READMEs link to it.
 
+### Changed
+- The first layout puts the view panels (the browser with them) in the middle, full height: the map, sessions and
+  input on the left, the conversation and answer on the right. A sign-in page now opens where the eye already is.
+  Panels -> Reset layout gives it too.
+
 ### Fixed
 - `whaybench ctl session type` and `session end` refused a conversation that had carried on under a new number (after
   a restart, for one) with "No conversation tab": they follow the move now, as `session show` and `session wait` do.

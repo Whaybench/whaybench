@@ -551,25 +551,25 @@ impl Surface {
         }
     }
 
-    /// Where a product panel goes the first time: left 18% map above sessions, middle 52% conversation,
-    /// answer and input, right 30% the view group.
+    /// Where a product panel goes the first time: left 28% map above sessions above input, middle 36% the view group
+    /// (the browser too, so a sign-in page opens where the eye already is), right the conversation above the answer.
     pub fn first_place(&self, slot: &str) -> Option<Rect> {
         let Metrics { outer, gap, .. } = self.m;
         let (w, h) = (self.w - 2.0 * outer, self.h - 2.0 * outer);
-        let left = (w * 0.18).round();
-        let right = (w * 0.30).round();
-        let middle = w - left - right - 2.0 * gap;
+        let left = (w * 0.28).round();
+        let middle = (w * 0.36).round();
+        let right = w - left - middle - 2.0 * gap;
         let (x0, x1, x2) = (outer, outer + left + gap, outer + left + gap + middle + gap);
-        let map_h = ((h - gap) * 0.64).round();
-        let input_h = 80.0;
-        let conversation = ((h - 2.0 * gap - input_h) * 0.68).round();
+        let input_h = (h * 0.17).round();
+        let map_h = ((h - input_h - 2.0 * gap) * 0.64).round();
+        let conversation = ((h - gap) * 0.40).round();
         Some(match slot {
             "map" => Rect::new(x0, outer, left, map_h),
-            "sessions" => Rect::new(x0, outer + map_h + gap, left, h - map_h - gap),
-            "term" => Rect::new(x1, outer, middle, conversation),
-            "answer" => Rect::new(x1, outer + conversation + gap, middle, h - conversation - input_h - 2.0 * gap),
-            "input" => Rect::new(x1, outer + h - input_h, middle, input_h),
-            "view" => Rect::new(x2, outer, right, h),
+            "sessions" => Rect::new(x0, outer + map_h + gap, left, h - input_h - map_h - 2.0 * gap),
+            "input" => Rect::new(x0, outer + h - input_h, left, input_h),
+            "view" => Rect::new(x1, outer, middle, h),
+            "term" => Rect::new(x2, outer, right, conversation),
+            "answer" => Rect::new(x2, outer + conversation + gap, right, h - conversation - gap),
             _ => return None,
         })
     }
@@ -963,14 +963,15 @@ mod tests {
         s.m = Metrics { outer: 14.0, gap: 10.0, pad: 5.0 };
         let r = |n: &str| s.first_place(n).unwrap();
         assert_eq!(r("map").x, 14.0);
-        assert_eq!(r("view").right(), 1486.0);
-        assert_eq!(r("term").x, r("map").right() + 10.0);
-        assert_eq!(r("view").x, r("term").right() + 10.0);
+        assert_eq!(r("term").right(), 1486.0);
+        assert_eq!(r("view").x, r("map").right() + 10.0);
+        assert_eq!(r("term").x, r("view").right() + 10.0);
+        assert_eq!((r("view").y, r("view").bottom()), (14.0, 886.0), "the view, where the browser opens, is the whole middle");
         assert_eq!(r("sessions").y, r("map").bottom() + 10.0);
-        assert_eq!(r("sessions").bottom(), 886.0);
-        assert_eq!(r("answer").y, r("term").bottom() + 10.0);
-        assert_eq!(r("input").y, r("answer").bottom() + 10.0);
+        assert_eq!(r("input").y, r("sessions").bottom() + 10.0);
         assert_eq!(r("input").bottom(), 886.0);
+        assert_eq!(r("answer").y, r("term").bottom() + 10.0);
+        assert_eq!(r("answer").bottom(), 886.0);
         assert!(s.first_place("other").is_none());
     }
 
