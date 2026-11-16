@@ -117,8 +117,13 @@ fn raster(fonts: &[FontVec], size: f32, text: &str, colour: [u8; 3]) -> Option<T
     if w <= 2 { return None; }
     let h = (size * 1.4).ceil() as i32;
     let mut bytes = vec![0u8; (w * h * 4) as usize];
+    // The letters' middle on the picture's middle: a capital's height above the baseline, as a title bar centres its
+    // text by eye. The font's ascent and descent would centre its whole line box, and CJK fonts give that box more
+    // room above, which set the text low.
     let first = fonts[0].as_scaled(PxScale::from(size));
-    let base = ((h as f32 + first.ascent() + first.descent()) / 2.0).round();
+    let cap = fonts[0].outline_glyph(first.glyph_id('H').with_scale_and_position(PxScale::from(size), point(0.0, 0.0)))
+        .map_or(first.ascent() * 0.7, |g| -g.px_bounds().min.y);
+    let base = ((h as f32 + cap) / 2.0).round();
     let (mut x, mut last) = (1.0, None);
     for c in text.chars() {
         let i = pick(fonts, c);

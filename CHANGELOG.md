@@ -11,6 +11,7 @@ names another step.
 - A restart with several Claude tabs no longer hides a conversation. Claude Code could note one session as carried on
   in another conversation's background number; Whaybench now ignores that note when the number already holds another
   conversation, or when the conversation went on under the old number after it.
+- Title bar text sat low with CJK fonts (their line box has more room above): it is now centred by a capital's height.
 
 ## [0.8.3] - 2026-11-16
 
