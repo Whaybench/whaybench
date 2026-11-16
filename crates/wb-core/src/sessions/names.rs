@@ -7,7 +7,13 @@ fn short(label: &str, n: usize) -> String {
     if head.chars().count() <= n { head.to_string() } else { format!("{}…", head.chars().take(n - 1).collect::<String>()) }
 }
 
-/// (main topic, what it is on now): the top branch with the most nodes, and the step under it holding the current one.
+/// How many of the latest nodes choose the main topic: the name follows where the work is now, and one or two nodes
+/// on a side topic do not move it.
+const RECENT: usize = 20;
+
+/// (main topic, what it is on now): the top branch holding the most of the latest `RECENT` nodes (a map keeps nodes in
+/// the order they came), and the step under it holding the current one. The whole map's biggest branch would keep the
+/// name of whatever grew first.
 pub fn map_topics(map: &Value) -> (String, String) {
     let nodes = map.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
     if nodes.is_empty() { return Default::default(); }
@@ -24,7 +30,7 @@ pub fn map_topics(map: &Value) -> (String, String) {
         sid(x)
     };
     let mut counts: Vec<(String, usize)> = Vec::new();
-    for n in &nodes {
+    for n in &nodes[nodes.len().saturating_sub(RECENT)..] {
         let t = top_of(n);
         match counts.iter_mut().find(|c| c.0 == t) { Some(c) => c.1 += 1, None => counts.push((t, 1)) }
     }
@@ -129,6 +135,12 @@ mod tests {
         let m = serde_json::json!({"current":"c","nodes":[{"id":"a","label":"small branch"},{"id":"b","label":"big topic → conclusion"},{"id":"c","parent":"b","label":"first step"},{"id":"d","parent":"c","label":"detail"}]});
         assert_eq!(map_topics(&m), ("big topic".to_string(), "first step".to_string()));
         assert_eq!(map_topics(&serde_json::json!({"nodes":[]})), Default::default());
+        // An early topic grown large gives the name up to the one the latest nodes are in.
+        let mut nodes = vec![serde_json::json!({"id":"old","label":"old topic"})];
+        nodes.extend((0..40).map(|i| serde_json::json!({"id":format!("o{i}"),"parent":"old","label":"o"})));
+        nodes.push(serde_json::json!({"id":"new","label":"new topic"}));
+        nodes.extend((0..15).map(|i| serde_json::json!({"id":format!("n{i}"),"parent":"new","label":"n"})));
+        assert_eq!(map_topics(&serde_json::json!({"current":"n3","nodes":nodes})).0, "new topic");
     }
     #[test]
     fn the_same_topic_in_two_sessions_is_told_apart() {
