@@ -908,7 +908,8 @@ impl App {
                     let w = g.w as f64 + 2.0 * pad;
                     // A settings window that changes width keeps its middle where it was: placed in the middle of the
                     // screen, it stays there at the size its content gives it, and where the person moved it, there.
-                    if p.modal && (w - p.rect.w).abs() > 0.5 { p.rect.x = (p.rect.x + (p.rect.w - w) / 2.0).max(0.0); }
+                    // Its target moves too: the panel glides to its target each frame and would go back.
+                    if p.modal && (w - p.rect.w).abs() > 0.5 { p.rect.x = recentred(p.rect.x, p.rect.w, w, self.surface.w); p.tx = p.rect.x; }
                     p.rect.w = w;
                     p.rect.h = g.h as f64 + layout::title() + pad;
                 }
@@ -1055,8 +1056,19 @@ pub fn out_edge(w: f64, h: f64, band: f64, x: f64, y: f64) -> Option<Side> {
         .filter(|(_, d)| *d <= band).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(s, _)| s)
 }
 
+/// Where a settings window that was `was` wide at `x` goes at `w` wide: its middle kept, inside the screen when it fits.
+fn recentred(x: f64, was: f64, w: f64, screen: f64) -> f64 { (x + (was - w) / 2.0).min(screen - w).max(0.0) }
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_settings_window_that_grows_stays_on_the_screen() {
+        use super::recentred;
+        assert_eq!(recentred(580.0, 760.0, 1000.0, 1920.0), 460.0, "its middle kept");
+        assert_eq!(recentred(1500.0, 400.0, 800.0, 1920.0), 1120.0, "moved by the person near the edge: pulled back in");
+        assert_eq!(recentred(100.0, 760.0, 2400.0, 1920.0), 0.0, "wider than the screen: from its left edge");
+    }
+
     #[test]
     fn the_window_buttons_and_edges_meet_without_a_gap() {
         use super::{Control, control_in, edge_in};

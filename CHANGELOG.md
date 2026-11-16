@@ -7,6 +7,9 @@ names another step.
 
 ## [Unreleased]
 
+### Fixed
+- A settings window that grew wider ran past the right edge of the screen: it is kept centred and on the screen.
+
 ## [0.8.4] - 2026-11-16
 
 The conversation map keeps a truer record with less text: the map tool tells the agent its record slips and like
