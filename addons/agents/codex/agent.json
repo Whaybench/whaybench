@@ -13,6 +13,7 @@
   "merge": { "config.toml": "config.toml" },
   "write": { "hooks.json": "hooks.json" },
   "context": "context.md",
+  "prompt_context": "prompt.md",
   "trust": "/hooks",
   "usage": "codex-rollout"
 }

@@ -6,7 +6,8 @@ An agent is an add-on: one folder, one coding agent that runs in a conversation 
 addons/agents/<id>/
   agent.json      required
   <templates>     settings files the agent reads, named in agent.json
-  context.md      what the agent is told at the start and with each prompt
+  context.md      what the agent is told at the start
+  prompt.md       what it is told with each prompt instead (optional)
 ```
 
 Each agent is a line in the session menu, `New conversation · <name>`. A session opens again with the agent it was
@@ -32,10 +33,11 @@ An agent without these cannot keep the map or the session list.
 | `merge` | no | `{ "settings file": "template" }`: the template's keys are written into the settings file in `home`; the person's other keys stay. TOML only |
 | `write` | no | `{ "settings file": "template" }`: the template becomes the whole settings file in `home`, each start. JSON or TOML |
 | `context` | no | A text file given to the agent at session start and with each prompt. English: only the agent reads it |
+| `prompt_context` | no | A shorter text file given with each prompt in place of `context`, which then goes only at session start. Text riding on every prompt stays in the conversation, so keep it to a line |
 | `trust` | no | The command inside the agent where the person trusts the hooks; Whaybench says so when its tab opens |
 | `usage` | no | Where the agent's context and plan usage are read, for the notifications panel. `codex-rollout`: the last `token_count` line of Codex's session file, read when a turn ends. Without it the panel shows no usage for the agent's sessions |
 
-In templates, these are filled in text values: `{exe}` the Whaybench program, `{data}` the data folder, `{hook}` the hook command (`'<exe>' hook <id>`). In `context.md`: `{session}`.
+In templates, these are filled in text values: `{exe}` the Whaybench program, `{data}` the data folder, `{hook}` the hook command (`'<exe>' hook <id>`). In `context.md` and `prompt.md`: `{session}`.
 
 The settings folder is readable only by the person (700, files 600).
 

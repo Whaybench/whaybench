@@ -41,6 +41,8 @@ pub struct Agent {
     #[serde(default)]
     write: BTreeMap<String, String>,
     context: Option<String>,
+    /// What each prompt gets instead of `context`; without it, `context` goes with every prompt too.
+    prompt_context: Option<String>,
     pub trust: Option<String>,
     pub usage: Option<String>,
 }
@@ -167,9 +169,9 @@ impl Agent {
         (!self.prompt.is_empty()).then(|| self.prompt.iter().map(|a| a.replace("{prompt}", text)).collect())
     }
 
-    /// What the agent is told at session start and with each prompt.
-    pub fn context(&self, session: &str) -> Result<Option<String>> {
-        let Some(file) = &self.context else { return Ok(None) };
+    /// What the agent is told at session start (`start`) and with each prompt.
+    pub fn context(&self, session: &str, start: bool) -> Result<Option<String>> {
+        let Some(file) = (if start { None } else { self.prompt_context.as_ref() }).or(self.context.as_ref()) else { return Ok(None) };
         Ok(Some(fs::read_to_string(self.dir.join(file))?.trim_end().replace("{session}", session)))
     }
 
@@ -374,7 +376,9 @@ mod tests {
         assert_eq!(a, ["--no-daemon", "--sandbox", "workspace-write", "resume", "sid"]);
         assert_eq!(codex.args(&[]).len(), 3);
         assert!(!a.iter().any(|s| s.contains("bypass")));
-        assert!(codex.context("sid")?.unwrap().contains("Whaybench session sid."));
+        assert!(codex.context("sid", true)?.unwrap().contains("Its description has the rules"), "the whole note at the start");
+        let each = codex.context("sid", false)?.unwrap();
+        assert!(each.starts_with("Whaybench session sid.") && each.len() < 200, "one line with each prompt: {each}");
         Ok(())
     }
 

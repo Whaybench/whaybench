@@ -76,7 +76,7 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     if name == "SessionStart" || name == "UserPromptSubmit" {
         let mut parts = Vec::new();
         if a.name != crate::agents::CLAUDE {
-            parts.extend(crate::agents::load(data, a.name)?.context(sid)?);
+            parts.extend(crate::agents::load(data, a.name)?.context(sid, name == "SessionStart")?);
         } else {
             // The whole note when the conversation starts, resumes or was compacted; on a prompt, one line: the rules are in the tool's text.
             parts.push(i18n::ai(if name == "SessionStart" { "map-note" } else { "map-short" }).to_string());

@@ -25,6 +25,8 @@ names another step.
   4 characters and only the new label, state or kind (other fields by name), and another map taking this
   conversation's nodes on is one line per session instead of one per node. The tool's input no longer repeats the
   node fields for `nodes` nor lists `inherit`, and the note on asking other conversations is shorter.
+- An agent add-on can name a one-line `prompt_context` file for each prompt, its `context` then going only at session
+  start; Codex now gets its whole note once and one line with each prompt.
 
 ### Fixed
 - Conversation map: a `resolves` link to another conversation's node (by its memory id) now settles that node; a link

@@ -56,7 +56,6 @@ fn first_question_two_turns_and_resume_keep_the_map_visible() {
     prompt["prompt"] = json!("check the map connection");
     let context = run(data, &["hook", "codex"], Some(&prompt));
     let text = context["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    assert!(text.contains("automatically from the first question"));
     assert!(text.contains("context_map"), "the map is kept with the MCP tool");
 
     let first = json!({"upsert":[{"id":"map", "label":"map connection", "isOpen":true, "state":"doing"}], "current":"map"});
@@ -123,7 +122,9 @@ fn startup_and_every_prompt_provide_localized_map_instructions() {
             let output: Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(output["hookSpecificOutput"]["hookEventName"], name);
             let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-            assert!(context.contains("automatically from the first question"), "the agent's text is English in every language");
+            // The whole note at the start, one line with each prompt; English in every language.
+            let english = if name == "SessionStart" { "automatically from the first question" } else { "call context_map in this turn" };
+            assert!(context.contains(english), "{context}");
             assert!(!context.contains("isOpen"));
             assert!(context.contains("context_map"));
             assert!(!context.contains("{ $") && !context.contains("{session}"));

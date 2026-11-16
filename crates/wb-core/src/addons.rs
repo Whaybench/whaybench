@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::{log as record, paths::Data};
 
 /// The add-ons the program brings: where, file, content.
-const BUNDLED: [(&str, &str, &str); 22] = [
+const BUNDLED: [(&str, &str, &str); 23] = [
     ("languages/ko", "messages.ftl", include_str!("../../../addons/languages/ko/messages.ftl")),
     ("languages/ko", "language.json", include_str!("../../../addons/languages/ko/language.json")),
     ("map-styles/ibis", "style.json", include_str!("../../../addons/map-styles/ibis/style.json")),
@@ -30,6 +30,7 @@ const BUNDLED: [(&str, &str, &str); 22] = [
     ("agents/codex", "config.toml", include_str!("../../../addons/agents/codex/config.toml")),
     ("agents/codex", "hooks.json", include_str!("../../../addons/agents/codex/hooks.json")),
     ("agents/codex", "context.md", include_str!("../../../addons/agents/codex/context.md")),
+    ("agents/codex", "prompt.md", include_str!("../../../addons/agents/codex/prompt.md")),
 ];
 /// What the people who make add-ons read; written every time, it is not an add-on.
 const GUIDES: [(&str, &str); 5] = [
