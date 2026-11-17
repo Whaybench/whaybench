@@ -202,7 +202,7 @@ pub fn adopt(d: &Data, old: &str, new: &str) {
     if old == new { return; }
     let Some(mut from) = record_of(d, old) else { return };
     let mut to = record_of(d, new).unwrap_or_else(|| serde_json::json!({"id": new}));
-    for key in ["cwd", "firstPrompt", "lastPrompt", "tab"] {
+    for key in ["cwd", "firstPrompt", "lastPrompt", "tab", "titleSent", "titleByPerson"] {
         if to.get(key).and_then(Value::as_str).is_none_or(str::is_empty)
             && let Some(v) = from.get(key) { to[key] = v.clone(); }
     }

@@ -101,6 +101,8 @@ fn titles_kept(d: &Data) -> std::collections::HashMap<String, String> {
 /// The session's name: its main topic from its map; without a map, the name Claude Code gives it
 /// (without the " (n)" it adds per /background), remembered after the session stops; else the first prompt.
 pub fn session_name(d: &Data, id: &str) -> String {
+    // A name the person gave in Claude Code (/rename, --name) comes first: the program does not undo it.
+    if let Some(n) = record_of(d, id).and_then(|r| r.get("titleByPerson")?.as_str().map(String::from)).filter(|n| !n.is_empty()) { return n; }
     let file = d.root.join("names.json");
     let mut names: Value = crate::paths::read_kept::<Option<Value>>(&file).filter(Value::is_object).unwrap_or_else(|| serde_json::json!({}));
     let running = strip_count(agent(id).as_ref().and_then(|a| a.get("name")).and_then(Value::as_str).unwrap_or(""));

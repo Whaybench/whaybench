@@ -8,6 +8,9 @@ names another step.
 ## [Unreleased]
 
 ### Added
+- Claude Code's name for a session (in `claude agents`, `/resume`) follows the session's name in Whaybench: the hooks
+  give the map's main topic as `sessionTitle` when it differs. A name the person gives in Claude Code (`/rename`,
+  `--name`) wins: Whaybench shows it too and no longer sends its own.
 - A session whose process still runs an older Claude Code than the one installed (an update leaves sessions that
   are working, waiting or shown in a tab on the old one) has `⟳` before its name in the session panel, and its
   right-click menu restarts it on the new one (`claude respawn`), or says why not now (working, awaiting the person,

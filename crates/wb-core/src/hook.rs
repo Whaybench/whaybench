@@ -112,9 +112,35 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
             if !lines.is_empty() { parts.push(i18n::ai_f("memory-changes", &[("lines", lines.join("\n"))])); }
             if let Some(changed) = changed_files_note(data, sid) { parts.push(changed); }
         }
-        return Ok(context_out(name, &parts.join("\n\n")));
+        let mut out = context_out(name, &parts.join("\n\n"));
+        if a.name == crate::agents::CLAUDE && let Some(t) = title(data, sid, event) { out["hookSpecificOutput"]["sessionTitle"] = json!(t); }
+        return Ok(out);
     }
     Ok(json!({}))
+}
+
+/// The name Claude Code should give the session (`/resume`, `claude agents`): the main topic of its map, sent when
+/// Claude Code's name differs. A name the person gave there (/rename, --name: neither the one sent last nor the
+/// topic) is theirs: it is kept, Whaybench shows it too, and nothing is sent over it again.
+fn title(data: &Path, sid: &str, event: &Value) -> Option<String> {
+    let d = crate::paths::Data::new(data.to_path_buf());
+    let record = crate::sessions::record_of(&d, sid).unwrap_or_default();
+    let sent = record["titleSent"].as_str();
+    let have = event["session_title"].as_str().filter(|t| !t.is_empty());
+    let mine = crate::sessions::map_of(&d, sid).map(|m| crate::sessions::map_topics(&m).0).filter(|t| !t.is_empty());
+    if let Some(h) = have && Some(h) != sent && Some(h) != mine.as_deref() {
+        if record["titleByPerson"].as_str() != Some(h) { let _ = session_record::set(data, sid, "titleByPerson", json!(h)); }
+        return None;
+    }
+    if record.get("titleByPerson").is_some() { return None; }
+    let mine = mine?;
+    // Already Claude Code's name, or sent and not told otherwise (a prompt's event may not carry the name).
+    if have == Some(mine.as_str()) || (have.is_none() && sent == Some(mine.as_str())) {
+        if sent != Some(mine.as_str()) { let _ = session_record::set(data, sid, "titleSent", json!(mine)); }
+        return None;
+    }
+    let _ = session_record::set(data, sid, "titleSent", json!(mine));
+    Some(mine)
 }
 
 /// The open nodes of a map with what is above them, and the node it is on, as the tool's `show` text; None when
@@ -730,5 +756,23 @@ mod tests {
         assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("working"), "a subagent's stop is not the turn's");
         run(dir.path(), &a, &ev("s", "SessionEnd", json!({}))).unwrap();
         assert!(!crate::sessions::subagents_dir(dir.path(), "s").exists());
+    }
+
+    #[test]
+    fn claude_code_is_given_the_maps_topic_as_the_name_and_a_persons_name_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
+        let d = crate::paths::Data::new(dir.path().to_path_buf());
+        let named = |e: Value| run(dir.path(), &a, &e).unwrap()["hookSpecificOutput"].get("sessionTitle").and_then(Value::as_str).map(String::from);
+        assert_eq!(named(ev("s", "SessionStart", json!({"source": "startup"}))), None, "no map yet: Claude Code's own name");
+        map::command(dir.path(), "s", Some(json!({"upsert": [{"id": "t", "label": "Store choice"}], "current": "t"}))).unwrap();
+        assert_eq!(named(ev("s", "UserPromptSubmit", json!({"prompt": "go"}))).as_deref(), Some("Store choice"));
+        assert_eq!(named(ev("s", "UserPromptSubmit", json!({"prompt": "on"}))), None, "sent once");
+        assert_eq!(named(ev("s", "SessionStart", json!({"source": "resume", "session_title": "Store choice"}))), None, "already its name");
+        // The person renames it in Claude Code: kept, shown, not sent over.
+        assert_eq!(named(ev("s", "SessionStart", json!({"source": "resume", "session_title": "my db work"}))), None);
+        assert_eq!(crate::sessions::session_name(&d, "s"), "my db work");
+        map::command(dir.path(), "s", Some(json!({"upsert": [{"id": "t", "label": "Store → SQLite"}]}))).unwrap();
+        assert_eq!(named(ev("s", "UserPromptSubmit", json!({"prompt": "more"}))), None, "the person's name stays");
     }
 }

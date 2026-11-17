@@ -37,7 +37,7 @@ pub fn touch(data: &Path, sid: &str, t: Touch) -> Result<Value> {
         if let Some(v) = v { r[k] = v; }
     }
     if let Some(a) = t.agent { r["agent"] = json!(a); }
-    for k in ["agent", "movedTo", "lastCompletedTurn"] {
+    for k in ["agent", "movedTo", "lastCompletedTurn", "titleSent", "titleByPerson"] {
         if r.get(k).is_none() && let Some(v) = keep(k) { r[k] = v; }
     }
     // A record that says it moved to itself is hidden from its own tab and every list: an active session has not moved.
@@ -52,6 +52,15 @@ pub fn state(data: &Path, sid: &str, state: &str, note: Option<&str>) -> Result<
     let mut v = json!({"state": state, "at": now_ms()});
     if let Some(n) = note { v["note"] = json!(n); }
     write_json(&data.join("cache/state").join(format!("{}.json", safe_id(sid)?)), &v)
+}
+
+/// Sets one field of the session's record, leaving the rest; a null value takes it out.
+pub fn set(data: &Path, sid: &str, key: &str, value: Value) -> Result<()> {
+    let path = record_path(data, sid)?;
+    let mut r = read_json(&path, json!({"id": sid}))?;
+    if !r.is_object() { return Err("session record must be an object".into()); }
+    if value.is_null() { r.as_object_mut().unwrap().shift_remove(key); } else { r[key] = value; }
+    write_json(&path, &r)
 }
 
 /// The heartbeat: fresh while a process holds the session, "0" once none does.
