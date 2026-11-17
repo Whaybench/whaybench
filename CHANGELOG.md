@@ -14,6 +14,10 @@ names another step.
   now also sends Claude Code's `SubagentStart` and `SubagentStop`; the list is kept in `cache/subagents/<session>/`.
 
 ### Fixed
+- A restart split a conversation in two: its tab came back on the old number while Claude Code carried the
+  conversation on in the background under a new one, which answered a background task's end on its own. Claude Code
+  now writes the /background command's own rows after its "continued in" note, and Whaybench took them for the
+  conversation going on under the old number; they are left out now, so the tab attaches to the new one.
 - A session was marked as awaiting the person on any Claude Code notification but the idle one, such as a sign-in
   or an agent finished; now only a permission prompt (a teammate's too), a question (elicitation) or an agent
   needing input does.

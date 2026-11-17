@@ -162,7 +162,10 @@ pub fn continued_in(d: &Data, id: &str) -> Option<String> {
 fn carried_on(text: &str) -> Option<String> {
     let id = continued_in_text(text)?;
     let after = &text[text.rfind("\"continuedInSessionId\":\"")?..];
-    (!after.lines().skip(1).any(|l| l.contains("\"type\":\"user\"") || l.contains("\"type\":\"assistant\""))).then_some(id)
+    // Claude Code records the /background command itself (its caveat, name and empty output) after the note: those
+    // rows are not the conversation going on here.
+    let own = |l: &str| ["\"content\":\"<local-command-caveat>", "<command-name>/background</command-name>", "\"content\":\"<local-command-stdout>"].iter().any(|k| l.contains(k));
+    (!after.lines().skip(1).any(|l| (l.contains("\"type\":\"user\"") && !own(l)) || l.contains("\"type\":\"assistant\""))).then_some(id)
 }
 
 /// A number that already holds another conversation: its record moved on, or another record moved into it. Claude
@@ -522,6 +525,11 @@ mod tests {
         assert_eq!(continued_in_text("\"continuedInSessionId\":\"short\""), None);
         assert_eq!(carried_on(&text).as_deref(), Some(id));
         assert_eq!(carried_on(&format!("{text}\n{{\"type\":\"user\"}}")), None, "the conversation went on here after the note");
+        let command = [r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"<command-name>/background</command-name>\n<command-message>background</command-message>"}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>(no content)</local-command-stdout>"}}"#].join("\n");
+        assert_eq!(carried_on(&format!("{text}\n{command}")).as_deref(), Some(id), "the /background command's own rows after the note");
+        assert_eq!(carried_on(&format!("{text}\n{command}\n{{\"type\":\"user\",\"message\":{{\"content\":\"hi\"}}}}")), None);
     }
     #[test]
     fn a_number_holding_another_conversation_is_not_taken_over() {
