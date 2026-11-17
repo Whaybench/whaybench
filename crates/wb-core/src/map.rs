@@ -377,7 +377,7 @@ pub fn person(data: &Path, upsert: Value) -> Result<Value> {
 }
 
 /// The session and the person write the same map file: one at a time, or a change is lost. Held until dropped.
-fn lock(data: &Path, sid: &str) -> Result<fs::File> {
+pub(crate) fn lock(data: &Path, sid: &str) -> Result<fs::File> {
     let locks = data.join("cache").join("map-locks");
     fs::create_dir_all(&locks)?;
     let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(locks.join(format!("{}.lock", safe_id(sid)?)))?;

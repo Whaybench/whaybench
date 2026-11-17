@@ -235,10 +235,14 @@ fn schedule_items(d: &crate::paths::Data) -> Vec<Value> {
         if !crate::sessions::alive(d, &sid) { continue; }
         let who = crate::sessions::session_name(d, &sid);
         for j in crate::sessions::schedules::live(&d.root, &sid) {
-            let next = j["next"].as_i64().filter(|n| *n > now);
-            let when = match (next, j["last"].as_i64()) {
+            let (known, last) = (j["next"].as_i64(), j["last"].as_i64());
+            // Ahead: when it runs. A recurring job that ran: when it last did, as the next run is put off. Not run
+            // yet (a one-shot waiting while the session is busy): its time.
+            let when = match (known, last) {
+                (Some(n), _) if n > now => at(n),
+                (_, Some(l)) if j["recurring"] == true => i18n::f("schedule-last", &[("time", at(l))]),
                 (Some(n), _) => at(n),
-                (None, last) => i18n::f("schedule-last", &[("time", last.map(at).unwrap_or_else(|| "—".into()))]),
+                (None, _) => "—".to_string(),
             };
             let how = i18n::t(if j["kind"] == "wakeup" { "schedule-wakeup" } else if j["recurring"] == true { "schedule-repeat" } else { "schedule-once" });
             let text = j["prompt"].as_str().filter(|p| !p.trim().is_empty()).or(j["reason"].as_str()).unwrap_or("");
@@ -247,7 +251,7 @@ fn schedule_items(d: &crate::paths::Data) -> Vec<Value> {
             if let Some(h) = j["human"].as_str().or(j["cron"].as_str()) { tip.push(h.to_string()); }
             if let Some(e) = j["expires"].as_i64() { tip.push(i18n::f("schedule-expires", &[("time", clock::local(e, "%m-%d %H:%M"))])); }
             out.push(json!({"session": sid, "schedule": true, "line": format!("⏲ {when} · {what} · {how} · {who}"),
-                "node": {"id": "", "detail": tip.join("\n"), "due": clock::local(next.unwrap_or(now), "%Y-%m-%d %H:%M")}}));
+                "node": {"id": "", "detail": tip.join("\n"), "due": clock::local(known.filter(|n| *n > now).or(last).or(known).unwrap_or(now), "%Y-%m-%d %H:%M")}}));
         }
     }
     out

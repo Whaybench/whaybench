@@ -101,7 +101,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let (query, show_hidden) = { let v = view.borrow(); (v.query.clone(), v.show_hidden) };
     let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{:?}{:?}", open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
         let id = sid(s);
-        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id))
+        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id), sessions::schedules::live(&d.root, id).len())
     }).collect::<Vec<_>>());
     if !force && view.borrow().signature == signature { return; }
     view.borrow_mut().signature = signature;

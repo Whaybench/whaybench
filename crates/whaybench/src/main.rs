@@ -125,6 +125,7 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     if wb_core::update::install_ready(&data) { start_again(&data, std::env::args().skip(1).collect()); }
     wb_core::sessions::save_lost_maps(&data);
     wb_core::sessions::prune(&data);
+    wb_core::sessions::schedules::tidy(&data.root);
     wb_core::map::empty_old_trash(&data.root);
 
     let again = std::env::args().skip(1).collect::<Vec<_>>();
