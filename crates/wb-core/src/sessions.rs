@@ -245,10 +245,18 @@ pub fn moved_back(d: &Data, id: &str) {
     }
 }
 
-/// Whether the person set this Claude Code setting themselves in ~/.claude/settings.json (`language`, `statusLine`).
-pub fn claude_setting_set(key: &str) -> bool {
-    let Some(home) = std::env::var_os("HOME") else { return false };
-    std::fs::read_to_string(std::path::Path::new(&home).join(".claude/settings.json")).ok()
+/// Whether the person set this Claude Code setting themselves (`language`, `statusLine`): in their own settings
+/// (`$CLAUDE_CONFIG_DIR`, else ~/.claude) or the project's in `cwd`. What Whaybench passes at the start outranks all
+/// of these, so a setting in any of them must be seen here or it is covered over.
+pub fn claude_setting_set(key: &str, cwd: &Path) -> bool {
+    let own = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude")));
+    let files = [own.map(|d| d.join("settings.json")), Some(cwd.join(".claude/settings.json")), Some(cwd.join(".claude/settings.local.json"))];
+    files.into_iter().flatten().any(|f| setting_in(&f, key))
+}
+
+fn setting_in(file: &Path, key: &str) -> bool {
+    std::fs::read_to_string(file).ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .is_some_and(|v| match &v[key] { Value::Null => false, Value::String(s) => !s.is_empty(), _ => true })
 }
@@ -411,6 +419,20 @@ pub fn target(d: &Data) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_setting_counts_in_the_project_too() {
+        let d = std::env::temp_dir().join(format!("wb-setting-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join(".claude")).unwrap();
+        assert!(!claude_setting_set("statusLineNobodySets", &d));
+        fs::write(d.join(".claude/settings.local.json"), r#"{"statusLine":{"type":"command","command":"x"}}"#).unwrap();
+        assert!(setting_in(&d.join(".claude/settings.local.json"), "statusLine"));
+        assert!(claude_setting_set("statusLine", &d));
+        fs::write(d.join(".claude/settings.local.json"), r#"{"statusLine":""}"#).unwrap();
+        assert!(!setting_in(&d.join(".claude/settings.local.json"), "statusLine"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
     use super::*;
 
     #[test]

@@ -91,6 +91,13 @@ impl Relay {
         // then: it is started with the request to read the map as that prompt.
         let carry_prompt = self.map_from.as_ref().and(agent.as_ref()).and_then(|a| a.first_prompt(wb_core::i18n::ai("map-carry-prompt")));
         if let Some(p) = &carry_prompt { args.extend(p.iter().cloned()); }
+        // A new conversation starts in the work folder; one coming back starts where it was: Claude Code
+        // keeps conversations by folder, and --resume looks only in the present one.
+        let home = std::env::var("HOME").unwrap_or_default();
+        let work = paths::work_dir(&self.data, std::path::Path::new(&home));
+        let _ = fs::create_dir_all(&work);
+        let earlier = self.session.as_deref().and_then(|s| sessions::record_of(&self.data, s)).and_then(|r| r.get("cwd").and_then(|c| c.as_str()).map(String::from));
+        let cwd = earlier.filter(|c| std::path::Path::new(c).is_dir()).unwrap_or_else(|| work.to_string_lossy().to_string());
         // The map is kept every turn: its tool (the plugin's MCP server) runs without asking. Attaching to a session
         // in the background takes no options; that session was started with them.
         if !addon && args.first().is_none_or(|a| a != "attach") {
@@ -98,12 +105,12 @@ impl Relay {
             // Answers in the interface language, as Claude Code's own `language` setting does: once in the system
             // prompt, not a note every turn. A language the person set themselves is left alone.
             let mut settings = serde_json::Map::new();
-            if let Some(l) = wb_core::i18n::agent_language(&self.data).filter(|_| !sessions::claude_setting_set("language")) {
+            if let Some(l) = wb_core::i18n::agent_language(&self.data).filter(|_| !sessions::claude_setting_set("language", std::path::Path::new(&cwd))) {
                 settings.insert("language".into(), l.into());
             }
             // Context and plan usage for the notifications panel come from the status line. A status line the person
             // set is theirs to keep (it can pass the same input on to `whaybench statusline`); without one, ours.
-            if !sessions::claude_setting_set("statusLine")
+            if !sessions::claude_setting_set("statusLine", std::path::Path::new(&cwd))
                 && let Some(exe) = paths::own_exe().ok().and_then(|e| wb_core::agents::shell_quote(&e).ok()) {
                 settings.insert("statusLine".into(), serde_json::json!({"type": "command", "command": format!("{exe} statusline")}));
             }
@@ -112,13 +119,6 @@ impl Relay {
         for a in &args { argv.push(CString::new(a.as_bytes()).map_err(|e| e.to_string())?); }
         let mut ptrs: Vec<*const libc::c_char> = argv.iter().map(|a| a.as_ptr()).collect();
         ptrs.push(std::ptr::null());
-        // A new conversation starts in the work folder; one coming back starts where it was: Claude Code
-        // keeps conversations by folder, and --resume looks only in the present one.
-        let home = std::env::var("HOME").unwrap_or_default();
-        let work = paths::work_dir(&self.data, std::path::Path::new(&home));
-        let _ = fs::create_dir_all(&work);
-        let earlier = self.session.as_deref().and_then(|s| sessions::record_of(&self.data, s)).and_then(|r| r.get("cwd").and_then(|c| c.as_str()).map(String::from));
-        let cwd = earlier.filter(|c| std::path::Path::new(c).is_dir()).unwrap_or_else(|| work.to_string_lossy().to_string());
         let c_cwd = CString::new(cwd).map_err(|e| e.to_string())?;
         // All of the child's environment is prepared here, before the fork.
         let mut env: Vec<(String, String)> = vec![

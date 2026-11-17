@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+### Fixed
+- A status line or language the person set in the project's `.claude/settings.json` or `settings.local.json`, or
+  in `$CLAUDE_CONFIG_DIR`, is kept: only `~/.claude/settings.json` was looked at, and Whaybench's own covered the others.
+
 ## [0.8.6] - 2026-11-17
 
 Menus close when they should and take the item chosen, and small Hangul keeps its strokes.
