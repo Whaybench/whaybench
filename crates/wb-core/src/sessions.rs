@@ -327,24 +327,41 @@ pub fn has_conversation(d: &Data, id: &str) -> bool {
 
 pub fn agent(id: &str) -> Option<Value> { agents().into_iter().find(|a| a.get("sessionId").and_then(Value::as_str) == Some(id)) }
 
-/// The Claude Code version a running session's process is on, when it is not the one installed now: after an update
+/// The Claude Code a running session's process is on and the one installed now, when they differ: after an update
 /// Claude Code moves only idle sessions that no tab shows onto the new one. None when current or not running.
-pub fn old_version(id: &str) -> Option<String> {
+pub fn old_version(id: &str) -> Option<(String, String)> {
     let pid = agent(id)?.get("pid")?.as_u64()?;
     older(&fs::read_link(format!("/proc/{pid}/exe")).ok()?.to_string_lossy(), &fs::canonicalize(claude_program()).ok()?)
 }
 
-/// The version file a process runs (as /proc shows it) against the one installed now: its name when they differ. A
-/// version file removed since the process started reads "<path> (deleted)".
-fn older(running: &str, now: &Path) -> Option<String> {
+/// The version file a process runs (as /proc shows it) against the one installed now: both names when it is older.
+/// Only Claude Code's own version files are compared, side by side in its versions folder: a launcher script, node (a
+/// package-manager install) or a process id taken by another program says nothing. A file removed since the process
+/// started reads "<path> (deleted)": old even when the new one took its name.
+fn older(running: &str, now: &Path) -> Option<(String, String)> {
+    let deleted = running.ends_with(" (deleted)");
     let running = Path::new(running.trim_end_matches(" (deleted)"));
-    (running != now).then(|| running.file_name().map(|n| n.to_string_lossy().to_string())).flatten()
+    if running.parent() != now.parent() || (running == now && !deleted) { return None; }
+    let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_string());
+    Some((name(running)?, name(now)?))
 }
 
-/// Restarts a background session's process on the Claude Code installed now; the conversation goes on.
-pub fn respawn(id: &str) -> bool {
-    Command::new(claude_program()).args(["respawn", &attach_name(id)]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .status().is_ok_and(|s| s.success())
+/// Restarts a background session's process on the Claude Code installed now; the conversation goes on. Given up after
+/// a minute.
+pub fn respawn(id: &str) -> std::result::Result<(), String> {
+    let mut child = Command::new(claude_program()).args(["respawn", &attach_name(id)]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped())
+        .spawn().map_err(|e| e.to_string())?;
+    let until = Instant::now() + Duration::from_secs(60);
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            if status.success() { return Ok(()); }
+            let mut err = String::new();
+            if let Some(mut e) = child.stderr.take() { let _ = std::io::Read::read_to_string(&mut e, &mut err); }
+            return Err(format!("{status}: {}", err.trim()));
+        }
+        if Instant::now() > until { let _ = child.kill(); let _ = child.wait(); return Err("no answer in a minute".into()); }
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 pub fn background(id: &str) -> bool { agent(id).is_some_and(|a| a.get("kind").and_then(Value::as_str) != Some("interactive")) }
@@ -468,9 +485,13 @@ mod tests {
     #[test]
     fn a_process_on_another_claude_version_is_told() {
         let now = Path::new("/h/.local/share/claude/versions/2.1.327");
+        let pair = |a: &str, b: &str| Some((a.to_string(), b.to_string()));
         assert_eq!(older("/h/.local/share/claude/versions/2.1.327", now), None);
-        assert_eq!(older("/h/.local/share/claude/versions/2.1.326", now).as_deref(), Some("2.1.326"));
-        assert_eq!(older("/h/.local/share/claude/versions/2.1.325 (deleted)", now).as_deref(), Some("2.1.325"), "its file removed by the update");
+        assert_eq!(older("/h/.local/share/claude/versions/2.1.326", now), pair("2.1.326", "2.1.327"));
+        assert_eq!(older("/h/.local/share/claude/versions/2.1.325 (deleted)", now), pair("2.1.325", "2.1.327"), "its file removed by the update");
+        assert_eq!(older("/h/.local/share/claude/versions/2.1.327 (deleted)", now), pair("2.1.327", "2.1.327"), "replaced under the same name");
+        assert_eq!(older("/usr/bin/node", Path::new("/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js")), None, "a package-manager install");
+        assert_eq!(older("/usr/bin/zsh", now), None, "a process id another program took");
     }
 
     #[test]

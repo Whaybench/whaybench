@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use gtk::{gio, glib, prelude::*};
 use serde_json::Value;
-use wb_core::{paths::Data, sessions, status};
+use wb_core::{log as record, paths::Data, sessions, status};
 
 use crate::common::{ago, ctl, cut, every};
 
@@ -49,6 +49,38 @@ fn subagents_note(d: &Data, id: &str) -> Option<String> {
     Some(wb_core::i18n::f("subagents-running", &[("a1", running.len().to_string()), ("a2", each.join(", "))]))
 }
 
+/// Sessions being restarted on a new Claude Code now: one restart at a time each.
+static RESPAWNING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Why a session on an older Claude Code cannot be restarted now, as a word for its menu; None when it can.
+fn respawn_block(d: &Data, id: &str) -> Option<&'static str> {
+    if RESPAWNING.lock().unwrap().iter().any(|r| r == id) { return Some("respawn-busy"); }
+    match sessions::state_of(d, id).as_deref() {
+        Some("working") => return Some("respawn-working"),
+        Some("waiting") => return Some("respawn-waiting"),
+        _ => {}
+    }
+    // A self-paced /loop's wake-up is not brought back by a restart.
+    if sessions::schedules::live(&d.root, id).iter().any(|j| j["kind"] == "wakeup") { return Some("respawn-loop"); }
+    None
+}
+
+/// Restarts the session on the installed Claude Code off the panel's loop; what goes wrong goes to the log.
+fn respawn(d: &Data, id: &str) {
+    if respawn_block(d, id).is_some() { return; }
+    RESPAWNING.lock().unwrap().push(id.to_string());
+    let id = id.to_string();
+    std::thread::spawn(move || {
+        if let Err(e) = sessions::respawn(&id) { record::warn("session", "not restarted on the new Claude Code", &e, &[("session", id.clone())]); }
+        sessions::refresh_agents();
+        // The supervisor may still be on the old one and start the session there again: the mark stays.
+        if let Some((now, installed)) = sessions::old_version(&id) {
+            record::warn("session", "still on the old Claude Code", "its supervisor has not moved to the new one yet", &[("session", id.clone()), ("running", now), ("installed", installed)]);
+        }
+        RESPAWNING.lock().unwrap().retain(|r| r != &id);
+    });
+}
+
 fn describe(d: &Data, info: &Value) -> (String, String) {
     let id = sid(info);
     let alive = sessions::alive(d, id);
@@ -71,7 +103,7 @@ fn describe(d: &Data, info: &Value) -> (String, String) {
     let name = sessions::session_name(d, id);
     let title = if name.is_empty() { wb_core::i18n::t("empty-session").into() } else { cut(&name, 34) };
     // On an older Claude Code than the one installed: a small mark on the title, the restart is in its right-click menu.
-    let title = if alive && sessions::old_version(id).is_some() { format!("{title} ⟳") } else { title };
+    let title = if alive && sessions::old_version(id).is_some() { format!("⟳ {title}") } else { title };
     (title, parts.join(" · "))
 }
 
@@ -225,15 +257,22 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             // Ending stops the session's process too; its conversation stays saved and can be opened again.
             let running = sessions::alive(&d, &id);
             if running { menu.append(Some(wb_core::i18n::t("end-session")), Some("s.end")); }
-            // A background session on an older Claude Code, while it is not in a turn or waiting on the person.
-            let old = sessions::old_version(&id).filter(|_| running && sessions::background(&id)
-                && !matches!(sessions::state_of(&d, &id).as_deref(), Some("working" | "waiting")));
-            if let Some(v) = &old { menu.append(Some(&wb_core::i18n::f("session-respawn", &[("version", v.clone())])), Some("s.respawn")); }
+            // A background session on an older Claude Code: restart it on the new one, or say why not now (an item
+            // with no action shows dimmed).
+            let old = sessions::old_version(&id).filter(|_| running && sessions::background(&id));
+            let block = old.as_ref().and_then(|_| respawn_block(&d, &id));
+            if let Some((_, installed)) = &old {
+                match block {
+                    None => menu.append(Some(&wb_core::i18n::f("session-respawn", &[("version", installed.clone())])), Some("s.respawn")),
+                    Some(why) => menu.append(Some(&wb_core::i18n::f("session-respawn-blocked", &[("why", wb_core::i18n::t(why).to_string())])), Some("s.respawn-blocked")),
+                }
+            }
             let group = gio::SimpleActionGroup::new();
-            if old.is_some() {
+            if old.is_some() && block.is_none() {
                 let act = gio::SimpleAction::new("respawn", None);
-                let id2 = id.clone();
-                act.connect_activate(move |_, _| { let id3 = id2.clone(); std::thread::spawn(move || { sessions::respawn(&id3); }); });
+                let (d2, id2) = (d.clone(), id.clone());
+                // Checked again when chosen: a turn may have started since the menu opened.
+                act.connect_activate(move |_, _| respawn(&d2, &id2));
                 group.add_action(&act);
             }
             if running {
