@@ -7,6 +7,11 @@ names another step.
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-11-18
+
+What a session scheduled, an older Claude Code under a session, and Claude Code's name for a session now show in
+Whaybench; dates and times come from a maintained library.
+
 ### Added
 - Claude Code's name for a session (in `claude agents`, `/resume`) follows the session's name in Whaybench: the hooks
   give the map's main topic as `sessionTitle` when it differs. A name the person gives in Claude Code (`/rename`,
