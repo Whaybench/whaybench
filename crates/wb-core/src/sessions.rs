@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::{log as record, paths::{Data, write_atomic}, versions};
 
 mod names;
+pub mod schedules;
 mod retention;
 mod tabs;
 pub use names::*;
@@ -213,6 +214,7 @@ pub fn adopt(d: &Data, old: &str, new: &str) {
     let empty = |p: &Path| fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .is_none_or(|m| m["nodes"].as_array().is_none_or(Vec::is_empty));
     if map_old.exists() && empty(&map_new) { let _ = fs::copy(map_old, map_new); }
+    schedules::carry(&d.root, old, new);
     from["movedTo"] = Value::String(new.to_string());
     let _ = write_atomic(&sessions_dir(d).join(format!("{old}.json")), from.to_string());
     mark_off(d, old);

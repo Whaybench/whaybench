@@ -52,6 +52,7 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     };
     if !state.is_empty() { session_record::state(data, sid, state, note)?; }
     subagent(data, sid, name, event)?;
+    crate::sessions::schedules::on_event(data, sid, name, event)?;
     // The turn's own question for its answer, unfiltered: the record's lastPrompt leaves out commands and Whaybench's
     // requests (they start with / or [), and the answer to one would be kept under the question before it.
     if let Some(p) = prompt { write_json(&state_file(data, "prompt", sid), &json!(p))?; }

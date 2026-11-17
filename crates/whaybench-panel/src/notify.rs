@@ -44,6 +44,12 @@ fn rows(list: &gtk::ListBox, board: &Value, view: &View) {
             if let Some(t) = item["node"].get("detail").and_then(Value::as_str) { label.set_tooltip_text(Some(t)); }
             let row = gtk::ListBoxRow::new();
             row.set_child(Some(&label));
+            // A session's scheduled job: a press goes to its session; it has no node to act on.
+            if item["schedule"] == true {
+                row.set_widget_name(&format!("__sched__\t{}", item["session"].as_str().unwrap_or("")));
+                list.append(&row);
+                continue;
+            }
             row.set_widget_name(&format!("{}\t{}\t{}\t{}\t{}", item["session"].as_str().unwrap_or(""), item["node"]["id"].as_str().unwrap_or(""), item["node"].get("mark").is_some(), if key == "trash" { item["action"].as_str().unwrap_or("-") } else { "" }, if key == "check" { item["node"]["suggest"]["state"].as_str().unwrap_or("") } else { "" }));
             list.append(&row);
         }
@@ -184,6 +190,10 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         let (d, list2, view) = (d.clone(), list.clone(), view.clone());
         list.connect_row_activated(move |_, r| {
             if r.widget_name() == "__trash__" { let o = view.borrow().trash_open; view.borrow_mut().trash_open = !o; redraw(&d, &list2, &view, true); }
+            if let Some(sid) = r.widget_name().strip_prefix("__sched__\t").filter(|s| !s.is_empty()) {
+                wb_core::sessions::set_focus(&d, sid, "person's click");
+                crate::common::ctl(&d, vec!["--data-dir".into(), d.root.to_string_lossy().to_string(), "session".into(), "show".into(), sid.to_string()]);
+            }
         });
     }
     let click = gtk::GestureClick::new();

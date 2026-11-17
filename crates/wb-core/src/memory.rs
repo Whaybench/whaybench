@@ -222,6 +222,37 @@ fn person_line(name: &str, n: &Value) -> String {
     parts.join(" · ")
 }
 
+/// What running sessions have scheduled for themselves, as items of the Due section: not nodes, so no node actions;
+/// `schedule` marks them and `node.due` places them in time. A job ahead shows when it runs; a recurring one past its
+/// known time shows when it last ran, as the next run is put off by Claude Code by up to half its period.
+fn schedule_items(d: &crate::paths::Data) -> Vec<Value> {
+    use crate::{clock, i18n};
+    let now = clock::now_ms();
+    let today = clock::local(now, "%Y-%m-%d");
+    let at = |ms: i64| if clock::local(ms, "%Y-%m-%d") == today { clock::local(ms, "%H:%M") } else { clock::local(ms, "%m-%d %H:%M") };
+    let mut out = Vec::new();
+    for sid in crate::sessions::schedules::sessions(&d.root) {
+        if !crate::sessions::alive(d, &sid) { continue; }
+        let who = crate::sessions::session_name(d, &sid);
+        for j in crate::sessions::schedules::live(&d.root, &sid) {
+            let next = j["next"].as_i64().filter(|n| *n > now);
+            let when = match (next, j["last"].as_i64()) {
+                (Some(n), _) => at(n),
+                (None, last) => i18n::f("schedule-last", &[("time", last.map(at).unwrap_or_else(|| "—".into()))]),
+            };
+            let how = i18n::t(if j["kind"] == "wakeup" { "schedule-wakeup" } else if j["recurring"] == true { "schedule-repeat" } else { "schedule-once" });
+            let text = j["prompt"].as_str().filter(|p| !p.trim().is_empty()).or(j["reason"].as_str()).unwrap_or("");
+            let what: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect();
+            let mut tip = vec![text.to_string()];
+            if let Some(h) = j["human"].as_str().or(j["cron"].as_str()) { tip.push(h.to_string()); }
+            if let Some(e) = j["expires"].as_i64() { tip.push(i18n::f("schedule-expires", &[("time", clock::local(e, "%m-%d %H:%M"))])); }
+            out.push(json!({"session": sid, "schedule": true, "line": format!("⏲ {when} · {what} · {how} · {who}"),
+                "node": {"id": "", "detail": tip.join("\n"), "due": clock::local(next.unwrap_or(now), "%Y-%m-%d %H:%M")}}));
+        }
+    }
+    out
+}
+
 /// The notifications panel's sections (3.19): nodes with a time or due date, the person's marked ones, what changed since the
 /// person last looked, held ones and the deleted ones. Each item is `{session, node, line}`: `session` is where the
 /// node came from, and the node's `id` is its node number, the one `map::person`, `trash` and `purge` take.
@@ -249,6 +280,7 @@ pub fn board(data: &Path, current: Option<&str>) -> Value {
         }
         if n.get("due").or_else(|| n.get("at")).is_some() { due.push(item(n, None)); }
     }
+    due.extend(schedule_items(&d));
     let date = |i: &Value| i["node"].get("due").or_else(|| i["node"].get("at")).and_then(Value::as_str).unwrap_or("").to_string();
     due.sort_by_key(date);
     let since = seen_at(data, "person");
@@ -385,6 +417,24 @@ mod tests {
         put(dir.path(), s, json!([{"id":"p","state":"done"}, {"id":"w","label":"decided","state":"done","links":[{"to":"b","rel":"resolves"}]}]));
         let b = board(dir.path(), None);
         assert_eq!(n(&b, "changed"), ["key", "then"], "what a decision settled, and only what its condition now allows");
+    }
+
+    #[test]
+    fn a_running_sessions_schedule_shows_among_the_due() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = "dddddddd-0000-0000-0000-000000000004";
+        put(dir.path(), s, json!([{"id":"a","label":"meet","at":"2999-01-01 09:00"}]));
+        let soon = crate::clock::now_ms() + 3_600_000;
+        crate::sessions::schedules::on_event(dir.path(), s, "PostToolUse", &json!({"tool_name": "CronCreate",
+            "tool_input": {"cron": "17 */2 * * *", "prompt": "check the build", "recurring": true},
+            "tool_response": {"id": "abe7b236", "humanSchedule": "Every 2 hours at :17", "recurring": true, "nextFireAt": soon}})).unwrap();
+        let due = |b: &Value| b["due"].as_array().unwrap().iter().map(|i| i["line"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert!(due(&board(dir.path(), None)).iter().all(|l| !l.starts_with('⏲')), "a session not running has nothing scheduled");
+        crate::session_record::alive(dir.path(), s, true).unwrap();
+        let lines = due(&board(dir.path(), None));
+        // Today's time alone, another day's with its date: either way the time is in it.
+        assert!(lines[0].starts_with('⏲') && lines[0].contains(&crate::clock::local(soon, "%H:%M")) && lines[0].contains("check the build"), "{lines:?}");
+        assert!(lines[1].starts_with("meet"), "in time order with the nodes: {lines:?}");
     }
 
     #[test]

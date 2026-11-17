@@ -60,6 +60,8 @@ fn describe(d: &Data, info: &Value) -> (String, String) {
         (_, Some("done")) => wb_core::i18n::t("answered").into(),
         _ => wb_core::i18n::t("running").into(),
     }, ago(info.get("lastActive").and_then(Value::as_i64).unwrap_or(0))];
+    let jobs = if alive { sessions::schedules::live(&d.root, id).len() } else { 0 };
+    if jobs > 0 { parts.push(wb_core::i18n::f("schedules-count", &[("n", jobs.to_string())])); }
     if let Some(m) = sessions::map_of(d, id) {
         let nodes = m.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
         let here = nodes.iter().find(|n| n.get("id") == m.get("current")).map(|n| text(n, "label").to_string());

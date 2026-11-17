@@ -7,6 +7,11 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- What a session has scheduled for itself (Claude Code's cron prompts, a /loop's next wake-up) shows in the
+  notifications panel's Due section among the dated nodes, and as `⏲ n` on the session's line. The hooks follow the
+  scheduling tools, as Claude Code keeps the jobs only in the session; the list is kept in `cache/schedules/`.
+
 ### Changed
 - Dates and times come from jiff instead of chrono, which is no longer maintained (RUSTSEC-2026-0543). Every time
   shown and every time the records keep reads as before: the records' RFC 3339 form, compared as text, is unchanged.
