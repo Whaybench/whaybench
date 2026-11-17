@@ -113,30 +113,50 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
             if let Some(changed) = changed_files_note(data, sid) { parts.push(changed); }
         }
         let mut out = context_out(name, &parts.join("\n\n"));
-        if a.name == crate::agents::CLAUDE && let Some(t) = title(data, sid, event) { out["hookSpecificOutput"]["sessionTitle"] = json!(t); }
+        if a.name == crate::agents::CLAUDE && let Some(t) = title(data, sid, name, event) { out["hookSpecificOutput"]["sessionTitle"] = json!(t); }
         return Ok(out);
     }
     Ok(json!({}))
 }
 
+/// A name as Claude Code keeps it: control and format characters and line breaks as spaces, trimmed, 200 characters.
+fn title_form(t: &str) -> String {
+    let odd = |c: char| c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{feff}');
+    t.chars().map(|c| if odd(c) { ' ' } else { c }).collect::<String>().trim().chars().take(200).collect()
+}
+
 /// The name Claude Code should give the session (`/resume`, `claude agents`): the main topic of its map, sent when
-/// Claude Code's name differs. A name the person gave there (/rename, --name: neither the one sent last nor the
-/// topic) is theirs: it is kept, Whaybench shows it too, and nothing is sent over it again.
-fn title(data: &Path, sid: &str, event: &Value) -> Option<String> {
+/// Claude Code's name differs, on a start, resume, move or prompt (Claude Code ignores it after a compaction or
+/// /clear). A name the person gave there (/rename, --name: neither the one sent last nor the topic) is theirs: it is
+/// kept, Whaybench shows it too, and nothing is sent over it until the person gives the topic's name back.
+fn title(data: &Path, sid: &str, name: &str, event: &Value) -> Option<String> {
+    let source = event["source"].as_str();
+    if name == "SessionStart" && !matches!(source, Some("startup" | "resume" | "fork")) { return None; }
     let d = crate::paths::Data::new(data.to_path_buf());
     let record = crate::sessions::record_of(&d, sid).unwrap_or_default();
-    let sent = record["titleSent"].as_str();
-    let have = event["session_title"].as_str().filter(|t| !t.is_empty());
-    let mine = crate::sessions::map_of(&d, sid).map(|m| crate::sessions::map_topics(&m).0).filter(|t| !t.is_empty());
-    if let Some(h) = have && Some(h) != sent && Some(h) != mine.as_deref() {
-        if record["titleByPerson"].as_str() != Some(h) { let _ = session_record::set(data, sid, "titleByPerson", json!(h)); }
+    let sent = record["titleSent"].as_str().map(String::from);
+    // " (n)" is Claude Code's own, added when a name is taken.
+    let have = event["session_title"].as_str().map(|t| crate::sessions::strip_count(&title_form(t))).filter(|t| !t.is_empty());
+    let mine = crate::sessions::map_of(&d, sid).map(|m| title_form(&crate::sessions::map_topics(&m).0)).filter(|t| !t.is_empty());
+    // A moved conversation's new number starts with the name it carries, before Whaybench follows the move: a name is
+    // the person's only where Whaybench has sent one, or at a start or resume (--name).
+    let judged = sent.is_some() || matches!(source, Some("startup" | "resume"));
+    if let Some(h) = &have && judged && Some(h) != sent.as_ref() && Some(h) != mine.as_ref() {
+        if record["titleByPerson"].as_str() != Some(h.as_str()) { let _ = session_record::set(data, sid, "titleByPerson", json!(h)); }
         return None;
     }
-    if record.get("titleByPerson").is_some() { return None; }
+    if record.get("titleByPerson").is_some() {
+        // The person gave the topic's own name back: the topic leads again.
+        if have.is_some() && have == mine {
+            let _ = session_record::set(data, sid, "titleByPerson", Value::Null);
+            let _ = session_record::set(data, sid, "titleSent", json!(mine));
+        }
+        return None;
+    }
     let mine = mine?;
-    // Already Claude Code's name, or sent and not told otherwise (a prompt's event may not carry the name).
-    if have == Some(mine.as_str()) || (have.is_none() && sent == Some(mine.as_str())) {
-        if sent != Some(mine.as_str()) { let _ = session_record::set(data, sid, "titleSent", json!(mine)); }
+    // Already Claude Code's name, or sent and not told otherwise.
+    if have.as_ref() == Some(&mine) || (have.is_none() && sent.as_ref() == Some(&mine)) {
+        if sent.as_ref() != Some(&mine) { let _ = session_record::set(data, sid, "titleSent", json!(mine)); }
         return None;
     }
     let _ = session_record::set(data, sid, "titleSent", json!(mine));
@@ -774,5 +794,35 @@ mod tests {
         assert_eq!(crate::sessions::session_name(&d, "s"), "my db work");
         map::command(dir.path(), "s", Some(json!({"upsert": [{"id": "t", "label": "Store → SQLite"}]}))).unwrap();
         assert_eq!(named(ev("s", "UserPromptSubmit", json!({"prompt": "more"}))), None, "the person's name stays");
+    }
+    #[test]
+    fn a_name_is_not_taken_for_the_persons_where_claude_code_carried_or_reshaped_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
+        let d = crate::paths::Data::new(dir.path().to_path_buf());
+        let named = |e: Value| run(dir.path(), &a, &e).unwrap()["hookSpecificOutput"].get("sessionTitle").and_then(Value::as_str).map(String::from);
+        let by_person = |s: &str| crate::sessions::record_of(&d, s).and_then(|r| r.get("titleByPerson").cloned());
+        // A moved conversation's new number starts with the carried name, and no map or record yet.
+        assert_eq!(named(ev("f", "SessionStart", json!({"source": "fork", "session_title": "Store choice (2)"}))), None);
+        assert_eq!(named(ev("f", "UserPromptSubmit", json!({"prompt": "go", "session_title": "Store choice (2)"}))), None);
+        assert!(by_person("f").is_none(), "carried, not the person's");
+        // After a compaction Claude Code ignores a name: none is sent or noted.
+        map::command(dir.path(), "c", Some(json!({"upsert": [{"id": "t", "label": "A"}], "current": "t"}))).unwrap();
+        assert_eq!(named(ev("c", "UserPromptSubmit", json!({"prompt": "go"}))).as_deref(), Some("A"));
+        map::command(dir.path(), "c", Some(json!({"upsert": [{"id": "t", "label": "B"}]}))).unwrap();
+        assert_eq!(named(ev("c", "SessionStart", json!({"source": "compact", "session_title": "A"}))), None);
+        assert_eq!(named(ev("c", "UserPromptSubmit", json!({"prompt": "on", "session_title": "A"}))).as_deref(), Some("B"), "still ours: sent after all");
+        // A topic with a line break comes back as Claude Code keeps it.
+        map::command(dir.path(), "n", Some(json!({"upsert": [{"id": "t", "label": "two\nlines "}], "current": "t"}))).unwrap();
+        assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "go"}))).as_deref(), Some("two lines"));
+        assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "on", "session_title": "two lines"}))), None);
+        assert!(by_person("n").is_none());
+        // The person renames, then gives the topic's name back: the topic leads again.
+        named(ev("n", "UserPromptSubmit", json!({"prompt": "x", "session_title": "mine"})));
+        assert_eq!(by_person("n"), Some(json!("mine")));
+        named(ev("n", "UserPromptSubmit", json!({"prompt": "y", "session_title": "two lines"})));
+        assert!(by_person("n").is_none());
+        map::command(dir.path(), "n", Some(json!({"upsert": [{"id": "t", "label": "three"}]}))).unwrap();
+        assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "z", "session_title": "two lines"}))).as_deref(), Some("three"));
     }
 }

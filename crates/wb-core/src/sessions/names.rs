@@ -118,7 +118,7 @@ pub fn session_name(d: &Data, id: &str) -> String {
 
 pub fn tab_title(d: &Data, id: &str) -> String { session_name(d, id) }
 
-fn strip_count(name: &str) -> String {
+pub(crate) fn strip_count(name: &str) -> String {
     let t = name.trim();
     if let Some(open) = t.rfind(" (") {
         let inner = &t[open + 2..];
