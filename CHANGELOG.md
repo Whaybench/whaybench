@@ -8,6 +8,9 @@ names another step.
 ## [Unreleased]
 
 ### Added
+- A session whose process still runs an older Claude Code than the one installed (an update leaves sessions that
+  are working, waiting or shown in a tab on the old one) has `⟳` after its name in the session panel, and its
+  right-click menu restarts it on the new one (`claude respawn`) when it is not in a turn or waiting.
 - What a session has scheduled for itself (Claude Code's cron prompts, a /loop's next wake-up) shows in the
   notifications panel's Due section among the dated nodes, and as `⏲ n` on the session's line. The hooks follow the
   scheduling tools, as Claude Code keeps the jobs only in the session; the list is kept in `cache/schedules/`. It

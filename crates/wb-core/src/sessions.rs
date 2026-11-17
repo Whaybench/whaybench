@@ -327,6 +327,26 @@ pub fn has_conversation(d: &Data, id: &str) -> bool {
 
 pub fn agent(id: &str) -> Option<Value> { agents().into_iter().find(|a| a.get("sessionId").and_then(Value::as_str) == Some(id)) }
 
+/// The Claude Code version a running session's process is on, when it is not the one installed now: after an update
+/// Claude Code moves only idle sessions that no tab shows onto the new one. None when current or not running.
+pub fn old_version(id: &str) -> Option<String> {
+    let pid = agent(id)?.get("pid")?.as_u64()?;
+    older(&fs::read_link(format!("/proc/{pid}/exe")).ok()?.to_string_lossy(), &fs::canonicalize(claude_program()).ok()?)
+}
+
+/// The version file a process runs (as /proc shows it) against the one installed now: its name when they differ. A
+/// version file removed since the process started reads "<path> (deleted)".
+fn older(running: &str, now: &Path) -> Option<String> {
+    let running = Path::new(running.trim_end_matches(" (deleted)"));
+    (running != now).then(|| running.file_name().map(|n| n.to_string_lossy().to_string())).flatten()
+}
+
+/// Restarts a background session's process on the Claude Code installed now; the conversation goes on.
+pub fn respawn(id: &str) -> bool {
+    Command::new(claude_program()).args(["respawn", &attach_name(id)]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .status().is_ok_and(|s| s.success())
+}
+
 pub fn background(id: &str) -> bool { agent(id).is_some_and(|a| a.get("kind").and_then(Value::as_str) != Some("interactive")) }
 
 /// Whether a process holds this session: Claude Code's list, else the mod's heartbeat (30 seconds).
@@ -444,6 +464,14 @@ mod tests {
         Data::new(d)
     }
     pub(crate) fn rec(d: &Data, id: &str, v: Value) { fs::write(sessions_dir(d).join(format!("{id}.json")), v.to_string()).unwrap(); }
+
+    #[test]
+    fn a_process_on_another_claude_version_is_told() {
+        let now = Path::new("/h/.local/share/claude/versions/2.1.327");
+        assert_eq!(older("/h/.local/share/claude/versions/2.1.327", now), None);
+        assert_eq!(older("/h/.local/share/claude/versions/2.1.326", now).as_deref(), Some("2.1.326"));
+        assert_eq!(older("/h/.local/share/claude/versions/2.1.325 (deleted)", now).as_deref(), Some("2.1.325"), "its file removed by the update");
+    }
 
     #[test]
     fn a_moved_conversation_takes_its_map_over_an_empty_one() {

@@ -267,6 +267,7 @@ hidden-sessions = { $a1 } 숨김 세션 { $a2 }개
 search-sessions-names-questions-answers-maps = 세션 검색 · 이름·질문·답변·지도
 restore-to-list = 목록에 복원
 hide = 숨김
+session-respawn = 새 Claude Code로 다시 시작 (지금 { $version })
 session-hidden-moved-to-hidden-sessions = 세션 숨김 · 숨김 세션 목록으로 이동
 new-version-available-whaybench-restart-tabs = 새 버전 있음 · Whaybench → 재시작
 read-failed-3 = <pre>읽기 실패: { $a1 }</pre>

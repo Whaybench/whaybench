@@ -267,6 +267,7 @@ hidden-sessions = { $a1 } Hidden sessions { $a2 }
 search-sessions-names-questions-answers-maps = Search sessions · Names, questions, answers, maps
 restore-to-list = Restore to list
 hide = Hide
+session-respawn = Restart on the new Claude Code (now { $version })
 session-hidden-moved-to-hidden-sessions = Session hidden · Moved to hidden sessions
 new-version-available-whaybench-restart-tabs = New version available · Whaybench → Restart
 read-failed-3 = <pre>Read failed: { $a1 }</pre>
