@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- Codex sessions show their subagents in the session panel too: the Codex add-on now registers `SubagentStart` and
+  `SubagentStop`. Codex asks once, in `/hooks`, to trust the two new hooks.
+
 ## [0.8.8] - 2026-11-18
 
 What a session scheduled, an older Claude Code under a session, and Claude Code's name for a session now show in

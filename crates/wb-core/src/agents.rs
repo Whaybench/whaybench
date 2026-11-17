@@ -480,7 +480,7 @@ mod tests {
         let (_, home) = codex.prepare_with(&data, &exe, Some(dir.path().join("source")))?.unwrap();
         let hooks = read_json(&home.join("hooks.json"), Value::Null)?;
         let events = hooks["hooks"].as_object().unwrap();
-        assert_eq!(events.len(), 8);
+        assert_eq!(events.len(), 10);
         for (_, h) in events {
             assert_eq!(h[0]["hooks"][0]["command"], format!("{} hook codex", shell_quote(&exe)?));
         }
