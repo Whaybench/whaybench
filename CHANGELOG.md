@@ -7,6 +7,11 @@ names another step.
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-17
+
+A waiting session is told on the desktop, subagents show in the session panel, and a restart no longer splits a
+conversation in two.
+
 ### Added
 - A desktop notification when a session starts waiting on the person (a permission, a question) while Whaybench is
   not the window in front: through the desktop's notification service, under WSL as a Windows notification.
