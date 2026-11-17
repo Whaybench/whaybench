@@ -201,8 +201,6 @@ impl Relay {
             return;
         }
         let in_background = self.session.as_deref().is_some_and(sessions::background);
-        if !in_background && (name == "background" || name == "bg")
-            && let Some(s) = &self.session { wb_core::hook::note_fork(&self.data.root, s); }
         record::decide("session", "typed command", if in_background { "a background session" } else { "this tab's session" }, &[("tab", self.tab.clone()), ("command", name.to_string())]);
         if !in_background {
             write_all(self.master, b"\r");
@@ -233,7 +231,6 @@ impl Relay {
         let hand_over = self.running && !self.attached && self.session.as_deref().is_some_and(|s| sessions::alive(&self.data, s) && sessions::has_conversation(&self.data, s));
         if hand_over {
             // Started in this tab: hand it to the supervisor instead of ending it.
-            if let Some(s) = &self.session { wb_core::hook::note_fork(&self.data.root, s); }
             write_all(self.master, b"/background\r");
             record::decide("session", "moved to the background", "the tab closed; the session goes on", &[("session", self.session.clone().unwrap_or_default())]);
             self.leave_at = Some(Instant::now() + AFTER_BACKGROUND);

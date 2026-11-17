@@ -14,6 +14,10 @@ names another step.
   now also sends Claude Code's `SubagentStart` and `SubagentStop`; the list is kept in `cache/subagents/<session>/`.
 
 ### Fixed
+- A conversation moved to the background could come up with an empty map: when its new number started before
+  Whaybench followed the move, the empty map made at the start kept the old one from being copied. Moves are now
+  found only by Claude Code's "continued in" note; the start hook's own note (`cache/forks/pending.json`), which could
+  no longer work because the new number has no transcript when it starts, is gone.
 - A restart split a conversation in two: its tab came back on the old number while Claude Code carried the
   conversation on in the background under a new one, which answered a background task's end on its own. Claude Code
   now writes the /background command's own rows after its "continued in" note, and Whaybench took them for the

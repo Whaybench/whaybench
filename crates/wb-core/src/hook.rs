@@ -65,7 +65,8 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     if name == "SessionStart" || name == "UserPromptSubmit" { note_agent_process(data, sid); }
     // The map a tab started from comes in once, when the agent starts; /clear starts a session in the same process.
     let starting = event["source"].as_str().is_none_or(|s| s == "startup");
-    let carried = if name == "SessionStart" { adopt_fork(data, sid, a, event).or_else(|| if starting { carry_in(data, sid) } else { None }) } else { None };
+    // A conversation moved to the background goes on under a new number: `sessions::locate` follows it there.
+    let carried = if name == "SessionStart" && starting { carry_in(data, sid) } else { None };
     let tool = event["tool_name"].as_str().unwrap_or("");
     match name {
         "Stop" => {
@@ -470,39 +471,8 @@ fn carry_in(data: &Path, sid: &str) -> Option<String> {
     }
 }
 
-fn fork_note(data: &Path) -> std::path::PathBuf { data.join("cache").join("forks").join("pending.json") }
-
-/// The relay saw /background: the conversation goes on in a new session, which takes this map over when it starts.
-pub fn note_fork(data: &Path, from: &str) {
-    let cwd = read_json(&data.join("sessions").join(format!("{from}.json")), Value::Null).ok().and_then(|r| r["cwd"].as_str().map(String::from)).unwrap_or_default();
-    let _ = write_json(&fork_note(data), &json!({"from": from, "cwd": cwd, "at": now_ms()}));
-}
-
 /// The relay saw /rewind: the next prompt asks the agent to set the map straight.
 pub fn note_rewind(data: &Path, sid: &str) { let _ = write_json(&state_file(data, "rewound", sid), &json!(now_ms())); }
-
-/// A session started within a minute of a /background in the same folder, with a conversation of its own, carries
-/// that session on: its map and record. Claude Code's spare processes start with an id but no conversation.
-fn adopt_fork(data: &Path, sid: &str, a: &Agent, event: &Value) -> Option<String> {
-    if a.name != "claude" { return None; }
-    let note = read_json(&fork_note(data), Value::Null).ok()?;
-    let from = note["from"].as_str()?.to_string();
-    let cwd = event["cwd"].as_str().unwrap_or("");
-    let near = |x: &str, y: &str| x == y || x.starts_with(&format!("{}/", y.trim_end_matches('/'))) || y.starts_with(&format!("{}/", x.trim_end_matches('/')));
-    if from == sid || now_ms().saturating_sub(note["at"].as_u64().unwrap_or(0)) > 60_000 || !near(note["cwd"].as_str().unwrap_or(""), cwd) { return None; }
-    let talked = event["transcript_path"].as_str().and_then(|p| fs::metadata(p).ok()).is_some_and(|m| m.len() > 0);
-    if !talked { return None; }
-    // When Whaybench restarts, every tab closes (each noting itself) and every conversation is resumed within the
-    // minute, in the same folder: only the one that shares messages with the noted session carries it on.
-    let transcript = Path::new(event["transcript_path"].as_str().unwrap_or(""));
-    if !crate::sessions::shares_messages(&crate::paths::Data::new(data.to_path_buf()), &from, transcript) { return None; }
-    let _ = write_json(&fork_note(data), &json!({}));
-    crate::map_tool::call(data, sid, &json!({"inherit": from})).ok()?;
-    crate::session_record::carry_from(data, sid, &from).ok()?;
-    // The carried record has no tab; this session is in the tab it started in.
-    crate::session_record::touch(data, sid, crate::session_record::Touch { prompt: None, tab: a.tab, cwd: None, agent: None }).ok()?;
-    None
-}
 
 /// One process: its name, parent and start time (`/proc/<pid>/stat`).
 fn proc_stat(pid: u32) -> Option<(String, u32, u64)> {

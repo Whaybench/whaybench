@@ -93,23 +93,6 @@ fn continued_in_text(text: &str) -> Option<String> {
     (id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).then(|| id.to_string())
 }
 
-/// Whether the transcript at `path` carries on `from`'s conversation: Claude Code copies the messages a session goes
-/// on from, each with its uuid, so the two share some. A session that only started near it in time shares none.
-pub fn shares_messages(d: &Data, from: &str, path: &Path) -> bool {
-    let (Some(old), Ok(new)) = (transcript_of(d, from).and_then(|p| fs::read_to_string(p).ok()), fs::read_to_string(path)) else { return false };
-    share_uuids(&old, &new)
-}
-
-/// Whether two transcripts hold a message of the same uuid.
-fn share_uuids(old: &str, new: &str) -> bool {
-    fn uuids(text: &str) -> std::collections::HashSet<&str> {
-        const KEY: &str = "\"uuid\":\"";
-        text.match_indices(KEY).filter_map(|(i, _)| text.get(i + KEY.len()..i + KEY.len() + 36)).collect()
-    }
-    let old = uuids(old);
-    uuids(new).iter().any(|u| old.contains(u))
-}
-
 fn transcript_of(d: &Data, id: &str) -> Option<PathBuf> {
     let cwd = record_of(d, id)?.get("cwd")?.as_str()?.to_string();
     let home = std::env::var("HOME").ok()?;
@@ -226,7 +209,10 @@ pub fn adopt(d: &Data, old: &str, new: &str) {
         && let Some(v) = from.get("lastActive") { to["lastActive"] = v.clone(); }
     let _ = write_atomic(&sessions_dir(d).join(format!("{new}.json")), to.to_string());
     let (map_old, map_new) = (d.root.join(format!("{old}.json")), d.root.join(format!("{new}.json")));
-    if map_old.exists() && !map_new.exists() { let _ = fs::copy(map_old, map_new); }
+    // The new number's start hook may have made it an empty map first; one with nodes of its own is kept.
+    let empty = |p: &Path| fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .is_none_or(|m| m["nodes"].as_array().is_none_or(Vec::is_empty));
+    if map_old.exists() && empty(&map_new) { let _ = fs::copy(map_old, map_new); }
     from["movedTo"] = Value::String(new.to_string());
     let _ = write_atomic(&sessions_dir(d).join(format!("{old}.json")), from.to_string());
     mark_off(d, old);
@@ -449,16 +435,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn a_session_carries_on_another_only_when_they_share_messages() {
-        let line = |u: &str| format!("{{\"type\":\"user\",\"uuid\":\"{u}\",\"sessionId\":\"x\"}}\n");
-        // 36 characters, as a uuid is; not shaped like one, so no real number is mistaken for it.
-        let (a, b, c) = (&"ma".repeat(18), &"mb".repeat(18), &"mc".repeat(18));
-        let old = line(a) + &line(b);
-        assert!(share_uuids(&old, &(line(b) + &line(c))), "a resumed or backgrounded copy keeps the messages it goes on from");
-        assert!(!share_uuids(&old, &line(c)), "another conversation resumed in the same minute shares none");
-        assert!(!share_uuids("", &line(c)));
-    }
     pub(crate) fn data(name: &str) -> Data {
         let d = std::env::temp_dir().join(format!("wb-s-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
@@ -466,6 +442,23 @@ mod tests {
         Data::new(d)
     }
     pub(crate) fn rec(d: &Data, id: &str, v: Value) { fs::write(sessions_dir(d).join(format!("{id}.json")), v.to_string()).unwrap(); }
+
+    #[test]
+    fn a_moved_conversation_takes_its_map_over_an_empty_one() {
+        let d = data("adopt-map");
+        rec(&d, "old", serde_json::json!({"id": "old", "firstPrompt": "q"}));
+        let map = |id: &str, n: usize| fs::write(d.root.join(format!("{id}.json")), serde_json::json!({"sessionId": id, "nodes": vec![serde_json::json!({"id": "a", "nid": "n"}); n]}).to_string()).unwrap();
+        let nodes = |id: &str| serde_json::from_str::<Value>(&fs::read_to_string(d.root.join(format!("{id}.json"))).unwrap()).unwrap()["nodes"].as_array().unwrap().len();
+        map("old", 2);
+        map("new", 0);
+        adopt(&d, "old", "new");
+        assert_eq!(nodes("new"), 2, "the new number's start hook made an empty map first");
+        assert_eq!(record_of(&d, "old").unwrap()["movedTo"], "new");
+        rec(&d, "old2", serde_json::json!({"id": "old2"}));
+        map("old2", 3);
+        adopt(&d, "old2", "new");
+        assert_eq!(nodes("new"), 2, "a map with nodes of its own is kept");
+    }
 
     #[test]
     fn a_tab_without_a_session_in_front_shows_no_session() {
