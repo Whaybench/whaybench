@@ -68,7 +68,11 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     // The map a tab started from comes in once, when the agent starts; /clear starts a session in the same process.
     let starting = event["source"].as_str().is_none_or(|s| s == "startup");
     // A conversation moved to the background goes on under a new number: `sessions::locate` follows it there.
-    let carried = if name == "SessionStart" && starting { carry_in(data, sid) } else { None };
+    let carried = match name {
+        "SessionStart" if starting => carry_in(data, sid),
+        "SessionStart" if event["source"] == "fork" => fork_in(data, sid, event),
+        _ => None,
+    };
     let tool = event["tool_name"].as_str().unwrap_or("");
     match name {
         "Stop" => {
@@ -486,6 +490,24 @@ pub fn carried_summary(m: &Value, from: &str) -> String {
     parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join("\n\n")
 }
 
+/// A conversation forked from another (Codex: `codex fork`, `/fork`) takes the map it branched from, as a new
+/// conversation from a map does; the other goes on with its own. Codex names the source in the first `session_meta`
+/// of the new transcript (`forked_from_id`), written before the start hook runs.
+fn fork_in(data: &Path, sid: &str, event: &Value) -> Option<String> {
+    use std::io::BufRead;
+    let file = fs::File::open(event["transcript_path"].as_str()?).ok()?;
+    // Only the first, this session's own: copied history further down can hold its ancestors' metadata.
+    let meta = std::io::BufReader::new(file).lines().take(20).map_while(std::result::Result::ok)
+        .filter_map(|l| serde_json::from_str::<Value>(&l).ok()).find(|r| r["type"] == "session_meta")?;
+    if meta["payload"]["id"].as_str() != Some(sid) { return None; }
+    let from = meta["payload"]["forked_from_id"].as_str().filter(|f| *f != sid)?.to_string();
+    if !map_is_empty(data, sid) { return None; }
+    let source = read_json(&data.join(format!("{}.json", safe_id(&from).ok()?)), Value::Null).ok()?;
+    if source["nodes"].as_array().is_none_or(Vec::is_empty) { return None; }
+    crate::map_tool::call(data, sid, &json!({"inherit": from})).ok()?;
+    Some(carried_summary(&map::command(data, sid, None).ok()?, &i18n::ai_f("carried-session", &[("id", from.chars().take(8).collect())])))
+}
+
 fn map_is_empty(data: &Path, sid: &str) -> bool {
     map::command(data, sid, None).ok().and_then(|m| m["nodes"].as_array().map(Vec::is_empty)).unwrap_or(true)
 }
@@ -824,5 +846,25 @@ mod tests {
         assert!(by_person("n").is_none());
         map::command(dir.path(), "n", Some(json!({"upsert": [{"id": "t", "label": "three"}]}))).unwrap();
         assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "z", "session_title": "two lines"}))).as_deref(), Some("three"));
+    }
+
+    #[test]
+    fn a_forked_codex_conversation_takes_the_map_it_branched_from() {
+        let dir = tempfile::tempdir().unwrap();
+        map::command(dir.path(), "p", Some(json!({"upsert": [{"id": "t", "label": "Store choice"}], "current": "t"}))).unwrap();
+        // As Codex 0.169.0 writes a fork's transcript: its first session_meta names the source.
+        let t = dir.path().join("rollout.jsonl");
+        fs::write(&t, format!("{}\n{}\n", json!({"type": "session_meta", "payload": {"id": "c", "forked_from_id": "p"}}),
+            json!({"type": "session_meta", "payload": {"id": "p"}}))).unwrap();
+        let out = crate::hook::fork_in(dir.path(), "c", &json!({"transcript_path": t, "source": "fork"}));
+        assert!(out.is_some_and(|o| o.contains("Store choice")));
+        assert_eq!(map::command(dir.path(), "c", None).unwrap()["nodes"].as_array().unwrap().len(), 1);
+        assert_eq!(map::command(dir.path(), "p", None).unwrap()["nodes"].as_array().unwrap().len(), 1, "the source keeps its own");
+        // Started again later: a map of its own is left alone; a transcript without a source carries nothing.
+        assert!(crate::hook::fork_in(dir.path(), "c", &json!({"transcript_path": t})).is_none());
+        fs::write(&t, format!("{}\n", json!({"type": "session_meta", "payload": {"id": "d"}}))).unwrap();
+        assert!(crate::hook::fork_in(dir.path(), "d", &json!({"transcript_path": t})).is_none());
+        fs::write(&t, format!("{}\n", json!({"type": "session_meta", "payload": {"id": "other", "forked_from_id": "p"}}))).unwrap();
+        assert!(crate::hook::fork_in(dir.path(), "e", &json!({"transcript_path": t})).is_none(), "metadata of another session");
     }
 }

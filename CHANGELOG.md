@@ -8,6 +8,8 @@ names another step.
 ## [Unreleased]
 
 ### Added
+- A Codex conversation forked from another (`codex fork`, `/fork`) takes the map it branched from; the other goes on
+  with its own. The source comes from the first `session_meta` of the new transcript (`forked_from_id`).
 - Codex sessions show their subagents in the session panel too: the Codex add-on now registers `SubagentStart` and
   `SubagentStop`. Codex asks once, in `/hooks`, to trust the two new hooks.
 
