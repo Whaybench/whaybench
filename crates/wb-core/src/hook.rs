@@ -213,7 +213,8 @@ fn subagent(data: &Path, sid: &str, name: &str, event: &Value) -> Result<()> {
     if a.get("started").is_none() { a["started"] = json!(now_ms()); }
     a["at"] = json!(now_ms());
     match name {
-        // A tool used is running again: another hook can block a stop and send it back to work.
+        // Started again, or a tool used: running again (another hook can block a stop and send it back to work).
+        "SubagentStart" => if let Some(o) = a.as_object_mut() { o.remove("done"); },
         "PreToolUse" | "PostToolUse" => {
             if let Some(o) = a.as_object_mut() { o.remove("done"); }
             if let Some(t) = event["tool_name"].as_str() { a["tool"] = json!(t); }
@@ -797,6 +798,9 @@ mod tests {
         assert!(crate::sessions::subagents_running(&d, "s").is_empty());
         sub("PreToolUse", json!({"tool_name": "Read", "tool_input": {}}));
         assert_eq!(crate::sessions::subagents_running(&d, "s").len(), 1, "a stop another hook blocked: it works on");
+        sub("SubagentStop", json!({}));
+        sub("SubagentStart", json!({}));
+        assert_eq!(crate::sessions::subagents_running(&d, "s").len(), 1, "started again under the same id");
         sub("SubagentStop", json!({}));
         assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("working"), "a subagent's stop is not the turn's");
         run(dir.path(), &a, &ev("s", "SessionEnd", json!({}))).unwrap();
