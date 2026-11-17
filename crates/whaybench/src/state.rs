@@ -149,6 +149,11 @@ pub struct App {
     pub chrome: Chrome,
     /// The person's zoom of the title bars (Ctrl+wheel on one), over the theme's text size; in settings.json.
     pub title_zoom: f64,
+    /// Whether Whaybench's own window is the one in front on the desktop. False until the desktop says so, so a
+    /// Whaybench started behind other windows still notifies.
+    pub host_focused: bool,
+    /// Sessions' states as last seen, for the notification when one starts waiting.
+    waiting: crate::notify::Waiting,
     /// Panels of the panel menu started and not yet open, by key: a click again while one starts (Firefox takes
     /// seconds) would start a second, which finds the first one's profile locked.
     pub starting: HashMap<String, Instant>,
@@ -268,6 +273,8 @@ impl App {
             act: Act::Idle, pointer: (0.0, 0.0), hover: None, window_cmd: None, strip_pressed: None, maximized: false, guides: Vec::new(), zone: None, out_zone: false,
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
             title_zoom,
+            host_focused: false,
+            waiting: crate::notify::Waiting::new(),
             starting: HashMap::new(),
             homes: Vec::new(),
             outside: Vec::new(),
@@ -578,6 +585,9 @@ impl App {
         let origin: Point<f64, Logical> = (0.0, top).into();
         w.surface_under(pos - origin, WindowSurfaceType::ALL).map(|(s, at)| (s, at.to_f64() + origin))
     }
+
+    /// Notifies the desktop of sessions that have just started waiting on the person (see `notify::Waiting`).
+    pub fn tell_waiting(&mut self) { self.waiting.poll(&self.data, self.host_focused); }
 
     /// Brings a conversation tab to the front.
     pub fn focus_term(&mut self, tab: &str) {

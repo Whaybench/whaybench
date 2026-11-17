@@ -7,7 +7,16 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- A desktop notification when a session starts waiting on the person (a permission, a question) while Whaybench is
+  not the window in front: through the desktop's notification service, under WSL as a Windows notification.
+- The session panel shows a session's running subagents under it, each with its type and last tool. The connector
+  now also sends Claude Code's `SubagentStart` and `SubagentStop`; the list is kept in `cache/subagents/<session>/`.
+
 ### Fixed
+- A session was marked as awaiting the person on any Claude Code notification but the idle one, such as a sign-in
+  or an agent finished; now only a permission prompt (a teammate's too), a question (elicitation) or an agent
+  needing input does.
 - A status line or language the person set in the project's `.claude/settings.json` or `settings.local.json`, or
   in `$CLAUDE_CONFIG_DIR`, is kept: only `~/.claude/settings.json` was looked at, and Whaybench's own covered the others.
 

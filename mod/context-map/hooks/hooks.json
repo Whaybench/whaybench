@@ -88,6 +88,28 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${HOME}/.local/bin/whaybench\" hook claude",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${HOME}/.local/bin/whaybench\" hook claude",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

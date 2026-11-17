@@ -7,8 +7,11 @@ use serde_json::{Value, json};
 
 use crate::{i18n, map::{self, Result, now_ms, read_json, safe_id, text, write_json}, memory, session_record};
 
-pub const EVENTS: [&str; 10] = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
-    "Notification", "Stop", "Interrupt", "SessionEnd", "PreCompact"];
+pub const EVENTS: [&str; 12] = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
+    "Notification", "Stop", "Interrupt", "SessionEnd", "PreCompact", "SubagentStart", "SubagentStop"];
+/// Claude Code's notifications that wait for the person; the others (signed in, an agent done, a quota resumed) do not.
+/// An agent add-on's notification carries no type and counts as waiting.
+const ASKS: [&str; 5] = ["permission_prompt", "worker_permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input"];
 const EDITS_KEPT: usize = 200;
 const TEXT_KEPT: usize = 40_000;
 
@@ -37,13 +40,18 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     let (state, note) = match name {
         "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => ("working", None),
         "PermissionRequest" => ("waiting", None),
-        "Notification" if event["notification_type"] != "idle_prompt" => ("waiting", event.get("message").and_then(Value::as_str)),
+        "Notification" if event["notification_type"].as_str().is_none_or(|t| ASKS.contains(&t)) => ("waiting", event.get("message").and_then(Value::as_str)),
+        // Idle after a turn: settles a turn that ended without a Stop (interrupted).
+        "Notification" if event["notification_type"] == "idle_prompt" => ("done", None),
+        // Other notifications, and a subagent starting or stopping, say nothing of the session's own turn.
+        "Notification" | "SubagentStart" | "SubagentStop" => ("", None),
         // A session can end mid-turn: no Stop comes, so the end settles it.
         "SessionEnd" => ("done", Some("ended")),
         "PreCompact" => ("", None),
         _ => ("done", None),
     };
     if !state.is_empty() { session_record::state(data, sid, state, note)?; }
+    subagent(data, sid, name, event)?;
     // The turn's own question for its answer, unfiltered: the record's lastPrompt leaves out commands and Whaybench's
     // requests (they start with / or [), and the answer to one would be kept under the question before it.
     if let Some(p) = prompt { write_json(&state_file(data, "prompt", sid), &json!(p))?; }
@@ -130,6 +138,38 @@ pub fn fallback(event: &Value) -> Option<Value> {
 }
 
 fn context_out(name: &str, context: &str) -> Value { json!({"hookSpecificOutput": {"hookEventName": name, "additionalContext": context}}) }
+
+/// What each subagent of the session is doing, one file per agent so agents running at once do not overwrite each
+/// other: its type, when it started, its last tool, and when it stopped with the start of its answer. Not map data.
+fn subagent(data: &Path, sid: &str, name: &str, event: &Value) -> Result<()> {
+    let dir = crate::sessions::subagents_dir(data, sid);
+    if name == "SessionEnd" { let _ = fs::remove_dir_all(&dir); return Ok(()); }
+    let Some(aid) = event["agent_id"].as_str() else { return Ok(()) };
+    if name == "SubagentStart" {
+        // Stopped ones are kept a while for the panel, then let go.
+        for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
+            if read_json(&e.path(), Value::Null)?["done"].as_u64().is_some_and(|t| now_ms().saturating_sub(t) > 600_000) { let _ = fs::remove_file(e.path()); }
+        }
+    }
+    let path = dir.join(format!("{}.json", safe_id(aid)?));
+    let mut a = read_json(&path, json!({}))?;
+    if let Some(t) = event["agent_type"].as_str() { a["type"] = json!(t); }
+    if a.get("started").is_none() { a["started"] = json!(now_ms()); }
+    a["at"] = json!(now_ms());
+    match name {
+        // A tool used is running again: another hook can block a stop and send it back to work.
+        "PreToolUse" | "PostToolUse" => {
+            if let Some(o) = a.as_object_mut() { o.remove("done"); }
+            if let Some(t) = event["tool_name"].as_str() { a["tool"] = json!(t); }
+        }
+        "SubagentStop" => {
+            a["done"] = json!(now_ms());
+            if let Some(m) = event["last_assistant_message"].as_str() { a["last"] = json!(m.chars().take(200).collect::<String>()); }
+        }
+        _ => {}
+    }
+    write_json(&path, &a)
+}
 
 fn is_shell(tool: &str) -> bool { ["Bash", "shell", "local_shell", "exec_command"].contains(&tool) }
 
@@ -672,5 +712,51 @@ mod tests {
         let moved = json!({"input": "*** Begin Patch\n*** Update File: a.rs\n*** Move to: b.rs\n*** End Patch"});
         assert_eq!(touched("apply_patch", &moved), vec![("a.rs".to_string(), "edit"), ("b.rs".to_string(), "edit")], "the file moved onto is changed too");
         assert!(glob("/w/src/**", "/w/src/a/b.rs") && glob("/w/*.rs", "/w/a.rs") && !glob("/w/*.rs", "/w/a/b.rs") && glob("a?c", "abc"));
+    }
+
+    #[test]
+    fn only_a_notification_that_asks_the_person_marks_the_session_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
+        let d = crate::paths::Data { root: dir.path().to_path_buf() };
+        let after = |kind: Option<&str>| {
+            run(dir.path(), &a, &ev("s", "UserPromptSubmit", json!({"prompt": "go"}))).unwrap();
+            let extra = kind.map(|k| json!({"notification_type": k, "message": "m"})).unwrap_or_else(|| json!({"message": "m"}));
+            run(dir.path(), &a, &ev("s", "Notification", extra)).unwrap();
+            crate::sessions::state_of(&d, "s").unwrap()
+        };
+        assert_eq!(after(Some("permission_prompt")), "waiting");
+        assert_eq!(after(Some("agent_needs_input")), "waiting");
+        assert_eq!(after(None), "waiting", "an add-on's notification has no type");
+        assert_eq!(after(Some("auth_success")), "working", "signing in asks nothing");
+        assert_eq!(after(Some("agent_completed")), "working");
+        assert_eq!(after(Some("idle_prompt")), "done", "idle settles a turn that ended without a stop");
+    }
+
+    #[test]
+    fn a_subagent_is_followed_without_ending_the_session_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
+        let d = crate::paths::Data { root: dir.path().to_path_buf() };
+        let sub = |name: &str, extra: Value| {
+            let mut e = json!({"agent_id": "a1", "agent_type": "Explore"});
+            for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); }
+            run(dir.path(), &a, &ev("s", name, e)).unwrap();
+        };
+        run(dir.path(), &a, &ev("s", "UserPromptSubmit", json!({"prompt": "go"}))).unwrap();
+        sub("SubagentStart", json!({}));
+        sub("PreToolUse", json!({"tool_name": "Grep", "tool_input": {}}));
+        let running = crate::sessions::subagents_running(&d, "s");
+        assert_eq!((running.len(), running[0]["type"].as_str(), running[0]["tool"].as_str()), (1, Some("Explore"), Some("Grep")));
+        run(dir.path(), &a, &ev("s", "PreToolUse", json!({"tool_name": "Read", "tool_input": {}}))).unwrap();
+        assert_eq!(crate::sessions::subagents_running(&d, "s")[0]["tool"], "Grep", "the session's own tools are not the subagent's");
+        sub("SubagentStop", json!({"last_assistant_message": "Found it."}));
+        assert!(crate::sessions::subagents_running(&d, "s").is_empty());
+        sub("PreToolUse", json!({"tool_name": "Read", "tool_input": {}}));
+        assert_eq!(crate::sessions::subagents_running(&d, "s").len(), 1, "a stop another hook blocked: it works on");
+        sub("SubagentStop", json!({}));
+        assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("working"), "a subagent's stop is not the turn's");
+        run(dir.path(), &a, &ev("s", "SessionEnd", json!({}))).unwrap();
+        assert!(!crate::sessions::subagents_dir(dir.path(), "s").exists());
     }
 }

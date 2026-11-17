@@ -118,7 +118,7 @@ impl Drop for Bridge {
 /// The desktop's text now. Under WSL, from Windows itself through PowerShell: a wl-paste there would show a window
 /// for a moment (WSLg has no data-control), take the keyboard and make keys repeat.
 fn desktop_text() -> Option<Vec<u8>> {
-    let wsl = std::path::Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists() || std::env::var_os("WSL_DISTRO_NAME").is_some();
+    let wsl = crate::notify::wsl();
     let out = if wsl {
         Command::new("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -Raw"])

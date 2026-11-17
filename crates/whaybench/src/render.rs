@@ -954,6 +954,7 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: 
         WinitEvent::Ime(ime) => state.handle_ime(ime),
         WinitEvent::Focus(focused) => {
             record::detail("screen", "window focus", &[("focused", focused.to_string())]);
+            state.host_focused = focused;
             // Back from the desktop: what was copied there comes in, where the desktop cannot be watched.
             if focused { state.clip.read_once(); }
         }

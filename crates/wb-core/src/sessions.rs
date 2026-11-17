@@ -22,6 +22,17 @@ pub use tabs::*;
 pub fn sessions_dir(d: &Data) -> PathBuf { d.root.join("sessions") }
 pub fn alive_dir(d: &Data) -> PathBuf { d.cache().join("alive") }
 pub fn state_dir(d: &Data) -> PathBuf { d.cache().join("state") }
+/// The session's subagents, one file each (written by the hooks; `root` is the data folder).
+pub fn subagents_dir(root: &Path, id: &str) -> PathBuf { root.join("cache").join("subagents").join(id) }
+
+/// The session's subagents still running, the earliest started first. One silent for half an hour is taken for
+/// stopped: an interrupted turn may never send its stop.
+pub fn subagents_running(d: &Data, id: &str) -> Vec<Value> {
+    let mut v: Vec<Value> = fs::read_dir(subagents_dir(&d.root, id)).into_iter().flatten().flatten()
+        .filter_map(|e| read_json(&e.path())).filter(|a| a.get("done").is_none() && crate::map::now_ms().saturating_sub(a["at"].as_u64().unwrap_or(0)) < 1_800_000).collect();
+    v.sort_by_key(|a| a["started"].as_u64().unwrap_or(0));
+    v
+}
 pub fn focus_file(d: &Data) -> PathBuf { d.root.join("focus.json") }
 pub fn tabs_dir(d: &Data) -> PathBuf { d.cache().join("term") }
 

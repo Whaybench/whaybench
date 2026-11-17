@@ -38,6 +38,17 @@ fn pairs(d: &Data, info: &Value) -> Vec<(&'static str, String)> {
     out
 }
 
+/// The running subagents as one line under the session: type and last tool each.
+fn subagents_note(d: &Data, id: &str) -> Option<String> {
+    let running = sessions::subagents_running(d, id);
+    if running.is_empty() { return None; }
+    let each: Vec<String> = running.iter().map(|a| match a["tool"].as_str() {
+        Some(t) => format!("{} ({t})", text(a, "type")),
+        None => text(a, "type").to_string(),
+    }).collect();
+    Some(wb_core::i18n::f("subagents-running", &[("a1", running.len().to_string()), ("a2", each.join(", "))]))
+}
+
 fn describe(d: &Data, info: &Value) -> (String, String) {
     let id = sid(info);
     let alive = sessions::alive(d, id);
@@ -88,7 +99,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let (query, show_hidden) = { let v = view.borrow(); (v.query.clone(), v.show_hidden) };
     let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{:?}{:?}", open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
         let id = sid(s);
-        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)))
+        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id))
     }).collect::<Vec<_>>());
     if !force && view.borrow().signature == signature { return; }
     view.borrow_mut().signature = signature;
@@ -130,7 +141,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
             // A number left behind by a move that did not hold: its conversation is listed under the number it went on in.
             if sessions::ghost(d, &all, sid(info)) { continue; }
             if info.get("ended") == Some(&Value::Bool(true)) { hidden.push(info); continue; }
-            add(info, false, None);
+            add(info, false, subagents_note(d, sid(info)));
         }
         if !hidden.is_empty() {
             let head = row(&wb_core::i18n::f("hidden-sessions", &[("a1", (if show_hidden { "▾" } else { "▸" }).to_string()), ("a2", (hidden.len()).to_string())]), "", None, false);

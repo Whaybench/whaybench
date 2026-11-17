@@ -8,6 +8,7 @@ mod mcp;
 mod render;
 mod agent;
 mod chrome;
+mod notify;
 mod clipboard;
 mod start;
 mod state;

@@ -421,6 +421,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
                 }
             }
         }
+        if ticks.is_multiple_of(10) { state.tell_waiting(); }
         ticks += 1;
         if ticks.is_multiple_of(10) { state.return_focus(); state.sync_focus(); }
         TimeoutAction::ToDuration(Duration::from_millis(100))
