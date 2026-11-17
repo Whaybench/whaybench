@@ -38,6 +38,9 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         session_record::touch(data, sid, session_record::Touch { prompt: shown.as_deref(), tab, cwd: event.get("cwd").and_then(Value::as_str), agent })?
     } else { existing };
     let (state, note) = match name {
+        // Codex asks the person through a tool: from before the question to the answer (Codex 0.169.0 runs both tool
+        // hooks around request_user_input; a question never shown leaves it to the next event to settle).
+        "PreToolUse" if event["tool_name"] == "request_user_input" => ("waiting", None),
         "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => ("working", None),
         "PermissionRequest" => ("waiting", None),
         "Notification" if event["notification_type"].as_str().is_none_or(|t| ASKS.contains(&t)) => ("waiting", event.get("message").and_then(Value::as_str)),
@@ -866,5 +869,18 @@ mod tests {
         assert!(crate::hook::fork_in(dir.path(), "d", &json!({"transcript_path": t})).is_none());
         fs::write(&t, format!("{}\n", json!({"type": "session_meta", "payload": {"id": "other", "forked_from_id": "p"}}))).unwrap();
         assert!(crate::hook::fork_in(dir.path(), "e", &json!({"transcript_path": t})).is_none(), "metadata of another session");
+    }
+
+    #[test]
+    fn a_codex_question_waits_on_the_person_until_answered() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
+        let d = crate::paths::Data::new(dir.path().to_path_buf());
+        run(dir.path(), &a, &ev("s", "UserPromptSubmit", json!({"prompt": "go"}))).unwrap();
+        let tool = |name: &str| run(dir.path(), &a, &ev("s", name, json!({"tool_name": "request_user_input", "tool_input": {}}))).unwrap();
+        tool("PreToolUse");
+        assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("waiting"));
+        tool("PostToolUse");
+        assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("working"), "answered");
     }
 }
