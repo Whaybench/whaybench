@@ -38,9 +38,10 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         session_record::touch(data, sid, session_record::Touch { prompt: shown.as_deref(), tab, cwd: event.get("cwd").and_then(Value::as_str), agent })?
     } else { existing };
     let (state, note) = match name {
-        // Codex asks the person through a tool: from before the question to the answer (Codex 0.169.0 runs both tool
-        // hooks around request_user_input; a question never shown leaves it to the next event to settle).
-        "PreToolUse" if event["tool_name"] == "request_user_input" => ("waiting", None),
+        // An agent asks the person through a tool: from before the question to the answer. Claude Code's
+        // AskUserQuestion and Codex's request_user_input both have their tool hooks around it (seen in a Claude Code
+        // 2.1.326 transcript; Codex 0.169.0 source); a question never shown leaves it to the next event to settle.
+        "PreToolUse" if matches!(event["tool_name"].as_str(), Some("AskUserQuestion" | "request_user_input")) => ("waiting", None),
         "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => ("working", None),
         "PermissionRequest" => ("waiting", None),
         "Notification" if event["notification_type"].as_str().is_none_or(|t| ASKS.contains(&t)) => ("waiting", event.get("message").and_then(Value::as_str)),
@@ -876,15 +877,17 @@ mod tests {
     }
 
     #[test]
-    fn a_codex_question_waits_on_the_person_until_answered() {
+    fn a_question_to_the_person_waits_until_answered() {
         let dir = tempfile::tempdir().unwrap();
         let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
         let d = crate::paths::Data::new(dir.path().to_path_buf());
         run(dir.path(), &a, &ev("s", "UserPromptSubmit", json!({"prompt": "go"}))).unwrap();
-        let tool = |name: &str| run(dir.path(), &a, &ev("s", name, json!({"tool_name": "request_user_input", "tool_input": {}}))).unwrap();
-        tool("PreToolUse");
-        assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("waiting"));
-        tool("PostToolUse");
-        assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("working"), "answered");
+        for question in ["request_user_input", "AskUserQuestion"] {
+            let tool = |name: &str| run(dir.path(), &a, &ev("s", name, json!({"tool_name": question, "tool_input": {}}))).unwrap();
+            tool("PreToolUse");
+            assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("waiting"), "{question}");
+            tool("PostToolUse");
+            assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("working"), "answered");
+        }
     }
 }
