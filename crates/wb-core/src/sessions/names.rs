@@ -78,7 +78,7 @@ pub fn map_titles(d: &Data) -> std::collections::HashMap<String, String> {
     for (id, _, _, at) in &rows {
         let name = &snapshot[id];
         if snapshot.values().filter(|v| *v == name).count() > 1 {
-            let stamp = chrono::DateTime::from_timestamp_millis(*at).map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string()).unwrap_or_default();
+            let stamp = crate::clock::local(*at, "%m-%d %H:%M");
             names.insert(id.clone(), format!("{name} · {stamp}"));
         }
     }

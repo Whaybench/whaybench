@@ -42,7 +42,7 @@ fn logged_after(d: &Data, since: i64, scanned: i64) -> Vec<(String, Value)> {
 fn same(r: &Value, at: i64, session: &str) -> bool { r["at"].as_i64() == Some(at) && r["session"].as_str() == Some(session) }
 
 fn time_of(ms: i64, format: &str) -> String {
-    chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format(format).to_string()).unwrap_or_default()
+    wb_core::clock::local(ms, format)
 }
 
 fn history_file(d: &Data) -> std::path::PathBuf { d.root.join("answer-history.json") }
@@ -196,7 +196,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 }
             }
             let session = sessions::target(&d);
-            let now = chrono::Utc::now().timestamp_millis();
+            let now = wb_core::clock::now_ms();
             let fresh = logged_after(&d, p.seen, p.scanned);
             p.scanned = now;
             if !fresh.is_empty() {

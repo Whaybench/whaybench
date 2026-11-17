@@ -22,7 +22,7 @@ fn link(kind: &str, rest: &str, label: &str) -> String { format!("<a href='wb:{k
 
 fn when(ms: i64) -> String {
     if ms == 0 { return String::new(); }
-    chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string()).unwrap_or_default()
+    wb_core::clock::local(ms, "%m-%d %H:%M")
 }
 fn at(v: &Value, k: &str) -> i64 { v.get(k).and_then(Value::as_i64).unwrap_or(0) }
 
@@ -301,7 +301,7 @@ fn ask_text(win: &gtk::ApplicationWindow, title: &str, label: &str, done: impl F
 /// The folder name of a new project: from its name, or from the time when the name has no latin letters; never one in use.
 fn new_project_id(st: &Store, name: &str) -> String {
     let slug: String = name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>().split('-').filter(|x| !x.is_empty()).collect::<Vec<_>>().join("-");
-    let base = if slug.is_empty() { format!("p-{}", chrono::Utc::now().timestamp()) } else { slug };
+    let base = if slug.is_empty() { format!("p-{}", (wb_core::clock::now_ms() / 1000)) } else { slug };
     if st.get_project(&base).is_none() { return base; }
     (2..).map(|n| format!("{base}-{n}")).find(|x| st.get_project(x).is_none()).unwrap()
 }

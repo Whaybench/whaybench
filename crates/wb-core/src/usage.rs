@@ -77,7 +77,7 @@ pub fn latest(data: &Path, sid: Option<&str>) -> Option<Value> {
         _ => all.first().map(|(_, v)| (v["context"].clone(), v["agent"].clone()))?,
     };
     // A window whose reset has passed is over, as Claude Code drops it too.
-    let now = chrono::Utc::now().timestamp();
+    let now = crate::clock::now_ms() / 1000;
     let live = |w: &Value| if w["resets_at"].as_i64().is_some_and(|t| t > now) { w.clone() } else { Value::Null };
     let window = |k: &str| all.iter().filter(|(_, v)| v["agent"] == agent).map(|(_, v)| live(&v[k])).find(|w| !w.is_null()).unwrap_or(Value::Null);
     Some(json!({"context": context, "five_hour": window("five_hour"), "seven_day": window("seven_day")}))
@@ -86,7 +86,7 @@ pub fn latest(data: &Path, sid: Option<&str>) -> Option<Value> {
 /// `Context 42% · 5h 23% resets 15:00 · 7d 41% resets 11-14 09:00`; what is missing is left out.
 pub fn line(u: &Value) -> String {
     let pct = |v: &Value| v.as_f64().map(|p| format!("{}", p.round() as i64));
-    let when = |w: &Value, fmt: &str| w["resets_at"].as_i64().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).map(|t| t.with_timezone(&chrono::Local).format(fmt).to_string()).unwrap_or_default();
+    let when = |w: &Value, fmt: &str| w["resets_at"].as_i64().map(|s| crate::clock::local(s.saturating_mul(1000), fmt)).unwrap_or_default();
     let mut parts = Vec::new();
     if let Some(p) = pct(&u["context"]) { parts.push(crate::i18n::f("usage-context", &[("p", p)])); }
     for (k, key, fmt) in [("five_hour", "usage-five-hour", "%H:%M"), ("seven_day", "usage-seven-day", "%m-%d %H:%M")] {
@@ -103,7 +103,7 @@ mod tests {
     fn a_status_line_is_kept_per_session_and_the_plan_is_the_accounts() {
         let dir = tempfile::tempdir().unwrap();
         let (a, b) = ("aaaaaaaa-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000002");
-        let soon = chrono::Utc::now().timestamp() + 3600;
+        let soon = (crate::clock::now_ms() / 1000) + 3600;
         let first = record(dir.path(), &json!({"session_id": a, "context_window": {"used_percentage": 41.6}}));
         assert_eq!(first, "Context 42%", "no plan windows before the first answer");
         std::thread::sleep(std::time::Duration::from_millis(3));
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn codex_numbers_come_from_its_session_file_and_stay_apart_from_claude_codes() {
         let dir = tempfile::tempdir().unwrap();
-        let soon = chrono::Utc::now().timestamp() + 3600;
+        let soon = (crate::clock::now_ms() / 1000) + 3600;
         record(dir.path(), &json!({"session_id": "claude-1", "context_window": {"used_percentage": 10}, "rate_limits": {"five_hour": {"used_percentage": 70, "resets_at": soon}}}));
         let file = dir.path().join("rollout.jsonl");
         let count = json!({"type": "event_msg", "payload": {"type": "token_count", "info": {"last_token_usage": {"total_tokens": 47500}, "model_context_window": 475000},

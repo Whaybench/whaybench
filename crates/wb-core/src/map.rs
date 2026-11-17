@@ -360,7 +360,7 @@ fn adopt(data: &Path, sid: &str, source: &Value, position: bool) -> Result<Value
 
 /// One event: `source` is `session/<id>`, `person`, `worker` or `program`.
 pub(crate) fn event(source: &str, kind: &str, nid: Option<&str>, session: Option<&str>, at: i64, data: Value) -> Value {
-    let time = chrono::DateTime::from_timestamp_millis(at).map(|t| t.to_rfc3339()).unwrap_or_default();
+    let time = crate::clock::rfc3339(at);
     let mut e = json!({"specversion": "1.0", "id": fresh("e"), "source": source, "type": kind, "time": time, "data": data});
     if let Some(n) = nid { e["nid"] = json!(n); }
     if let Some(s) = session { e["session"] = json!(s); }
@@ -757,7 +757,7 @@ pub fn node_span(nodes: &[Value]) -> Option<(i64, i64)> {
 /// never its title (a title is in the person's language; it is kept inside the file).
 /// `map-<first>-<last>`, `branch-<node id>-<first>-<last>`.
 pub fn file_name(span: (i64, i64), root: Option<&str>, prefix: &str) -> String {
-    let minute = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%Y%m%d-%H%M").to_string()).unwrap_or_default();
+    let minute = |ms: i64| crate::clock::local(ms, "%Y%m%d-%H%M");
     let (first, last) = span;
     let kind = match root {
         None => "map".to_string(),

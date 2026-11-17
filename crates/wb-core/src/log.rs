@@ -15,7 +15,6 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use chrono::{Local, NaiveDate};
 
 use crate::paths::Data;
 
@@ -34,8 +33,8 @@ pub const DETAIL: &str = "detail";
 struct Log {
     path: PathBuf,
     detail_file: PathBuf,
-    day: Option<NaiveDate>,
-    last: Option<chrono::DateTime<Local>>,
+    day: Option<String>,
+    last: Option<i64>,
     over: bool,
     told: bool,
     detail: BTreeSet<String>,
@@ -52,7 +51,7 @@ pub fn run_id(data: &Data) -> String {
 
 /// A run id no folder has yet: the time now, with a number after it when that second is taken.
 fn new_run_id(data: &Data) -> String {
-    let base = Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let base = crate::clock::local_now("%Y%m%d-%H%M%S");
     let free = |n: &str| !data.log_runs().join(n).exists();
     if free(&base) { return base; }
     (2..).map(|i| format!("{base}-{i}")).find(|n| free(n)).unwrap()
@@ -68,7 +67,7 @@ pub fn open(data: &Data, program: &str, run: &str, reason: &str) -> PathBuf {
         path: path.clone(), detail_file: data.log_detail(), day: None, last: None,
         over: false, told: false, detail: BTreeSet::new(), detail_read: None,
     });
-    header(&format!("Whaybench log · started={} reason={} run={} program={}", Local::now().format("%Y-%m-%d %H:%M:%S"), reason, run, program));
+    header(&format!("Whaybench log · started={} reason={} run={} program={}", crate::clock::local_now("%Y-%m-%d %H:%M:%S"), reason, run, program));
     let runs = prune_runs(&data.log_runs(), KEEP_RUNS, run).unwrap_or(0);
     let sessions = prune_sessions(&data.log_sessions(), Duration::from_secs(KEEP_SESSION_DAYS * 86400)).unwrap_or(0);
     if runs + sessions > 0 {
@@ -78,7 +77,7 @@ pub fn open(data: &Data, program: &str, run: &str, reason: &str) -> PathBuf {
 }
 
 /// The clock as a record line starts with it.
-pub fn clock() -> String { Local::now().format("%H:%M:%S%.3f").to_string() }
+pub fn clock() -> String { crate::clock::local_now("%H:%M:%S%.3f") }
 
 /// One header line (`# ...`).
 pub fn header(text: &str) {
@@ -144,17 +143,18 @@ pub fn line(level: &str, part: &str, event: &str, why: Option<&str>, fields: &[(
     let mut guard = LOG.lock().unwrap();
     let Some(l) = guard.as_mut() else { return };
     if level == DETAIL && (l.over || !wanted(l, part)) { return; }
-    let now = Local::now();
-    let clock = now.format("%H:%M:%S%.3f");
+    let now = crate::clock::now_ms();
+    let clock = crate::clock::local(now, "%H:%M:%S%.3f");
     let mut out = String::new();
-    if l.last.is_some_and(|t| now < t - chrono::Duration::seconds(1)) {
+    if l.last.is_some_and(|t| now < t - 1000) {
         out += &format!("{clock} [{WARN}] [log] clock went back\n");
     }
     l.last = Some(now);
-    if l.day.is_some_and(|d| d != now.date_naive()) {
-        out += &format!("# date {}\n", now.format("%Y-%m-%d"));
+    let day = crate::clock::local(now, "%Y-%m-%d");
+    if l.day.as_ref().is_some_and(|d| *d != day) {
+        out += &format!("# date {day}\n");
     }
-    l.day = Some(now.date_naive());
+    l.day = Some(day);
     out += &cut_line(format!("{clock} {}", format_body(level, part, event, why, fields)));
     out.push('\n');
     write(l, &out);

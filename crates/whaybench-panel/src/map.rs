@@ -133,7 +133,7 @@ fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str)
     };
     let span = sessions::span(d, data.get("sessionId").and_then(Value::as_str).unwrap_or(""), &nodes);
     let path = wb_core::map::free_path(&maps_dir(d), &wb_core::map::file_name(span, root, prefix));
-    let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": data.get("sessionId"), "nodes": wb_core::map::saved_nodes(&nodes)});
+    let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "exported": wb_core::clock::local_now("%Y-%m-%d %H:%M"), "from": data.get("sessionId"), "nodes": wb_core::map::saved_nodes(&nodes)});
     wb_core::paths::write_atomic(&path, serde_json::to_string_pretty(&body).unwrap_or_default())?;
     Ok(path)
 }
@@ -813,7 +813,7 @@ mod tests {
     use super::*;
     #[test]
     fn a_saved_map_is_named_by_kind_and_its_first_and_last_change() {
-        let at = |y: i32, mo: u32, da: u32, h: u32, mi: u32| chrono::TimeZone::with_ymd_and_hms(&chrono::Local, y, mo, da, h, mi, 0).unwrap().timestamp_millis();
+        let at = |y: i16, mo: i8, da: i8, h: i8, mi: i8| wb_core::clock::local_ms(y, mo, da, h, mi).unwrap();
         let nodes = vec![json!({"id":"a","opened":{"at":at(2026,11,3,14,22)}}), json!({"id":"b","opened":{"at":at(2026,11,5,9,0)},"closed":{"at":at(2026,11,11,1,35)}})];
         assert_eq!(wb_core::map::file_name(wb_core::map::node_span(&nodes).unwrap(), None, ""), "map-20261103-1422-20261111-0135");
         assert_eq!(wb_core::map::file_name(wb_core::map::node_span(&nodes).unwrap(), Some("pub-front"), "deleted-"), "deleted-branch-pub-front-20261103-1422-20261111-0135");

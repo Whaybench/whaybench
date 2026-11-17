@@ -89,7 +89,7 @@ pub fn read(d: &Data, source: &Source) -> Option<(Vec<Value>, String, String)> {
 pub fn keep(d: &Data, nodes: &[Value], title: &str, from: &str) -> std::io::Result<PathBuf> {
     fs::create_dir_all(imported_dir(d))?;
     let path = wb_core::map::free_path(&imported_dir(d), &wb_core::map::file_name(sessions::span(d, from, nodes), None, ""));
-    let imported = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+    let imported = wb_core::clock::local_now("%Y-%m-%d %H:%M");
     wb_core::paths::write_atomic(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": wb_core::map::saved_nodes(nodes)}).to_string())?;
     Ok(path)
 }

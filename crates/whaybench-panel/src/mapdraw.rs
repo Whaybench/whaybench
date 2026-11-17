@@ -2,7 +2,6 @@
 //! element carries its id, and a press on it comes back as a link the panel handles, the same as on the tree.
 use std::collections::{HashMap, HashSet};
 
-use chrono::TimeZone;
 use serde_json::Value;
 use wb_core::{paths::Data, theme};
 use wb_store::{arr, s};
@@ -237,7 +236,7 @@ fn frame_time(nodes: &[Value], current: &str, style: &Style, steps: &[Step]) -> 
         let cols: Vec<i64> = turns.iter().copied().filter(|x| *x >= start).collect();
         let head: String = cols.iter().map(|c| {
             let at = lanes.iter().find_map(|l| l.1.get(c).and_then(|m| m.at));
-            let clock = at.and_then(|ms| chrono::Local.timestamp_millis_opt(ms).single()).map(|x| x.format("%H:%M").to_string()).unwrap_or_default();
+            let clock = at.map(|ms| wb_core::clock::local(ms, "%H:%M")).unwrap_or_default();
             wb_core::i18n::f("turn", &[("clock", (clock).to_string()), ("c", (c).to_string())])
         }).collect();
         let mut rows = String::new();

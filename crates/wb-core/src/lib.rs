@@ -12,6 +12,7 @@ pub mod memory;
 pub mod paths;
 pub mod records;
 pub mod session_record;
+pub mod clock;
 pub mod sessions;
 pub mod status;
 pub mod theme;

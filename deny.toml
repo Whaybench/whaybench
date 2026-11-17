@@ -10,9 +10,6 @@ ignore = [
     # ttf-parser (title bar fonts, through ab_glyph) is no longer maintained: no known flaw, and no maintained
     # version of ab_glyph without it yet. Look again when ab_glyph moves off it.
     { id = "RUSTSEC-2026-0192", reason = "unmaintained only, no safe upgrade yet" },
-    # chrono (local time and RFC 3339 in the logs, records and panels) is no longer maintained: no known flaw. Moving
-    # to a maintained date crate touches about 45 places and is its own change.
-    { id = "RUSTSEC-2026-0543", reason = "unmaintained only, no known flaw; replacing it is a separate change" },
 ]
 
 [licenses]

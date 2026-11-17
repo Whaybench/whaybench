@@ -13,7 +13,6 @@ gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
 webkit6 = "0.6"
 regex = "1"
-chrono.workspace = true
 similar = "2"
 
 [lints]

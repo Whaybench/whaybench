@@ -187,7 +187,7 @@ pub fn carry_file(d: &Data, session: &str, style: &str) -> Option<PathBuf> {
     for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
         if e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() > 86_400) { let _ = fs::remove_file(e.path()); }
     }
-    let path = dir.join(format!("{session}-{}.json", chrono::Local::now().timestamp_millis()));
+    let path = dir.join(format!("{session}-{}.json", wb_core::clock::now_ms()));
     let title = format!("{} · {}", wb_core::sessions::session_name(d, session), st.name);
     let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "from": session, "style": style,
         "current": data.get("current"), "nodes": wb_core::map::saved_nodes(&kept)});

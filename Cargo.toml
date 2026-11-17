@@ -19,7 +19,7 @@ wrong_self_convention = "allow"
 
 [workspace.dependencies]
 wb-core = { path = "crates/wb-core" }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+jiff = "0.2.39"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 png = "0.17"

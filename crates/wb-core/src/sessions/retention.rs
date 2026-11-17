@@ -45,7 +45,7 @@ pub fn prune(d: &Data) -> usize {
     // How the nodes changed is kept as long as the conversations: older events go, the nodes stay as they are.
     // shortcut: `keep_mb` counts conversation records only; count the store's events in it if they grow large.
     if days > 0 && d.root.join("memory").join("memory.db").exists() {
-        let before = (chrono::Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
+        let before = crate::clock::rfc3339(crate::clock::now_ms() - days as i64 * 86_400_000);
         if let Ok(n) = crate::db::open(&d.root).and_then(|c| crate::db::events_drop_before(&c, &before))
             && n > 0 { record::decide("memory", "old events dropped", "over the keeping limit", &[("events", n.to_string())]); }
     }
@@ -57,7 +57,7 @@ pub fn prune(d: &Data) -> usize {
     let inherited: Value = read_json(&d.root.join("forks/inherited.json")).unwrap_or(Value::Null);
     let parents: Vec<&str> = inherited.as_object().into_iter().flatten().filter(|(child, _)| record_of(d, child).is_some()).filter_map(|(_, p)| p.as_str()).collect();
     convs.sort_by_key(|c| std::cmp::Reverse(c.0));
-    let now = chrono::Local::now().timestamp_millis();
+    let now = crate::clock::now_ms();
     let sizes: Vec<u64> = convs.iter().map(|c| c.1.iter().flat_map(|id| session_paths(d, id)).map(|p| size_of(&p)).sum()).collect();
     let mut total: u64 = sizes.iter().sum();
     let mut dropped = 0;
@@ -83,7 +83,7 @@ pub fn span(d: &Data, id: &str, nodes: &[Value]) -> (i64, i64) {
     let started = chain(&all, id).iter().filter_map(|n| all.iter().find(|r| r["id"].as_str() == Some(n.as_str()))?["started"].as_i64()).min();
     let answers: Vec<i64> = if id.is_empty() { Vec::new() } else { crate::records::answers_of(d, &crate::records::lineage(d, id)).iter().filter_map(|r| r["at"].as_i64()).collect() };
     let nodes = crate::map::node_span(nodes);
-    let now = chrono::Local::now().timestamp_millis();
+    let now = crate::clock::now_ms();
     let first = started.or(answers.iter().min().copied()).or(nodes.map(|n| n.0)).unwrap_or(now);
     let last = rec["lastActive"].as_i64().or(answers.iter().max().copied()).or(nodes.map(|n| n.1)).unwrap_or(now);
     (first, last.max(first))
@@ -108,7 +108,7 @@ pub fn save_lost_maps(d: &Data) -> usize {
         if nodes.is_empty() { continue; }
         let path = crate::map::free_path(&d.maps(), &crate::map::file_name(span(d, id, &nodes), None, "auto-"));
         let body = serde_json::json!({"format": "whaybench-map", "version": map.get("version"), "title": session_name(d, id),
-            "exported": chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), "from": id, "auto": true, "nodes": crate::map::saved_nodes(&nodes)});
+            "exported": crate::clock::local_now("%Y-%m-%d %H:%M"), "from": id, "auto": true, "nodes": crate::map::saved_nodes(&nodes)});
         if crate::paths::write_atomic(&path, body.to_string()).is_ok() {
             record::decide("session", "map saved", "its conversation is no longer kept", &[("session", id.to_string()), ("file", path.display().to_string())]);
             done.push(id.to_string());
@@ -146,7 +146,7 @@ mod tests {
     fn old_conversations_go_whole_and_only_when_a_limit_is_set() {
         let d = data("prune");
         let day = 86_400_000_i64;
-        let now = chrono::Local::now().timestamp_millis();
+        let now = crate::clock::now_ms();
         rec(&d, "a", serde_json::json!({"id":"a","movedTo":"b"}));
         rec(&d, "b", serde_json::json!({"id":"b","lastActive": now - 40 * day}));
         rec(&d, "c", serde_json::json!({"id":"c","lastActive": now - day}));
@@ -158,7 +158,7 @@ mod tests {
         // How nodes changed is kept as long as the conversations; the nodes themselves stay.
         let conn = crate::db::open(&d.root).unwrap();
         crate::db::node_put(&conn, &serde_json::json!({"nid": "n1", "memid": "m1", "label": "kept"})).unwrap();
-        let at = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).unwrap().to_rfc3339();
+        let at = |ms: i64| crate::clock::rfc3339(ms);
         for (id, ms) in [("old", now - 40 * day), ("new", now - day)] {
             crate::db::event_add(&conn, &serde_json::json!({"id": id, "source": "person", "type": "node.changed", "time": at(ms), "nid": "n1"})).unwrap();
         }
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn over_the_size_the_oldest_go_first_and_a_map_another_took_stays() {
         let d = data("prune-size");
-        let now = chrono::Local::now().timestamp_millis();
+        let now = crate::clock::now_ms();
         fs::create_dir_all(d.root.join("forks")).unwrap();
         for (id, age) in [("p", 4), ("x", 3), ("y", 2), ("child", 1)] {
             rec(&d, id, serde_json::json!({"id": id, "lastActive": now - age * 1000}));

@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+### Changed
+- Dates and times come from jiff instead of chrono, which is no longer maintained (RUSTSEC-2026-0543). Every time
+  shown and every time the records keep reads as before: the records' RFC 3339 form, compared as text, is unchanged.
+
 ## [0.8.7] - 2026-11-17
 
 A waiting session is told on the desktop, subagents show in the session panel, and a restart no longer splits a

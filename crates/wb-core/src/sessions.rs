@@ -108,7 +108,7 @@ fn transcript_of(d: &Data, id: &str) -> Option<PathBuf> {
 pub fn resumed_elsewhere(d: &Data, me: &str) -> Option<(String, Option<String>)> {
     // The last 90 seconds are at the end of the file; 2 MB leaves room for large tool results in them.
     let text = crate::paths::read_tail(&transcript_of(d, me)?, 2 * 1024 * 1024).ok()?;
-    let short = opened_short(&text, chrono::Utc::now())?;
+    let short = opened_short(&text, crate::clock::now_ms())?;
     let target = fs::read_dir(sessions_dir(d)).ok()?.flatten().filter_map(|f| f.file_name().to_string_lossy().strip_suffix(".json").map(String::from))
         .find(|n| n.starts_with(&short))?;
     if target == me { return None; }
@@ -117,7 +117,7 @@ pub fn resumed_elsewhere(d: &Data, me: &str) -> Option<(String, Option<String>)>
 }
 
 /// The short number of the background session a transcript says was opened in the last 90 seconds.
-fn opened_short(text: &str, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
+fn opened_short(text: &str, now: i64) -> Option<String> {
     let mut short = None;
     for line in text.lines().filter(|l| l.contains("running in the background (")) {
         let Ok(row) = serde_json::from_str::<Value>(line) else { continue };
@@ -128,8 +128,8 @@ fn opened_short(text: &str, now: chrono::DateTime<chrono::Utc>) -> Option<String
         let id = &rest[at + "running in the background (".len()..];
         let id = id.split(')').next().unwrap_or("");
         if id.len() != 8 || !id.bytes().all(|b| b.is_ascii_hexdigit()) { continue; }
-        let when = row["timestamp"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok());
-        if when.is_some_and(|t| (now - t.with_timezone(&chrono::Utc)).num_seconds() < 90) { short = Some(id.to_string()); }
+        let when = row["timestamp"].as_str().and_then(crate::clock::parse_ms);
+        if when.is_some_and(|t| now - t < 90_000) { short = Some(id.to_string()); }
     }
     short
 }
@@ -509,8 +509,8 @@ mod tests {
         assert_eq!(continued_in_text(&text).as_deref(), Some(id));
         assert_eq!(continued_in_text("nothing"), None);
         // /resume into a background session: only Claude Code's own system row counts, and only a recent one.
-        let now = chrono::Utc::now();
-        let row = |kind: &str, ago: i64| serde_json::json!({"type": kind, "subtype": "local_command", "timestamp": (now - chrono::Duration::seconds(ago)).to_rfc3339(),
+        let now = crate::clock::now_ms();
+        let row = |kind: &str, ago: i64| serde_json::json!({"type": kind, "subtype": "local_command", "timestamp": crate::clock::rfc3339(now - ago * 1000),
             "content": "<local-command-stdout>Opening Fix the store, running in the background (5813148b)</local-command-stdout>"}).to_string();
         assert_eq!(opened_short(&row("system", 5), now).as_deref(), Some("5813148b"));
         assert_eq!(opened_short(&row("user", 5), now), None, "the same words in the conversation do not count");

@@ -18,7 +18,7 @@ pub fn file_touched(data: &Path, sid: &str, op: &str, path: &str, node: Option<&
     if !["read", "edit", "attach"].contains(&op) { return Err(format!("file touch must be read, edit or attach: {op}").into()); }
     let entries = map::session_entries(data, sid);
     let nid = node.and_then(|id| entries.iter().find(|e| e.0 == id)).map(|e| e.1.as_str());
-    let mut e = map::event(&format!("session/{sid}"), "file.touched", nid, Some(sid), chrono::Local::now().timestamp_millis(), json!({"path": path, "op": op}));
+    let mut e = map::event(&format!("session/{sid}"), "file.touched", nid, Some(sid), crate::clock::now_ms(), json!({"path": path, "op": op}));
     e["path"] = json!(path);
     db::event_add(&db::open(data)?, &e)
 }
@@ -36,7 +36,7 @@ pub fn line(n: &Value, aliases: &HashMap<String, i64>) -> String {
     let from = n["origin"].as_str().unwrap_or("");
     let key = short(n, aliases);
     let what = n.get("state").or_else(|| n.get("kind")).and_then(Value::as_str).unwrap_or(if is_open(n) { "open" } else { "closed" });
-    let day = chrono::DateTime::from_timestamp_millis(when(n)).map(|t| t.with_timezone(&chrono::Local).format("%m-%d").to_string()).unwrap_or_default();
+    let day = crate::clock::local(when(n), "%m-%d");
     let due = n.get("due").or_else(|| n.get("at")).and_then(Value::as_str).map(|d| format!(" · due {d}")).unwrap_or_default();
     // A decision's reason travels with it: a new session misses the why more than the what.
     let why = n.get("detail").and_then(Value::as_str).filter(|_| n["kind"] == "conclusion")
@@ -63,7 +63,7 @@ pub fn steps(data: &Path, sid: &str) -> Vec<(i64, i64, String, bool)> {
     let evs = db::open(data).and_then(|c| db::events(&c, "session = ? AND type IN ('node.added', 'node.changed')", &[sid])).unwrap_or_default();
     evs.into_iter().filter_map(|e| {
         let id = entries.iter().find(|x| Some(x.1.as_str()) == e["nid"].as_str())?.0.clone();
-        let at = chrono::DateTime::parse_from_rfc3339(e["time"].as_str()?).ok()?.timestamp_millis();
+        let at = crate::clock::parse_ms(e["time"].as_str()?)?;
         // A change holds [before, after]; a node made closed holds the value itself.
         let state = if e["type"] == "node.added" { &e["data"]["state"] } else { &e["data"]["state"][1] };
         let closed = !is_open(&json!({"state": state})) && (e["type"] == "node.added" || is_open(&json!({"state": e["data"]["state"][0]})));
@@ -97,7 +97,7 @@ pub fn list(data: &Path, sid: &str, limit: usize) -> Vec<String> {
         let own_mem: HashSet<&str> = own.iter().filter_map(|n| n.get("memid")?.as_str()).collect();
         for m in &own_mem { for n in db::nodes(&conn, "memid = ?", &[m])? { push(&n, &mut out); } }
         for nid in by_file(&conn, sid)?.1 { if let Some(n) = db::node_get(&conn, &nid)? { push(&n, &mut out); } }
-        let soon = (chrono::Local::now().date_naive() + chrono::Duration::days(7)).format("%Y-%m-%d 99").to_string();
+        let soon = crate::clock::local(crate::clock::now_ms() + 7 * 86_400_000, "%Y-%m-%d 99");
         for n in db::nodes(&conn, &format!("{OPEN} AND coalesce(due, at) <= ?"), &[&soon])? { push(&n, &mut out); }
         // A conversation given only part of a map (a display style such as Focus) gets only open nodes of others too.
         let which = if part_carried(data, sid).exists() { OPEN } else { "1" };
@@ -122,12 +122,12 @@ fn seen_file(data: &Path, sid: &str) -> PathBuf { data.join("cache").join("memor
 pub fn mark_seen(data: &Path, sid: &str) {
     let f = seen_file(data, sid);
     let _ = fs::create_dir_all(f.parent().unwrap_or(data));
-    let _ = crate::paths::write_atomic(&f, chrono::Local::now().timestamp_millis().to_string());
+    let _ = crate::paths::write_atomic(&f, crate::clock::now_ms().to_string());
 }
 
 fn seen_at(data: &Path, sid: &str) -> i64 { fs::read_to_string(seen_file(data, sid)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0) }
 
-fn after(e: &Value, since: i64) -> bool { chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).is_ok_and(|t| t.timestamp_millis() > since) }
+fn after(e: &Value, since: i64) -> bool { crate::clock::parse_ms(e["time"].as_str().unwrap_or("")).is_some_and(|t| t > since) }
 
 /// Who made a change, as the memory list names sessions: `person`, or the first 4 characters of the session id.
 fn by_whom(source: &str) -> String {
@@ -160,7 +160,7 @@ pub fn delta(data: &Path, sid: &str) -> Vec<String> {
         let own_mem: HashSet<&str> = own.iter().filter_map(|n| n.get("memid")?.as_str()).collect();
         let mine = by_file(&conn, sid)?.0;
         // Only what came after the session last looked is read (the store keeps times as RFC 3339 in UTC, which sort as text).
-        let from = chrono::DateTime::from_timestamp_millis(since).map(|t| t.to_rfc3339()).unwrap_or_default();
+        let from = crate::clock::rfc3339(since);
         let events = db::events(&conn, "source != ? AND time >= ?", &[&format!("session/{sid}"), &from])?;
         let aliases = db::aliases(&conn).unwrap_or_default();
         let mut out = Vec::new();

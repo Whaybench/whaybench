@@ -363,7 +363,7 @@ fn tell_changes(data: &Path, sid: &str, changes: &[(String, u64)]) {
     let _ = write_json(&file, &told);
 }
 
-fn clock(ms: u64) -> String { chrono::DateTime::from_timestamp_millis(ms as i64).map(|t| t.with_timezone(&chrono::Local).format("%H:%M:%S").to_string()).unwrap_or_default() }
+fn clock(ms: u64) -> String { crate::clock::local(ms as i64, "%H:%M:%S") }
 
 /// For the next prompt: files the person changed since the agent read or changed them.
 fn changed_files_note(data: &Path, sid: &str) -> Option<String> {

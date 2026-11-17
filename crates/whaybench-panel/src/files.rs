@@ -60,7 +60,7 @@ fn escape_html(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;")
 pub fn diff_page(path: &str, edits: &[Value], bg: &str, fg: &str) -> String {
     let mut blocks = String::new();
     for e in edits.iter().rev() {
-        let when = chrono::DateTime::from_timestamp_millis(e["at"].as_i64().unwrap_or(0)).map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string()).unwrap_or_default();
+        let when = wb_core::clock::local(e["at"].as_i64().unwrap_or(0), "%m-%d %H:%M");
         let diff = TextDiff::from_lines(s(e, "before"), s(e, "after"));
         let mut rows = String::new();
         for group in diff.grouped_ops(3) {
@@ -121,7 +121,7 @@ fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dy
                 let html = diff_page(&p, &edits, &hex([bg[0], bg[1], bg[2]]), &hex(t.ink));
                 let dir = d2.cache().join("diffs");
                 let _ = std::fs::create_dir_all(&dir);
-                let out = dir.join(format!("{}.html", chrono::Utc::now().timestamp_millis()));
+                let out = dir.join(format!("{}.html", wb_core::clock::now_ms()));
                 if std::fs::write(&out, html).is_ok() { let _ = view::open(&d2, &out.to_string_lossy(), None); }
             }));
         }

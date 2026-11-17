@@ -201,7 +201,7 @@ pub fn table_pipes(text: &str) -> String {
 }
 
 pub fn ago(ms: i64) -> String {
-    let minutes = (chrono::Utc::now().timestamp_millis() - ms) / 60_000;
+    let minutes = (wb_core::clock::now_ms() - ms) / 60_000;
     if minutes < 1 { wb_core::i18n::t("just-now").into() } else if minutes < 60 { wb_core::i18n::f("min-ago", &[("minutes", (minutes).to_string())]) } else if minutes < 1440 { wb_core::i18n::f("h-ago", &[("a1", (minutes / 60).to_string())]) } else { wb_core::i18n::f("d-ago", &[("a1", (minutes / 1440).to_string())]) }
 }
 

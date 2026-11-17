@@ -2,7 +2,6 @@
 //! Built only while the tab is on show, and again only when the memory's files changed.
 use std::collections::HashMap;
 
-use chrono::Datelike;
 use serde_json::Value;
 use wb_core::i18n::{f, t};
 
@@ -73,9 +72,9 @@ pub fn rows(events: &[Value], mut name: impl FnMut(&str) -> String, mut label: i
         };
         let source = e["source"].as_str().unwrap_or("");
         let who = match source.strip_prefix("session/") { Some(s) => name(s), None if source == "person" => t("history-person").to_string(), None => t("history-program").to_string() };
-        let at = chrono::DateTime::parse_from_rfc3339(e["time"].as_str().unwrap_or("")).ok().map(|x| x.with_timezone(&chrono::Local));
-        let day = at.map(|x| format!("{} ({})", x.format("%m-%d"), t(days[x.weekday().num_days_from_monday() as usize]))).unwrap_or_default();
-        let clock = at.map(|x| x.format("%H:%M").to_string()).unwrap_or_default();
+        let at = wb_core::clock::parse_ms(e["time"].as_str().unwrap_or(""));
+        let day = at.and_then(|x| Some(format!("{} ({})", wb_core::clock::local(x, "%m-%d"), t(days[wb_core::clock::weekday(x)?])))).unwrap_or_default();
+        let clock = at.map(|x| wb_core::clock::local(x, "%H:%M")).unwrap_or_default();
         let label = named(&nid).unwrap_or_else(|| "—".to_string());
         out.push(Row { day, line: format!("{clock}  {label} · {what} · {}", who.chars().take(30).collect::<String>()), tip, nid, label });
     }
