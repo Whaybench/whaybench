@@ -51,6 +51,8 @@ conversation in two.
   now also sends Claude Code's `SubagentStart` and `SubagentStop`; the list is kept in `cache/subagents/<session>/`.
 
 ### Fixed
+- The status line Whaybench gives Claude Code runs `whaybench statusline`, not `whaybench-term statusline`, which
+  stopped with "unknown argument": context and plan usage reach the notifications panel again.
 - A conversation moved to the background could come up with an empty map: when its new number started before
   Whaybench followed the move, the empty map made at the start kept the old one from being copied. Moves are now
   found only by Claude Code's "continued in" note; the start hook's own note (`cache/forks/pending.json`), which could

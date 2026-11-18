@@ -111,7 +111,7 @@ impl Relay {
             // Context and plan usage for the notifications panel come from the status line. A status line the person
             // set is theirs to keep (it can pass the same input on to `whaybench statusline`); without one, ours.
             if !sessions::claude_setting_set("statusLine", std::path::Path::new(&cwd))
-                && let Some(exe) = paths::own_exe().ok().and_then(|e| wb_core::agents::shell_quote(&e).ok()) {
+                && let Some(exe) = paths::own_exe().ok().and_then(|e| wb_core::agents::shell_quote(&e.with_file_name("whaybench")).ok()) {
                 settings.insert("statusLine".into(), serde_json::json!({"type": "command", "command": format!("{exe} statusline")}));
             }
             if !settings.is_empty() { args.extend(["--settings".into(), serde_json::Value::Object(settings).to_string()]); }
