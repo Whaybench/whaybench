@@ -2,7 +2,7 @@
 
 > Codex CLI support is experimental. Some parts may not work yet; reports are welcome in [Issues](https://github.com/Whaybench/whaybench/issues).
 
-Choose `New conversation · Codex` in the session menu and that tab runs Codex CLI. Claude Code and Codex tabs work side
+Choose `New conversation → Codex` in the session menu and that tab runs Codex CLI. Claude Code and Codex tabs work side
 by side; a session opens again with the agent it was started with.
 Codex is an agent add-on, `addons/agents/codex/`: its command, arguments, settings folder, hook and MCP templates and
 guidance are files there, not code. How to make one is in `addons/agents/README.md`.

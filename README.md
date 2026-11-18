@@ -93,7 +93,7 @@ Themes, languages, map styles and document templates are folders. English and Ko
 
 ## Codex CLI
 
-Experimental. Open a Codex conversation from the session menu (**New conversation · Codex**). See
+Experimental. Open a Codex conversation from the session menu (**New conversation → Codex**). See
 [docs/codex.md](docs/codex.md).
 
 ## Build from source

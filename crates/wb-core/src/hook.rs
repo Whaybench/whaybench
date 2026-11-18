@@ -523,22 +523,33 @@ fn map_is_empty(data: &Path, sid: &str) -> bool {
 fn carry_in(data: &Path, sid: &str) -> Option<String> {
     let from = std::env::var("WHAYBENCH_MAP_FROM").ok().filter(|f| !f.is_empty())?;
     if !map_is_empty(data, sid) { return None; }
+    // Passed on as the main map panel showed it: the screen itself is what the agent works from.
+    let mut screen = None;
     let label = if from.starts_with('/') {
         let body = map::view_file(data, Path::new(&from)).ok()?;
         if body["nodes"].as_array().is_none_or(Vec::is_empty) { return None; }
         // A part of a session's map passed on in a display style keeps where that conversation was.
         if body.get("style").is_some() {
             map::take_over(data, sid, &body).ok()?;
-            let _ = crate::paths::write_atomic(&crate::memory::part_carried(data, sid), body["style"].as_str().unwrap_or(""));
+            if body["partial"] != false { let _ = crate::paths::write_atomic(&crate::memory::part_carried(data, sid), body["style"].as_str().unwrap_or("")); }
         } else { map::start_from(data, sid, &body).ok()?; }
-        format!("imported map '{}'", body["title"].as_str().unwrap_or(&from))
+        match (body["from"].as_str(), body["screen"].as_str()) {
+            (Some(source), Some(text)) => {
+                screen = Some(i18n::ai_f("carried-screen", &[("style", body["style"].as_str().unwrap_or("").to_string()), ("screen", text.to_string()), ("source", source.to_string())]));
+                i18n::ai_f("carried-session", &[("id", source.chars().take(8).collect())])
+            }
+            _ => format!("imported map '{}'", body["title"].as_str().unwrap_or(&from)),
+        }
     } else {
         let source = read_json(&data.join(format!("{}.json", safe_id(&from).ok()?)), Value::Null).ok()?;
         source.get("nodes")?;
         crate::map_tool::call(data, sid, &json!({"inherit": from})).ok()?;
         i18n::ai_f("carried-session", &[("id", from.chars().take(8).collect())])
     };
-    let summary = carried_summary(&map::command(data, sid, None).ok()?, &label);
+    let summary = match screen {
+        Some(screen) => format!("{}\n\n{screen}", i18n::ai_f("carried-head", &[("from", label)])),
+        None => carried_summary(&map::command(data, sid, None).ok()?, &label),
+    };
     match std::env::var("WHAYBENCH_MAP_PROMPT").ok().filter(|p| !p.is_empty()) {
         // No tab to type it in yet: the summary is told at the start instead.
         Some(asked) if crate::sessions::queue_prompt(&crate::paths::Data::new(data.to_path_buf()), sid, &format!("{asked}\n\n{summary}")) => None,

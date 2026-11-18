@@ -99,7 +99,7 @@ pub fn list(data: &Path, sid: &str, limit: usize) -> Vec<String> {
         for nid in by_file(&conn, sid)?.1 { if let Some(n) = db::node_get(&conn, &nid)? { push(&n, &mut out); } }
         let soon = crate::clock::local(crate::clock::now_ms() + 7 * 86_400_000, "%Y-%m-%d 99");
         for n in db::nodes(&conn, &format!("{OPEN} AND coalesce(due, at) <= ?"), &[&soon])? { push(&n, &mut out); }
-        // A conversation given only part of a map (a display style such as Focus) gets only open nodes of others too.
+        // A conversation given only part of a map (as shown, with parts folded or hidden) gets only open nodes of others too.
         let which = if part_carried(data, sid).exists() { OPEN } else { "1" };
         for n in db::nodes(&conn, &format!("{which} ORDER BY {RECENT} LIMIT {cap}"), &[])? { push(&n, &mut out); }
         Ok(out)
@@ -113,7 +113,7 @@ fn unread(what: &str, e: Box<dyn std::error::Error>) -> Vec<String> {
     Vec::new()
 }
 
-/// Marks a session that started from part of a map; holds the display style it was passed in.
+/// Marks a session that started from part of a map as shown; holds the display style it was shown in.
 pub fn part_carried(data: &Path, sid: &str) -> PathBuf { data.join("cache").join("carried-part").join(sid) }
 
 fn seen_file(data: &Path, sid: &str) -> PathBuf { data.join("cache").join("memory-seen").join(sid) }

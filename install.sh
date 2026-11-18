@@ -99,7 +99,7 @@ if command -v claude >/dev/null; then
         say "Then run:  claude plugin marketplace add Whaybench/whaybench && claude plugin install context-map@whaybench && claude plugin update context-map@whaybench"
     fi
 else
-    say "Claude Code was not found. With Codex CLI, open a conversation with Session → New conversation · Codex."
+    say "Claude Code was not found. With Codex CLI, open a conversation with Session → New conversation → Codex."
 fi
 
 # What the programs need from the system: missing packages are installed with sudo once the person says yes.

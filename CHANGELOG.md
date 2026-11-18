@@ -8,6 +8,11 @@ names another step.
 ## [Unreleased]
 
 ### Changed
+- Conversation map → New conversation from this map is now a submenu: Whole map, or As shown, each for an agent.
+  As shown reads the main map panel at that moment (the display style, the branches folded or open) and passes on
+  the nodes on screen, the screen as text with folded parts as one line, and the command that reads the whole map.
+  The separate "Carried to a new conversation" choice is gone.
+- Session → New conversation is a submenu of the agents too, in the same shape.
 - Taking one branch of an imported map as a reference now tells the session the command that reads the map
   file, so it can look up a node's details (reasons, symptoms), not only its label.
 

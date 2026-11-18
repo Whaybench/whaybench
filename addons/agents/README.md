@@ -10,7 +10,7 @@ addons/agents/<id>/
   prompt.md       what it is told with each prompt instead (optional)
 ```
 
-Each agent is a line in the session menu, `New conversation · <name>`. A session opens again with the agent it was
+Each agent is a line in the session menu, `New conversation → <name>`. A session opens again with the agent it was
 started with, and the session list shows the agent's name.
 
 ## What an agent needs

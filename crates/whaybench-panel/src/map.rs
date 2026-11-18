@@ -61,6 +61,10 @@ impl Tree {
         let sub = self.below(s(n, "id"));
         !sub.is_empty() && !is_open(n) && sub.iter().all(|k| !is_open(k)) && !sub.iter().any(|k| s(k, "id") == current)
     }
+    /// Folded on the screen: the default, unless the person turned it.
+    pub fn folded(&self, n: &Value, top: bool, current: &str, flipped: &HashSet<String>) -> bool {
+        self.kids.contains_key(s(n, "id")) && (self.default_folded(n, top, current) != flipped.contains(s(n, "id")))
+    }
 }
 
 struct Panel {
@@ -503,6 +507,34 @@ fn style_chosen(d: &Data, panel: &Rc<RefCell<Panel>>, scope: Option<&(String, St
     }
 }
 
+/// The default tree as it is on the screen: the node ids shown, and the screen as text, a folded node as one line.
+/// The same folding as `draw`.
+fn shown_tree(data: &Value, flipped: &HashSet<String>) -> (Vec<String>, String) {
+    fn walk(tree: &Tree, nodes: &[Value], depth: usize, top: bool, current: &str, flipped: &HashSet<String>, out: &mut (Vec<String>, Vec<String>)) {
+        for n in nodes {
+            let id = s(n, "id");
+            let kids = tree.kids.get(id);
+            let folded = tree.folded(n, top, current, flipped);
+            let tail = if folded { wb_core::i18n::ai_f("carried-folded", &[("n", tree.below(id).len().to_string())]) } else { String::new() };
+            out.0.push(id.to_string());
+            out.1.push(format!("{}{} {}{tail}", "  ".repeat(depth), glyph(n, current), s(n, "label")));
+            if let (Some(k), false) = (kids, folded) { walk(tree, k, depth + 1, false, current, flipped, out); }
+        }
+    }
+    let tree = tree_of(data);
+    let mut out = (Vec::new(), Vec::new());
+    walk(&tree, tree.kids.get("").map(Vec::as_slice).unwrap_or(&[]), 0, true, s(data, "current"), flipped, &mut out);
+    (out.0, out.1.join("\n"))
+}
+
+/// A new conversation from the map as this panel shows it now.
+fn carry_shown(d: &Data, agent: &str, data: &Value, style: &str, shown: &[String], screen: &str) {
+    let Some(session) = sessions::target(d) else { return status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6) };
+    let Some(path) = mapstyles::carry_file(d, &session, data, style, shown, screen) else { return status::say(d, wb_core::i18n::t("carry-shown-failed"), 6) };
+    record::decide("map", "carried as shown", "the person chose", &[("style", style.to_string()), ("nodes", shown.len().to_string())]);
+    crate::common::ctl(d, crate::menu::session_args(d, &["new", "--agent", agent, &path.to_string_lossy()]));
+}
+
 fn escape(t: &str) -> String { glib::markup_escape_text(t).to_string() }
 
 fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option<&(String, String)>) {
@@ -525,7 +557,7 @@ fn draw(list: &gtk::ListBox, panel: &Rc<RefCell<Panel>>, d: &Data, scope: Option
             let id = s(n, "id").to_string();
             let here = id == *current;
             let kids = tree.kids.get(&id);
-            let folded = kids.is_some() && (tree.default_folded(n, top, current) != flipped.contains(&id));
+            let folded = tree.folded(n, top, current, flipped);
             let area = gtk::Box::new(gtk::Orientation::Horizontal, 2);
             area.set_margin_start(depth * unit);
             let arrow = gtk::Button::with_label(if kids.is_none() { " " } else if folded { "▸" } else { "▾" });
@@ -753,6 +785,28 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
                 match m.get("do").and_then(Value::as_str) {
                     Some("tidy") => ask(),
                     Some("open") => open_map_file(&win2, &d),
+                    // From the menu bar: what is on this screen now goes to a new conversation.
+                    Some("carry") => {
+                        let agent = m.get("agent").and_then(Value::as_str).unwrap_or_default().to_string();
+                        let (data, flipped, style) = { let p = panel.borrow(); (p.data.clone(), p.flipped.clone(), p.style.clone()) };
+                        let Some(data) = data else { status::say(&d, wb_core::i18n::t("carry-shown-failed"), 6); return };
+                        let page = stack.visible_child_name().as_deref() == Some("page");
+                        let name = mapstyles::find(&d, &style).filter(|_| page).map_or(mapstyles::DEFAULT.to_string(), |x| x.name);
+                        match web.borrow().clone().filter(|_| page) {
+                            None => { let (ids, screen) = shown_tree(&data, &flipped); carry_shown(&d, &agent, &data, &name, &ids, &screen); }
+                            // A style's page: what the browser lays out, so what the page hides stays out.
+                            Some(view) => {
+                                let d2 = d.clone();
+                                let js = "JSON.stringify({ids:[...document.querySelectorAll('[data-n]')].filter(e=>e.getClientRects().length).map(e=>e.dataset.n),text:document.body.innerText})";
+                                view.evaluate_javascript(js, None, None, None::<&gio::Cancellable>, move |r| {
+                                    let got: Value = r.ok().and_then(|x| serde_json::from_str(&x.to_str()).ok()).unwrap_or_default();
+                                    let ids: Vec<String> = got["ids"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+                                    if ids.is_empty() { return status::say(&d2, wb_core::i18n::t("carry-shown-failed"), 6); }
+                                    carry_shown(&d2, &agent, &data, &name, &ids, s(&got, "text"));
+                                });
+                            }
+                        }
+                    }
                     // From the project panel: an item's original node.
                     Some("pick") => {
                         if let Some(n) = m.get("node").and_then(Value::as_str) {
@@ -831,6 +885,15 @@ mod tests {
     }
     fn map() -> Value {
         json!({"current":"d","nodes":[{"id":"t","state":"done","label":"top"},{"id":"a","parent":"t","state":"done"},{"id":"b","parent":"a","state":"done"},{"id":"c","parent":"t","state":"done"},{"id":"d","parent":"c","state":"done"},{"id":"lost","parent":"none"}]})
+    }
+    #[test]
+    fn the_screen_is_what_is_unfolded() {
+        let m = map();
+        let (ids, text) = shown_tree(&m, &HashSet::new());
+        assert_eq!(ids, ["t", "a", "c", "d", "lost"], "a is folded at first, b under it is not on the screen");
+        assert!(text.lines().nth(1).is_some_and(|l| l.starts_with("  ✓") && l.contains('1')), "a folded node is one line with its count: {text}");
+        let (ids, _) = shown_tree(&m, &HashSet::from(["c".to_string(), "a".to_string()]));
+        assert_eq!(ids, ["t", "a", "b", "c", "lost"], "what the person turned");
     }
     #[test]
     fn what_folds_at_first() {

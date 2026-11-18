@@ -146,22 +146,11 @@ pub fn set_current(d: &Data, panel: &str, id: &str) {
     let _ = write_json(&choice_file(d), &v);
 }
 
-/// The style a new conversation from the map is given by: the one chosen for it, else the main map's.
-pub fn carry_choice(d: &Data) -> String {
-    let id = read(&choice_file(d)).and_then(|v| v.get("carry")?.as_str().map(String::from)).unwrap_or_default();
-    if id == DEFAULT || find(d, &id).is_some() { id } else { current(d, "map") }
-}
-
-/// What a new conversation from the map takes when this style is chosen: a tree with the path filter (Focus) takes the
-/// way to the current node and every open node, with the branches above them; every other style takes the whole map.
-pub fn carried(style: Option<&Style>, nodes: &[Value], current: &str) -> Vec<Value> {
-    let focus = style.is_some_and(|st| st.frame() == Some("tree") && s(&st.raw, "filter") == "path");
-    if !focus { return nodes.to_vec(); }
-    let mut keep: HashSet<String> = path_to(nodes, current).iter().map(|n| s(n, "id").to_string()).collect();
-    for n in nodes.iter().filter(|n| wb_core::map::is_open(n)) {
-        keep.extend(path_to(nodes, s(n, "id")).iter().map(|a| s(a, "id").to_string()));
-    }
-    // What a kept node requires or assumes comes too, with its branch: the map is not valid without the nodes named.
+/// What a new conversation from the map as shown takes: the nodes on the screen, the branches above them (the map
+/// is a tree), and what a kept node requires or assumes, with its branch: the map is not valid without the nodes named.
+pub fn carried(nodes: &[Value], shown: &[String]) -> Vec<Value> {
+    let mut keep: HashSet<String> = HashSet::new();
+    for id in shown { keep.extend(path_to(nodes, id).iter().map(|a| s(a, "id").to_string())); }
     let ids: HashSet<&str> = nodes.iter().map(|n| s(n, "id")).collect();
     loop {
         let named: Vec<String> = nodes.iter().filter(|n| keep.contains(s(n, "id")))
@@ -174,23 +163,24 @@ pub fn carried(style: Option<&Style>, nodes: &[Value], current: &str) -> Vec<Val
     nodes.iter().filter(|n| keep.contains(s(n, "id"))).cloned().collect()
 }
 
-/// The session's map as `style` passes it on, written for `session new` to start from. None when the style takes the
-/// whole map: the new conversation then takes it over from the session itself.
-pub fn carry_file(d: &Data, session: &str, style: &str) -> Option<PathBuf> {
-    let st = find(d, style)?;
-    let data = wb_core::sessions::map_of(d, session)?;
-    let nodes = arr(&data, "nodes");
-    let kept = carried(Some(&st), nodes, s(&data, "current"));
-    if kept.len() == nodes.len() { return None; }
+/// The session's map as the main map panel shows it, written for `session new` to start from: the nodes on the screen
+/// (`shown`) with the way to the current node (the map is not valid without it), and the screen as text. The whole map
+/// stays readable from the session itself. None when nothing on the screen is in the map.
+pub fn carry_file(d: &Data, session: &str, data: &Value, style: &str, shown: &[String], screen: &str) -> Option<PathBuf> {
+    let nodes = arr(data, "nodes");
+    let mut ids = shown.to_vec();
+    ids.extend(path_to(nodes, s(data, "current")).iter().map(|n| s(n, "id").to_string()));
+    let kept = carried(nodes, &ids);
+    if !shown.iter().any(|i| kept.iter().any(|n| s(n, "id") == i)) { return None; }
     let dir = d.cache().join("carry");
     // Read when their conversation started; a day later they are of no use.
     for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
         if e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() > 86_400) { let _ = fs::remove_file(e.path()); }
     }
-    let path = dir.join(format!("{session}-{}.json", wb_core::clock::now_ms()));
-    let title = format!("{} · {}", wb_core::sessions::session_name(d, session), st.name);
-    let body = json!({"format": "whaybench-map", "version": data.get("version"), "title": title, "from": session, "style": style,
+    let body = json!({"format": "whaybench-map", "version": data.get("version"), "from": session, "style": style, "screen": screen,
+        "partial": kept.len() < nodes.len(), "title": format!("{} · {style}", wb_core::sessions::session_name(d, session)),
         "current": data.get("current"), "nodes": wb_core::map::saved_nodes(&kept)});
+    let path = dir.join(format!("{session}-{}.json", wb_core::clock::now_ms()));
     wb_core::paths::write_atomic(&path, body.to_string()).ok()?;
     Some(path)
 }
@@ -276,16 +266,14 @@ pub fn allow(d: &Data, style: &Style) {
 mod tests {
     use super::*;
     #[test]
-    fn focus_carries_the_way_and_the_open_nodes_others_all() {
-        let n = |id: &str, parent: &str, state: &str| json!({"id": id, "parent": parent, "state": state});
-        let nodes = vec![n("a", "", "done"), n("a1", "a", "done"), n("a2", "a", "plan"), n("b", "", "done"), n("b1", "b", "done"), n("c", "", "doing")];
-        let focus = Style { id: "focus".into(), name: "Focus".into(), raw: json!({"frame": "tree", "filter": "path"}), path: PathBuf::new() };
+    fn the_screen_carries_its_nodes_their_branches_and_what_they_require() {
+        let n = |id: &str, parent: &str| json!({"id": id, "parent": parent});
+        let mut nodes = vec![n("a", ""), n("a1", "a"), n("a2", "a"), n("b", ""), n("b1", "b"), n("c", "")];
         let ids = |v: Vec<Value>| v.iter().map(|x| s(x, "id").to_string()).collect::<Vec<_>>();
-        assert_eq!(ids(carried(Some(&focus), &nodes, "b1")), ["a", "a2", "b", "b1", "c"], "way to b1, open a2 with its branch, open c; a1 stays");
-        assert_eq!(carried(None, &nodes, "b1").len(), 6, "the tree takes all");
-        let mut needs = nodes.clone();
-        needs[5]["requires"] = json!("a1 ∧ ¬b");
-        assert_eq!(ids(carried(Some(&focus), &needs, "b1")), ["a", "a1", "a2", "b", "b1", "c"], "a closed node an open one requires comes along");
+        let shown = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(carried(&nodes, &shown(&["b1", "c"]))), ["b", "b1", "c"], "the branch above comes along");
+        nodes[5]["requires"] = json!("a1 ∧ ¬b");
+        assert_eq!(ids(carried(&nodes, &shown(&["c"]))), ["a", "a1", "b", "c"], "a required node comes with its branch");
     }
     struct St { data: Data }
     fn scratch(name: &str) -> St {

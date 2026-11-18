@@ -103,7 +103,7 @@ fn whaybench_menu(d: &Data, k: &Maker) -> gio::Menu {
     m
 }
 
-fn session_args(d: &Data, rest: &[&str]) -> Vec<String> {
+pub(crate) fn session_args(d: &Data, rest: &[&str]) -> Vec<String> {
     let mut a = vec!["--data-dir".to_string(), d.root.to_string_lossy().to_string(), "session".to_string()];
     a.extend(rest.iter().map(|s| s.to_string()));
     a
@@ -111,9 +111,14 @@ fn session_args(d: &Data, rest: &[&str]) -> Vec<String> {
 
 fn new_tab_with_map(d: &Data, agent: &str) {
     let Some(s) = sessions::target(d) else { return status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6) };
-    // A style that shows part of the map passes that part on; the whole map is taken over from the session.
-    let from = crate::mapstyles::carry_file(d, &s, &crate::mapstyles::carry_choice(d)).map_or(s, |f| f.to_string_lossy().to_string());
-    ctl(d, session_args(d, &["new", "--agent", agent, &from]));
+    ctl(d, session_args(d, &["new", "--agent", agent, &s]));
+}
+
+/// As shown: the main map panel knows what is on its screen, folds included, so it passes the map on itself.
+fn new_tab_as_shown(d: &Data, agent: &str) {
+    if sessions::target(d).is_none() { return status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6) }
+    if !open_keys(d).iter().any(|t| t == "dev.whaybench.map#1" || t.starts_with("dev.whaybench.map#1#")) { return status::say(d, wb_core::i18n::t("carry-shown-no-map-panel"), 6) }
+    status::send(d, "map", json!({"do": "carry", "agent": agent}));
 }
 
 fn session_menu(d: &Data, k: &Maker) -> gio::Menu {
@@ -125,10 +130,12 @@ fn session_menu(d: &Data, k: &Maker) -> gio::Menu {
             status::send(&d2, "sessions", json!({"search": true}));
         });
     }
+    let new = gio::Menu::new();
     for (id, name) in wb_core::agents::list(&d.root) {
         let d2 = d.clone();
-        k.add(&m, &wb_core::i18n::f("new-conversation-with", &[("name", name)]), move || ctl(&d2, session_args(&d2, &["new", "--agent", &id])));
+        k.add(&new, &name, move || ctl(&d2, session_args(&d2, &["new", "--agent", &id])));
     }
+    m.append_submenu(Some(wb_core::i18n::t("new-conversation")), &new);
     {
         let d2 = d.clone();
         k.add(&m, wb_core::i18n::t("end-this-tab-s-session"), move || {
@@ -146,23 +153,19 @@ fn map_menu(d: &Data, k: &Maker) -> gio::Menu {
     { let d2 = d.clone(); k.add(&sec, wb_core::i18n::t("open-map"), move || status::send(&d2, "map", json!({"do": "open"}))); }
     { let d2 = d.clone(); k.add(&sec, wb_core::i18n::t("save-map"), move || status::send(&d2, "map", json!({"do": "export"}))); }
     m.append_section(None, &sec);
-    let sec = gio::Menu::new();
-    for (id, name) in wb_core::agents::list(&d.root) {
-        let d2 = d.clone();
-        k.add(&sec, &wb_core::i18n::f("new-tab-keep-map-with", &[("name", name)]), move || new_tab_with_map(&d2, &id));
+    // New conversation from this map › Whole map | As shown › agent.
+    let carry = gio::Menu::new();
+    for (label, shown) in [(wb_core::i18n::t("carry-whole"), false), (wb_core::i18n::t("carry-shown"), true)] {
+        let sub = gio::Menu::new();
+        for (id, name) in wb_core::agents::list(&d.root) {
+            let d2 = d.clone();
+            k.add(&sub, &name, move || if shown { new_tab_as_shown(&d2, &id) } else { new_tab_with_map(&d2, &id) });
+        }
+        carry.append_submenu(Some(label), &sub);
     }
+    let sec = gio::Menu::new();
+    sec.append_submenu(Some(wb_core::i18n::t("new-tab-keep-map")), &carry);
     m.append_section(None, &sec);
-    // What the new conversation takes: the way a display style shows the map. Chosen here, in the same menu.
-    let sec = gio::Menu::new();
-    let chosen = crate::mapstyles::carry_choice(d);
-    let styles = std::iter::once((crate::mapstyles::DEFAULT.to_string(), wb_core::i18n::t("default").to_string()))
-        .chain(crate::mapstyles::list(d).into_iter().filter(|s| s.frame().is_some()).map(|s| (s.id, s.name)));
-    let set = Rc::default();
-    for (id, name) in styles {
-        let d2 = d.clone();
-        k.radio(&set, &sec, &name, id == chosen, move || crate::mapstyles::set_current(&d2, "carry", &id));
-    }
-    m.append_section(Some(wb_core::i18n::t("carried-to-new-conversation")), &sec);
     let sec = gio::Menu::new();
     {
         let d2 = d.clone();
@@ -296,7 +299,7 @@ fn make(win: &gtk::ApplicationWindow, d: &Data) -> (gio::Menu, gio::SimpleAction
 }
 
 /// What the menus depend on; they are made again only when it changes.
-fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {} {:?} {:?} {} {} {} {:?}", wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), wb_core::i18n::active(d, Some(wb_core::i18n::lang())), crate::mapstyles::current(d, "map"), crate::mapstyles::carry_choice(d), crate::mapstyles::list(d).iter().map(|x| x.id.clone()).collect::<Vec<_>>()) }
+fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {} {:?} {:?} {}", wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), wb_core::i18n::active(d, Some(wb_core::i18n::lang()))) }
 
 /// Whether one of the bar's menus is showing.
 fn menu_open(w: &gtk::Widget) -> bool {

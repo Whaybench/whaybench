@@ -74,7 +74,7 @@ chmod 0755 /usr/local/bin/whaybench-start
 
 say "Claude Code, Codex CLI and Whaybench"
 su - "$user" -c 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
-# Codex CLI for "New conversation · Codex"; it asks to sign in the first time a Codex tab opens. Codex is a package
+# Codex CLI for "New conversation → Codex"; it asks to sign in the first time a Codex tab opens. Codex is a package
 # of programs (codex-code-mode-host beside codex): a codex copied alone fails to start, so it is put aside and the
 # official installer installs the whole package. Outside any Whaybench folder: CODEX_HOME is the person's own.
 su - "$user" -c 'c=$(command -v codex || true); r=${c:+$(readlink -f "$c")}
