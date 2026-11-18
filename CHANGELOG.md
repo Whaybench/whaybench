@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-11-18
+
 ### Added
 - `whaybench record SESSION|- task start|alive|done ID [--source NAME] [--name NAME]`: a program that runs
   work for a session where no hook sees it (a review handed to another agent from a shell script) reports it, and
