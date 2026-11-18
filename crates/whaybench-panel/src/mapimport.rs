@@ -145,7 +145,7 @@ pub fn panels(d: &Data) -> Vec<Vec<String>> {
 pub fn reference_request(path: &str, title: &str, node: &Value, flow: &[String], lines: &[String]) -> String {
     let source = json!({"file": path, "node": s(node, "id"), "title": title, "path": flow}).to_string();
     let upper = if flow.is_empty() { i18n::ai("none-top-branch").to_string() } else { flow.join(" › ") };
-    i18n::ai_f("import-reference-request", &[("title", title.to_string()), ("head", s(node, "label").to_string()), ("flow", upper), ("lines", lines.iter().take(60).cloned().collect::<Vec<_>>().join("\n")), ("source", source)])
+    i18n::ai_f("import-reference-request", &[("title", title.to_string()), ("path", path.to_string()), ("head", s(node, "label").to_string()), ("flow", upper), ("lines", lines.iter().take(60).cloned().collect::<Vec<_>>().join("\n")), ("source", source)])
 }
 
 /// The request that hands a whole imported map to a session: its file, its size and its top branches; the session
@@ -174,6 +174,11 @@ mod tests {
         let t = whole_reference_request("/m/x.json", "X", &data);
         assert!(t.contains("/m/x.json") && t.contains("3 nodes, 1 open"));
         assert!(t.contains("- top") && t.contains("- other") && !t.contains("- under"));
+    }
+    #[test]
+    fn a_branch_request_names_the_command_that_reads_the_details() {
+        let t = reference_request("/m/x.json", "X", &json!({"id":"a","label":"top"}), &[], &["- top".into()]);
+        assert!(t.contains("whaybench map --file /m/x.json"));
     }
     #[test]
     fn a_branch_comes_with_what_is_under_it_and_a_copy_is_kept() {

@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+### Changed
+- Taking one branch of an imported map as a reference now tells the session the command that reads the map
+  file, so it can look up a node's details (reasons, symptoms), not only its label.
+
 ### Added
 - Themes can set the title bar's own font, weight and letter spacing (`base.title_font`, `title_weight`,
   `title_spacing`); the title bar was always the desktop's bold sans.
