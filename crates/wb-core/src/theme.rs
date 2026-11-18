@@ -119,6 +119,10 @@ pub struct Theme {
     pub font_size: f64,
     /// Size of the title bar text, in pixels.
     pub title_size: f64,
+    /// Font of the title bar text, its weight (100 to 900, as CSS) and pixels added after each letter.
+    pub title_font: String,
+    pub title_weight: f64,
+    pub title_spacing: f64,
     /// Font of the conversation terminals and its size in points.
     pub terminal_font: String,
     pub terminal_size: f64,
@@ -134,7 +138,8 @@ pub const FIELDS: &[(&str, &str, &str, Kind)] = &[
     ("base", "base", "accent", Kind::Colour), ("base", "base", "text", Kind::Colour),
     ("font", "base", "font_size", Kind::Number(6.0, 24.0)), ("font", "base", "font", Kind::Font),
     ("font", "base", "terminal_size", Kind::Number(6.0, 32.0)), ("font", "base", "terminal_font", Kind::Font),
-    ("font", "base", "title_size", Kind::Number(8.0, 32.0)),
+    ("font", "base", "title_size", Kind::Number(8.0, 32.0)), ("font", "base", "title_font", Kind::Font),
+    ("font", "base", "title_weight", Kind::Number(100.0, 900.0)), ("font", "base", "title_spacing", Kind::Number(0.0, 10.0)),
     ("panel", "frame", "panel", Kind::Colour), ("panel", "frame", "radius", Kind::Number(0.0, 64.0)),
     ("panel", "frame", "gap", Kind::Number(0.0, 64.0)), ("panel", "frame", "outer", Kind::Number(0.0, 64.0)),
     ("panel", "frame", "pad", Kind::Number(0.0, 64.0)),
@@ -247,6 +252,9 @@ impl Theme {
             font: text_of("font", "sans-serif"),
             font_size: size("font_size", 6.0..=24.0, 10.0),
             title_size: size("title_size", 8.0..=32.0, 14.0),
+            title_font: text_of("title_font", "sans"),
+            title_weight: size("title_weight", 100.0..=900.0, 700.0),
+            title_spacing: size("title_spacing", 0.0..=10.0, 0.0),
             terminal_font: text_of("terminal_font", "monospace"),
             terminal_size: size("terminal_size", 6.0..=32.0, 12.0),
         })
@@ -263,6 +271,7 @@ impl Theme {
         match key {
             "background" => c(self.background), "surface" => c(self.surface), "text" => ink(self.ink), "accent" => c(self.accent),
             "font" => self.font.clone().into(), "font_size" => self.font_size.into(), "title_size" => self.title_size.into(),
+            "title_font" => self.title_font.clone().into(), "title_weight" => self.title_weight.into(), "title_spacing" => self.title_spacing.into(),
             "terminal_font" => self.terminal_font.clone().into(), "terminal_size" => self.terminal_size.into(),
             "outer" => self.outer.into(), "gap" => self.gap.into(), "pad" => self.pad.into(), "radius" => self.radius.into(),
             "border_width" => self.border_width.into(), "shadow_size" => self.shadow_size.into(), "joint_width" => self.joint_width.into(),

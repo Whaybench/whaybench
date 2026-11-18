@@ -62,6 +62,9 @@ Panel apps take their text and background from these.
 | `font` | Font of the panels | `sans-serif` |
 | `font_size` | Its size in points, 6 to 24 | `10` |
 | `title_size` | Size of the title bar text in pixels, 8 to 32; the bar's height follows it | `14` |
+| `title_font` | Font of the title bar and tab text: one family, or several separated by commas as fontconfig takes them | `sans` |
+| `title_weight` | Its weight, 100 (thin) to 900 (black), as CSS `font-weight`; a variable font is set to it | `700` |
+| `title_spacing` | Pixels added between the letters of the title bar text, 0 to 10: wide spacing reads lighter and more formal | `0` |
 | `terminal_font` | Font of the conversation terminals | `monospace` |
 | `terminal_size` | Its size in points, 6 to 32 | `12` |
 

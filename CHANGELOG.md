@@ -8,6 +8,8 @@ names another step.
 ## [Unreleased]
 
 ### Added
+- Themes can set the title bar's own font, weight and letter spacing (`base.title_font`, `title_weight`,
+  `title_spacing`); the title bar was always the desktop's bold sans.
 - A session asking the person a question (Claude Code's `AskUserQuestion`, Codex's `request_user_input`) shows as
   awaiting the person, with the desktop notification, until the answer comes back.
 - A Codex conversation forked from another (`codex fork`, `/fork`) takes the map it branched from; the other goes on

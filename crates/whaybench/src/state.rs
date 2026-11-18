@@ -259,7 +259,7 @@ impl App {
         record::decide("screen", "theme", "the chosen theme", &[("theme", theme.name.clone())]);
         let title_zoom = title_zoom(&data);
         layout::set_title(theme.title_size * title_zoom);
-        let chrome = Chrome::new(theme.title_size * title_zoom);
+        let chrome = Chrome::new(theme.title_size * title_zoom, &theme.title_font, theme.title_weight, theme.title_spacing);
         Self {
             surface,
             theme,
@@ -845,7 +845,7 @@ impl App {
     /// The title bars' text and height: the theme's size times the person's zoom.
     fn apply_title(&mut self) {
         let size = self.theme.title_size * self.title_zoom;
-        self.chrome.set_size(size);
+        self.chrome.set_style(size, &self.theme.title_font, self.theme.title_weight, self.theme.title_spacing);
         layout::set_title(size);
     }
 
