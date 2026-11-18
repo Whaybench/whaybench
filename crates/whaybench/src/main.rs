@@ -22,7 +22,7 @@ use wb_core::{log as record, paths};
 const USAGE: &str = "whaybench [--data-dir DIR] [--app COMMAND]... [--no-session]    the agent is Claude Code unless given
 whaybench map [--data-dir DIR] SESSION [--write < CHANGE.json | --take-over < MAP.json | --start-from < MAP.json | --end-turn] | --file MAP.json    read, change or take over a conversation map, count a finished turn, or read a saved map
 whaybench memory [--data-dir DIR] list SESSION | changes SESSION | show MEMID|SESSION/NODE | search WORD...    what the memory holds: a session's memory list, what changed since it last looked, one node, a search
-whaybench record [--data-dir DIR] SESSION touch|state|alive|off|answer|moved|carry-from ...    a session's record, state, heartbeat, answers
+whaybench record [--data-dir DIR] SESSION|- touch|state|alive|off|answer|moved|carry-from|task ...    a session's record, state, heartbeat, answers, tasks it runs elsewhere
 whaybench hook [--data-dir DIR] claude|ID < EVENT.json    run by the agent's hooks
 whaybench mcp [--data-dir DIR]    the conversation map tool over MCP (stdio), for an agent in a Whaybench tab
 whaybench statusline [--data-dir DIR] < STATUS.json    a Claude Code status line: context and plan usage, kept for the notifications panel

@@ -102,7 +102,7 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         }
         if a.inside { parts.push(i18n::ai(if name == "SessionStart" { "view-note" } else { "view-short" }).to_string()); }
         // How to ask another conversation, told once: an agent knows of it only from here.
-        if a.inside && name == "SessionStart" { parts.push(i18n::ai("sessions-note").to_string()); }
+        if a.inside && name == "SessionStart" { parts.push(i18n::ai("sessions-note").to_string()); parts.push(i18n::ai("tasks-note").to_string()); }
         if let Some(c) = carried { parts.push(c); }
         // After a compaction the agent no longer has the ids it gave: its open nodes and where it stands, once.
         if name == "SessionStart" && event["source"] == "compact" && let Some(m) = map::view(data, sid).ok().as_ref().and_then(open_part) {
@@ -202,12 +202,7 @@ fn subagent(data: &Path, sid: &str, name: &str, event: &Value) -> Result<()> {
     let dir = crate::sessions::subagents_dir(data, sid);
     if name == "SessionEnd" { let _ = fs::remove_dir_all(&dir); return Ok(()); }
     let Some(aid) = event["agent_id"].as_str() else { return Ok(()) };
-    if name == "SubagentStart" {
-        // Stopped ones are kept a while for the panel, then let go.
-        for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
-            if read_json(&e.path(), Value::Null)?["done"].as_u64().is_some_and(|t| now_ms().saturating_sub(t) > 600_000) { let _ = fs::remove_file(e.path()); }
-        }
-    }
+    if name == "SubagentStart" { let_go_stopped(&dir)?; }
     let path = dir.join(format!("{}.json", safe_id(aid)?));
     let mut a = read_json(&path, json!({}))?;
     if let Some(t) = event["agent_type"].as_str() { a["type"] = json!(t); }
@@ -226,6 +221,35 @@ fn subagent(data: &Path, sid: &str, name: &str, event: &Value) -> Result<()> {
         }
         _ => {}
     }
+    write_json(&path, &a)
+}
+
+/// Stopped ones are kept a while for the panel, then let go.
+fn let_go_stopped(dir: &Path) -> Result<()> {
+    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+        // A file being written (its .tmp) does not parse: it is not one to let go, and no reason to fail.
+        if read_json(&e.path(), Value::Null).ok().and_then(|a| a["done"].as_u64()).is_some_and(|t| now_ms().saturating_sub(t) > 600_000) { let _ = fs::remove_file(e.path()); }
+    }
+    Ok(())
+}
+
+/// A task another program runs for the session (`whaybench record SESSION task`), such as a review handed to another
+/// agent: no hook tells of it, so the program reports its start, that it still runs (`alive`, before the 30 minutes
+/// after which a silent one is no longer shown) and its end itself. Kept and shown as a subagent is.
+pub fn task(data: &Path, sid: &str, op: &str, source: &str, id: &str, name: Option<&str>) -> Result<()> {
+    let dir = crate::sessions::subagents_dir(data, safe_id(sid)?);
+    // Dots are in no id: no two tasks, and no task and subagent, share a file.
+    let path = dir.join(format!("task.{}.{}.json", safe_id(source)?, safe_id(id)?));
+    let mut a = if op == "start" {
+        let_go_stopped(&dir)?;
+        json!({"type": name.unwrap_or(source), "source": source, "started": now_ms()})
+    } else {
+        let mut a = read_json(&path, Value::Null)?;
+        if a.is_null() || a.get("done").is_some() { return Err(format!("no task {id} from {source} is running").into()); }
+        if op == "done" { a["done"] = json!(now_ms()); }
+        a
+    };
+    a["at"] = json!(now_ms());
     write_json(&path, &a)
 }
 
@@ -817,6 +841,30 @@ mod tests {
         assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("working"), "a subagent's stop is not the turn's");
         run(dir.path(), &a, &ev("s", "SessionEnd", json!({}))).unwrap();
         assert!(!crate::sessions::subagents_dir(dir.path(), "s").exists());
+    }
+
+    #[test]
+    fn a_task_run_elsewhere_is_shown_as_a_subagent() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = crate::paths::Data { root: dir.path().to_path_buf() };
+        assert!(task(dir.path(), "s", "done", "codex-ask", "1", None).is_err(), "ending one never started");
+        task(dir.path(), "s", "start", "codex-ask", "1", Some("codex")).unwrap();
+        task(dir.path(), "s", "start", "codex-ask", "2", Some("codex")).unwrap();
+        task(dir.path(), "s", "start", "codex", "ask-1", None).unwrap();
+        let running = crate::sessions::subagents_running(&d, "s");
+        assert_eq!((running.len(), running[0]["type"].as_str()), (3, Some("codex")), "codex-ask 1 and codex ask-1 are two");
+        let file = crate::sessions::subagents_dir(dir.path(), "s").join("task.codex-ask.2.json");
+        let mut old = read_json(&file, Value::Null).unwrap();
+        old["at"] = json!(now_ms() - 1_900_000);
+        write_json(&file, &old).unwrap();
+        assert_eq!(crate::sessions::subagents_running(&d, "s").len(), 2, "silent for over 30 minutes: not shown");
+        task(dir.path(), "s", "alive", "codex-ask", "2", None).unwrap();
+        assert_eq!(crate::sessions::subagents_running(&d, "s").len(), 3, "alive again");
+        task(dir.path(), "s", "done", "codex-ask", "1", None).unwrap();
+        assert_eq!(crate::sessions::subagents_running(&d, "s").len(), 2);
+        assert!(task(dir.path(), "s", "alive", "codex-ask", "1", None).is_err(), "a done one does not come back");
+        assert!(task(dir.path(), "s", "start", "../x", "1", None).is_err(), "names make a file name");
+        assert!(task(dir.path(), "/tmp/x", "start", "a", "1", None).is_err(), "so does the session");
     }
 
     #[test]

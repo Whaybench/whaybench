@@ -214,6 +214,9 @@ impl Agent {
             let before = table.clone();
             merge(&mut table, add);
             if table != before { fs::write(&target, toml::to_string(&table)?)?; }
+            // A writable folder of the sandbox that is not there yet is not writable (Codex binds what exists).
+            let roots = table.get("sandbox_workspace_write").and_then(|s| s.get("writable_roots")).and_then(toml::Value::as_array);
+            for r in roots.into_iter().flatten().filter_map(toml::Value::as_str).filter(|r| Path::new(r).starts_with(data)) { fs::create_dir_all(r)?; }
         }
         for (file, template) in &self.write {
             let text = fs::read_to_string(self.dir.join(template))?;
@@ -392,6 +395,8 @@ mod tests {
         assert_eq!(mcp["tools"]["context_map"]["approval_mode"].as_str(), Some("approve"), "kept every turn without asking");
         let roots: Vec<&str> = config["sandbox_workspace_write"]["writable_roots"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
         assert!(roots.contains(&data.join("view").to_str().unwrap()), "Whaybench's commands can write their requests");
+        assert!(roots.contains(&data.join("cache/subagents").to_str().unwrap()), "and the tasks a program reports, but no more of cache");
+        assert!(data.join("cache/subagents").is_dir(), "made beforehand: a folder that is not there cannot be written in the sandbox");
         assert!(!roots.iter().any(|r| *r == data.to_str().unwrap() || r.ends_with("/codex") || r.ends_with("/addons") || r.ends_with("/cache")), "not its own settings, the add-ons or other tabs' input");
         assert_eq!(fs::metadata(home.join("config.toml"))?.permissions().mode() & 0o777, 0o600, "still private after the server is added");
         assert_eq!(config.len(), 4, "model, effort, the MCP server and the sandbox; nothing else is copied");

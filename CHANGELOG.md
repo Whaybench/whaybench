@@ -7,6 +7,17 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- `whaybench record SESSION|- task start|alive|done ID [--source NAME] [--name NAME]`: a program that runs
+  work for a session where no hook sees it (a review handed to another agent from a shell script) reports it, and
+  the session line shows it as it shows a running subagent; `alive` keeps a long one shown past the 30 minutes after
+  which a silent one is not. `-` is the session of the agent the command runs under. Claude Code and Codex are told
+  of it once at the start of a session, for work they leave running in the background.
+  It works inside a Codex tab too: the sandbox may write `cache/subagents` (and no more of `cache`), and the folders
+  the sandbox may write under the data folder are made when the tab opens.
+- The session line counts what runs besides the session by agent: `Helpers: Codex (2), Claude Code (1)` in place of
+  each subagent's type and last tool.
+
 ### Changed
 - Conversation map → New conversation from this map is now a submenu: Whole map, or As shown, each for an agent.
   As shown reads the main map panel at that moment (the display style, the branches folded or open) and passes on

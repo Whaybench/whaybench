@@ -38,15 +38,25 @@ fn pairs(d: &Data, info: &Value) -> Vec<(&'static str, String)> {
     out
 }
 
-/// The running subagents as one line under the session: type and last tool each.
+/// What runs for the session besides it, as one line under the session, counted by agent: `Codex (2), Claude Code (1)`.
 fn subagents_note(d: &Data, id: &str) -> Option<String> {
     let running = sessions::subagents_running(d, id);
     if running.is_empty() { return None; }
-    let each: Vec<String> = running.iter().map(|a| match a["tool"].as_str() {
-        Some(t) => format!("{} ({t})", text(a, "type")),
-        None => text(a, "type").to_string(),
-    }).collect();
-    Some(wb_core::i18n::f("subagents-running", &[("a1", running.len().to_string()), ("a2", each.join(", "))]))
+    let own = wb_core::agents::name_of(&d.root, sessions::record_of(d, id).as_ref().and_then(|r| r["agent"].as_str()));
+    Some(wb_core::i18n::f("subagents-running", &[("a1", counted(&running, &own, &d.root))]))
+}
+
+/// A subagent is the session's own agent's; a task a program reported goes by its name, an agent's when it names one.
+fn counted(running: &[Value], own: &str, root: &std::path::Path) -> String {
+    let mut by: Vec<(String, usize)> = Vec::new();
+    for a in running {
+        let name = if a.get("source").is_none() { own.to_string() } else {
+            let t = text(a, "type");
+            wb_core::agents::list(root).into_iter().find(|(i, _)| i == t).map_or(t.to_string(), |x| x.1)
+        };
+        match by.iter_mut().find(|x| x.0 == name) { Some(x) => x.1 += 1, None => by.push((name, 1)) }
+    }
+    by.iter().map(|(n, c)| format!("{n} ({c})")).collect::<Vec<_>>().join(", ")
 }
 
 /// Sessions being restarted on a new Claude Code now: one restart at a time each.
@@ -318,6 +328,14 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn helpers_are_counted_by_agent() {
+        let root = std::env::temp_dir().join(format!("wb-helpers-{}", std::process::id()));
+        let r = |v: Value| v;
+        let running = [r(serde_json::json!({"type": "codex", "source": "codex-ask"})), r(serde_json::json!({"type": "general-purpose", "tool": "Bash"})),
+            r(serde_json::json!({"type": "codex", "source": "codex-ask"})), r(serde_json::json!({"type": "build", "source": "script"}))];
+        assert_eq!(counted(&running, "Claude Code", &root), "codex (2), Claude Code (1), build (1)", "a name that is no agent's stays as given");
+    }
     #[test]
     fn every_word_must_be_somewhere() {
         let p = [("Name", "build the parser".to_string()), ("Answer", "tests pass on the server".to_string())];

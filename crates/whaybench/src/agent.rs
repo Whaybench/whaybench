@@ -21,8 +21,15 @@ pub fn map(data: &Data, words: &[String]) -> Result<(), String> {
 
 /// `whaybench record SESSION ...`: the session's record, state, heartbeat and answers (wb_core::session_record).
 pub fn record(data: &Data, words: &[String]) -> Result<(), String> {
-    let usage = "record SESSION touch [--prompt TEXT] [--tab TAB] [--cwd DIR] | state working|waiting|done [--note TEXT] | alive | off | answer < ANSWER.json | moved TO [--empty-carried ID] | carry-from OLD | file read|edit|attach PATH [--node ID]";
+    let usage = "record SESSION|- touch [--prompt TEXT] [--tab TAB] [--cwd DIR] | state working|waiting|done [--note TEXT] | alive | off | answer < ANSWER.json | moved TO [--empty-carried ID] | carry-from OLD | file read|edit|attach PATH [--node ID] | task start|alive|done ID [--source NAME] [--name NAME]";
     let (Some(id), Some(op)) = (words.first(), words.get(1)) else { return Err(usage.into()) };
+    // `-`: the session of the agent this runs under, as the map tool finds it.
+    let found;
+    let id = if id == "-" {
+        found = wb_core::hook::session_of_agent(&data.root).or_else(|| std::env::var("WHAYBENCH_TAB").ok().and_then(|t| wb_core::sessions::session_of_tab(data, &t)))
+            .ok_or("no session: not run under an agent in Whaybench")?;
+        &found
+    } else { id };
     let rest = &words[2..];
     // --name VALUE pairs after the words an operation takes.
     let opt = |from: usize, name: &str| -> Result<Option<&str>, String> {
@@ -46,6 +53,8 @@ pub fn record(data: &Data, words: &[String]) -> Result<(), String> {
         }
         "moved" => { let to = rest.first().ok_or(usage)?; rec::moved(root, id, to, opt(1, "--empty-carried")?) }
         "carry-from" if rest.len() == 1 => rec::carry_from(root, id, &rest[0]),
+        "task" if rest.len() >= 2 && ["start", "alive", "done"].contains(&rest[0].as_str()) =>
+            wb_core::hook::task(root, id, &rest[0], opt(2, "--source")?.unwrap_or("script"), &rest[1], opt(2, "--name")?),
         "file" if rest.len() >= 2 => wb_core::memory::file_touched(root, id, &rest[0], &rest[1], opt(2, "--node")?.filter(|n| !n.is_empty())),
         _ => return Err(usage.into()),
     };
