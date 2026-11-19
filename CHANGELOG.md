@@ -7,6 +7,21 @@ names another step.
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-11-19
+
+### Changed
+- A frame is built only when something happened (an app's request, input, a command) or something moves by itself;
+  else the picture is looked at 10 times a second, not 60: an idle window spent several percent of a core building
+  frames with nothing new. An app's pending events go out after every turn of the loop.
+- Drawing makes no GPU fence for each picture it draws when it has one graphics context (Smithay patch
+  `patches/smithay-gles-fences.patch`): a driver that flushes at each fence (VMware SVGA) spent more on the fences
+  than on the drawing, about 20% of a core with a moving theme.
+- `panel_opacity` and `back_opacity` now fade only a panel's frame and fill: its title, tab names and app content
+  stay solid, so text no longer fades with the panel. The conversation terminal and the panels' own windows and pages
+  leave their background to the panel when it is see-through, the input field too. A panel moved out to the desktop
+  keeps its background, and a file the view shows as it is (HTML, PDF) keeps WebKit's white under it. An app that
+  paints its own background (a web page) stays opaque.
+
 ## [0.8.9] - 2026-11-18
 
 ### Added
@@ -21,17 +36,6 @@ names another step.
   each subagent's type and last tool.
 
 ### Changed
-- A frame is built only when something happened (an app's request, input, a command) or something moves by itself;
-  else the picture is looked at 10 times a second, not 60: an idle window spent several percent of a core building
-  frames with nothing new. An app's pending events go out after every turn of the loop.
-- Drawing makes no GPU fence for each picture it draws when it has one graphics context (Smithay patch
-  `patches/smithay-gles-fences.patch`): a driver that flushes at each fence (VMware SVGA) spent more on the fences
-  than on the drawing, about 20% of a core with a moving theme.
-- `panel_opacity` and `back_opacity` now fade only a panel's frame and fill: its title, tab names and app content
-  stay solid, so text no longer fades with the panel. The conversation terminal and the panels' own windows and pages
-  leave their background to the panel when it is see-through, the input field too. A panel moved out to the desktop
-  keeps its background, and a file the view shows as it is (HTML, PDF) keeps WebKit's white under it. An app that
-  paints its own background (a web page) stays opaque.
 - Conversation map → New conversation from this map is now a submenu: Whole map, or As shown, each for an agent.
   As shown reads the main map panel at that moment (the display style, the branches folded or open) and passes on
   the nodes on screen, the screen as text with folded parts as one line, and the command that reads the whole map.
