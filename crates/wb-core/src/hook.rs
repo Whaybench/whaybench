@@ -85,6 +85,17 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
                 crate::usage::from_codex_rollout(data, sid, a.name, event);
             }
         }
+        // Codex's question cannot be answered from a hook: the answer panel shows it and sends the answer as a prompt.
+        "PreToolUse" if a.inside && tool == "request_user_input" => if let Some(reason) = crate::ask::hold(data, sid, a.name, event)? {
+            return Ok(json!({"hookSpecificOutput": {"hookEventName": name, "permissionDecision": "deny", "permissionDecisionReason": reason}}));
+        },
+        // The answer panel answers; nothing from it in time and the agent asks in the terminal.
+        "PermissionRequest" if a.inside => if let Some(out) = crate::ask::wait(data, sid, a.name, event)? {
+            session_record::state(data, sid, "working", None)?;
+            return Ok(out);
+        },
+        // A new prompt answers or passes over a question left waiting.
+        "UserPromptSubmit" => crate::ask::clear(data, sid),
         "PreToolUse" if is_shell(tool) => write_json(&state_file(data, "bash", sid), &json!(now_ms()))?,
         "PreToolUse" => if let Some(reason) = held_back(data, sid, a, tool, event) {
             return Ok(json!({"hookSpecificOutput": {"hookEventName": name, "permissionDecision": "deny", "permissionDecisionReason": reason}}));

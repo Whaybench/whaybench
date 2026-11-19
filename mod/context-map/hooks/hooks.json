@@ -34,6 +34,17 @@
         ]
       }
     ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${HOME}/.local/bin/whaybench\" hook claude",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [

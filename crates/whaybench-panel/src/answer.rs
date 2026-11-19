@@ -90,6 +90,127 @@ fn draw(p: &Panel, w: &Widgets, d: &Data) {
     show(w, format!("{top}<div class='asked'>{}</div>{}", web::escape(&asked), web::markdown(row.get("text").and_then(Value::as_str).unwrap_or(""), RawHtml::AsText)));
 }
 
+/// What a permission ask is about, in one place: the command, file or address, else the whole input.
+fn about(input: &Value) -> String {
+    let one = ["command", "file_path", "path", "url", "pattern"].iter().find_map(|k| input[*k].as_str().map(String::from));
+    cut(&one.unwrap_or_else(|| input.to_string()), 600)
+}
+
+fn button(label: &str) -> gtk::Button { gtk::Button::with_label(label) }
+
+/// Fills the card with an agent's question or permission ask (wb_core::ask); a press answers it and hides the card.
+fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
+    while let Some(c) = outer.first_child() { outer.remove(&c); }
+    // A new box each time, so its Enter key goes with it.
+    let card = &gtk::Box::new(gtk::Orientation::Vertical, 4);
+    outer.append(card);
+    let sid = ask["session"].as_str().unwrap_or("").to_string();
+    let at = ask["at"].as_i64().unwrap_or(0);
+    let name = cut(&sessions::session_name(d, &sid), 24);
+    let question = ask["kind"] == "question";
+    let head = gtk::Label::new(Some(&if question { wb_core::i18n::f("ask-question", &[("a1", name)]) }
+        else { wb_core::i18n::f("ask-permission", &[("a1", name), ("a2", ask["tool"].as_str().unwrap_or("").to_string())]) }));
+    head.set_xalign(0.0);
+    head.add_css_class("heading");
+    card.append(&head);
+    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let by_prompt = ask["via"] == "prompt";
+    let done = {
+        let outer = outer.clone();
+        move || outer.set_visible(false)
+    };
+    if question {
+        // Each question: its options (one or, with multiSelect, several) and a line for another answer.
+        let mut asked: Vec<(String, Vec<(gtk::CheckButton, String)>, gtk::Entry)> = Vec::new();
+        for q in ask["input"]["questions"].as_array().into_iter().flatten() {
+            let text = q["question"].as_str().unwrap_or("").to_string();
+            if let Some(h) = q["header"].as_str() { let l = gtk::Label::new(Some(h)); l.set_xalign(0.0); l.add_css_class("dim"); l.add_css_class("small"); card.append(&l); }
+            let l = gtk::Label::new(Some(&text));
+            l.set_xalign(0.0);
+            l.set_wrap(true);
+            card.append(&l);
+            let mut options: Vec<(gtk::CheckButton, String)> = Vec::new();
+            for o in q["options"].as_array().into_iter().flatten() {
+                let label = o["label"].as_str().unwrap_or("").to_string();
+                let b = gtk::CheckButton::with_label(&label);
+                if let Some(t) = o["description"].as_str() { b.set_tooltip_text(Some(t)); }
+                if q["multiSelect"] != true && let Some((first, _)) = options.first() { b.set_group(Some(first)); }
+                card.append(&b);
+                options.push((b, label));
+            }
+            let other = gtk::Entry::new();
+            other.set_placeholder_text(Some(wb_core::i18n::t("ask-other")));
+            card.append(&other);
+            asked.push((text, options, other));
+        }
+        let send = button(wb_core::i18n::t("ask-send"));
+        {
+            let (d, sid, done) = (d.clone(), sid.clone(), done.clone());
+            send.connect_clicked(move |_| {
+                let answers: Vec<(String, String)> = asked.iter().map(|(q, options, other)| {
+                    let typed = other.text().trim().to_string();
+                    let a = if typed.is_empty() { options.iter().filter(|(b, _)| b.is_active()).map(|(_, l)| l.as_str()).collect::<Vec<_>>().join(", ") } else { typed };
+                    (q.clone(), a)
+                }).collect();
+                // Every question needs an answer.
+                if answers.iter().any(|(_, a)| a.is_empty()) { return; }
+                if by_prompt {
+                    if !sessions::queue_prompt(&d, &sid, &wb_core::ask::reply_prompt(&answers)) { status::say(&d, wb_core::i18n::t("ask-not-sent"), 8); return; }
+                    wb_core::ask::clear(&d.root, &sid);
+                } else {
+                    let map: serde_json::Map<String, Value> = answers.into_iter().map(|(q, a)| (q, json!(a))).collect();
+                    let _ = wb_core::ask::answer(&d.root, &sid, at, "allow", &Value::Object(map));
+                }
+                done();
+            });
+        }
+        buttons.append(&send);
+        // Enter sends, as in the terminal: on an option or in the line for another answer (after the input method commits).
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        {
+            let (send, card) = (send.clone(), card.clone());
+            keys.connect_key_pressed(move |_, key, _, _| {
+                if !matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter) { return gtk::glib::Propagation::Proceed; }
+                // As in the terminal, Enter takes the option the keys are on.
+                if let Some(b) = card.root().and_then(|r| r.focus()).and_then(|w| w.downcast::<gtk::CheckButton>().ok()) { b.set_active(true); }
+                send.emit_clicked();
+                gtk::glib::Propagation::Stop
+            });
+        }
+        card.add_controller(keys);
+    } else {
+        let l = gtk::Label::new(Some(&about(&ask["input"])));
+        l.set_xalign(0.0);
+        l.set_wrap(true);
+        l.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        l.set_selectable(true);
+        l.add_css_class("monospace");
+        card.append(&l);
+        for (key, decision) in [("ask-allow", "allow"), ("ask-deny", "deny")] {
+            let b = button(wb_core::i18n::t(key));
+            let (d, sid, done) = (d.clone(), sid.clone(), done.clone());
+            b.connect_clicked(move |_| { let _ = wb_core::ask::answer(&d.root, &sid, at, decision, &json!({})); done(); });
+            buttons.append(&b);
+        }
+    }
+    // A held-back question has no terminal ask to fall back on: it is only closed.
+    let last = button(wb_core::i18n::t(if by_prompt { "ask-close" } else { "ask-terminal" }));
+    last.add_css_class("flat");
+    {
+        let (d, sid) = (d.clone(), sid.clone());
+        last.connect_clicked(move |_| {
+            if by_prompt { wb_core::ask::clear(&d.root, &sid); } else { let _ = wb_core::ask::answer(&d.root, &sid, at, "terminal", &json!({})); }
+            done();
+        });
+    }
+    buttons.append(&last);
+    card.append(&buttons);
+    outer.set_visible(true);
+    // The keys go to the question at once; a permission waits for a press, so a stray Enter allows nothing.
+    if question && let Some(first) = card.observe_children().into_iter().flatten().filter_map(|c| c.downcast::<gtk::CheckButton>().ok()).next() { first.grab_focus(); }
+}
+
 /// The nearest answer in the conversation: a session moved on has none of its own at first.
 fn newest_answer(d: &Data, session: &str) -> Option<Value> {
     records::lineage(d, session).into_iter().find_map(|id| std::fs::read_to_string(d.root.join("answers").join(format!("{id}.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()))
@@ -126,8 +247,14 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             true
         });
     }
+    // An agent's question or permission ask, above the answer.
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    for m in [8, 12] { card.set_margin_start(m); card.set_margin_end(m); }
+    card.set_margin_bottom(6);
+    card.set_visible(false);
     let area = gtk::Box::new(gtk::Orientation::Vertical, 0);
     area.append(&bar);
+    area.append(&card);
     area.append(&web);
     win.set_child(Some(&area));
 
@@ -169,7 +296,21 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             draw(&panel.borrow(), &w, &d);
         });
     }
+    let card_of: RefCell<Option<(String, i64)>> = RefCell::default();
     every(1000, move || {
+        wb_core::ask::panel_alive(&d.root);
+        // The followed conversation's ask first, else the oldest one waiting.
+        let asks = wb_core::ask::pending(&d.root);
+        let mine = sessions::target(&d).map(|s| records::lineage(&d, &s)).unwrap_or_default();
+        let ask = asks.iter().find(|a| a["session"].as_str().is_some_and(|s| mine.iter().any(|m| m == s))).or(asks.first());
+        let key = ask.map(|a| (a["session"].as_str().unwrap_or("").to_string(), a["at"].as_i64().unwrap_or(0)));
+        if key != *card_of.borrow() {
+            match ask {
+                Some(a) => { fill_card(&card, &d, a); status::focus_app(&d, "dev.whaybench.answer"); }
+                None => card.set_visible(false),
+            }
+            *card_of.borrow_mut() = key;
+        }
         let mut changed = false;
         {
             let mut p = panel.borrow_mut();

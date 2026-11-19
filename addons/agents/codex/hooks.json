@@ -39,7 +39,7 @@
           {
             "type": "command",
             "command": "{hook}",
-            "timeout": 10
+            "timeout": 600
           }
         ]
       }
