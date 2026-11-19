@@ -143,11 +143,15 @@ fn lasting(v: &V, path: &str) -> String {
 }
 
 fn display(v: &V) {
+    // The pages drawn here paint their own background, or leave it to a see-through panel.
+    v.web.set_background_color(&gtk::gdk::RGBA::TRANSPARENT);
     match v.hist.current() {
         Some((path, title)) => {
             match text_page(&v.d, path) {
                 Some(page) => v.web.load_html(&page, Some(&file_uri(&Path::new(path).parent().map(|p| format!("{}/", p.display())).unwrap_or_default()))),
                 None => {
+                    // A file shown as it is (HTML, PDF) has WebKit's white under it, as in a browser: its text may count on it.
+                    v.web.set_background_color(&gtk::gdk::RGBA::WHITE);
                     let at = v.page.filter(|_| path.to_lowercase().ends_with(".pdf")).map(|n| format!("#page={n}")).unwrap_or_default();
                     v.web.load_uri(&format!("{}{at}", file_uri(path)));
                 }
@@ -384,7 +388,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
     // A link that wants a new window stays in this view.
     web.connect_create(|w, action| {
         let action = action.clone();
-        if let Some(uri) = action.request().and_then(|r| r.uri()) { w.load_uri(&uri); }
+        if let Some(uri) = action.request().and_then(|r| r.uri()) { w.set_background_color(&gtk::gdk::RGBA::WHITE); w.load_uri(&uri); }
         None
     });
 

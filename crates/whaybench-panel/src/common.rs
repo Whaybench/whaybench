@@ -77,6 +77,7 @@ pub fn style_sheet(t: &Theme) -> String {
     let bar = css_colour(t.bar_bottom);
     // See-through panels: the window and its lists leave the background to the panel's fill, so only that fades.
     let fill = if t.see_through() { "transparent".to_string() } else { bg.clone() };
+    let field = if t.see_through() { "transparent".to_string() } else { bar.clone() };
     let (font, size, mono) = (t.font.replace('\'', ""), t.font_size, t.terminal_font.replace('\'', ""));
     let (small, h1, h2, h3) = (size - 1.0, size + 5.0, size + 3.0, size + 1.0);
     format!("
@@ -90,7 +91,8 @@ label {{ color: {text}; }}
 row {{ padding: 2px 6px; border-radius: 6px; }}
 row:hover {{ background: alpha({accent}, 0.10); }}
 row:selected, row.chosen {{ background: alpha({accent}, 0.22); color: {text}; }}
-entry, textview, textview text {{ background: {bar}; color: {text}; caret-color: {text}; }}
+entry {{ background: {bar}; color: {text}; caret-color: {text}; }}
+textview, textview text {{ background: {field}; color: {text}; caret-color: {text}; }}
 entry {{ border: 1px solid {line}; border-radius: 6px; padding: 2px 6px; min-height: 22px; }}
 spinbutton {{ background: {bar}; color: {text}; border: 1px solid {line}; border-radius: 6px; }}
 spinbutton text {{ background: transparent; color: {text}; caret-color: {text}; }}

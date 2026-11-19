@@ -118,7 +118,8 @@ fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dy
                 let t = wb_core::theme::load_active(&d2);
                 let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
                 let bg = t.panel.map(|x| (x * 255.0) as u8);
-                let html = diff_page(&p, &edits, &hex([bg[0], bg[1], bg[2]]), &hex(t.ink));
+                let bg = if t.see_through() { "transparent".to_string() } else { hex([bg[0], bg[1], bg[2]]) };
+                let html = diff_page(&p, &edits, &bg, &hex(t.ink));
                 let dir = d2.cache().join("diffs");
                 let _ = std::fs::create_dir_all(&dir);
                 let out = dir.join(format!("{}.html", wb_core::clock::now_ms()));

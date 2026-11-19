@@ -178,7 +178,10 @@ fn bytes(c: Colour) -> [u8; 3] { [(c[0] * 255.0).round() as u8, (c[1] * 255.0).r
 
 impl Theme {
     /// The panels let what lies under them show through: a panel's app then leaves its background to the panel's fill.
-    pub fn see_through(&self) -> bool { self.panel_opacity * self.back_opacity < 1.0 }
+    /// Not in a panel moved out to a window on the desktop: there nothing fills under it.
+    pub fn see_through(&self) -> bool {
+        self.panel_opacity * self.back_opacity < 1.0 && std::env::var_os(crate::view::ENV_OUTSIDE).is_none()
+    }
 
     pub fn parse(name: &str, text: &str) -> Option<Theme> {
         let v: Value = serde_json::from_str(text).ok()?;
@@ -352,19 +355,22 @@ pub fn save_as(data: &Data, from: &str, name: &str) -> std::io::Result<String> {
 /// The conversation terminal's settings (Alacritty, read again by it when the file changes): the theme's terminal
 /// font, size and colours, and Shift+Enter as Claude Code's new line.
 pub fn write_terminal_config(data: &Data) -> std::io::Result<PathBuf> {
-    let t = load_active(data);
-    let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
-    // A see-through panel: the terminal leaves its background to the panel's fill, so only that fades and the text stays solid.
-    let opacity = if t.see_through() { 0.0 } else { 1.0 };
-    let base = include_str!("../../../config/alacritty.toml").replacen("[window]\n", &format!("[window]\nopacity = {opacity:.1}\n"), 1);
-    let text = format!("{}\n[font]\nnormal = {{ family = {:?} }}\nsize = {:.1}\n\n[colors.primary]\nbackground = {:?}\nforeground = {:?}\n",
-        base, t.terminal_font, t.terminal_size, hex(bytes(t.panel)), hex(t.ink));
+    let text = terminal_config(&load_active(data));
     let path = data.cache().join("alacritty.toml");
     if fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
         fs::create_dir_all(data.cache())?;
         crate::paths::write_atomic(&path, text)?;
     }
     Ok(path)
+}
+
+fn terminal_config(t: &Theme) -> String {
+    let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+    // A see-through panel: the terminal leaves its background to the panel's fill, so only that fades and the text stays solid.
+    let opacity = if t.see_through() { 0.0 } else { 1.0 };
+    let base = include_str!("../../../config/alacritty.toml").replacen("[window]\n", &format!("[window]\nopacity = {opacity:.1}\n"), 1);
+    format!("{}\n[font]\nnormal = {{ family = {:?} }}\nsize = {:.1}\n\n[colors.primary]\nbackground = {:?}\nforeground = {:?}\n",
+        base, t.terminal_font, t.terminal_size, hex(bytes(t.panel)), hex(t.ink))
 }
 
 fn valid_id(id: &str) -> bool { id != DEFAULT && crate::addons::valid_id(id) }
@@ -413,9 +419,11 @@ pub fn save_active(data: &Data, name: &str) -> std::io::Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn the_terminal_settings_have_a_window_table_for_the_opacity() {
-        // write_terminal_config puts `opacity` under this line; without it a see-through panel keeps an opaque terminal.
-        assert!(include_str!("../../../config/alacritty.toml").contains("[window]\n"));
+    fn the_terminal_leaves_its_background_to_a_see_through_panel() {
+        let with = |frame: &str| terminal_config(&Theme::parse("t", &format!(r#"{{"frame": {{{frame}}}}}"#)).unwrap());
+        assert!(with("").contains("[window]\nopacity = 1.0\n"));
+        assert!(with(r#""back_opacity": 50"#).contains("[window]\nopacity = 0.0\n"));
+        assert!(with(r#""panel_opacity": 60"#).contains("[window]\nopacity = 0.0\n"));
     }
     #[test]
     fn a_title_behind_reads_on_its_bar() {
