@@ -803,7 +803,8 @@ fn background_apps(state: &App, renderer: &mut GlesRenderer, (sw, sh): (f64, f64
     let crop: Rectangle<i32, Physical> = Rectangle::new((0, 0).into(), (sw.round() as i32, sh.round() as i32).into());
     let mut out = Vec::new();
     for layer in [Layer::Bottom, Layer::Background] {
-        for l in map.layers_on(layer) {
+        // The newest on top, as Smithay's Space draws them (the list is front to back).
+        for l in map.layers_on(layer).rev() {
             let Some(g) = map.layer_geometry(l) else { continue };
             let at = (g.loc.x, g.loc.y - down);
             let e = AsRenderElements::<GlesRenderer>::render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(l, renderer, at.into(), Scale::from(1.0), 1.0);

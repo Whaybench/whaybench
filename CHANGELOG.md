@@ -9,7 +9,9 @@ names another step.
 
 ### Added
 - An app can stand behind the panels (wlr-layer-shell, background and bottom layers: swaybg, mpvpaper and the like):
-  it shows as the surface.
+  it shows as the surface. It is laid out on the whole window (under the menu bar and the status line, as a
+  wallpaper under a desktop's bars) and again when the window is resized; the newest is on top. A layer above the
+  windows, or one that moves there, is closed.
 
 ## [0.8.10] - 2026-11-19
 

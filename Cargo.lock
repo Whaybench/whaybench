@@ -2683,6 +2683,8 @@ dependencies = [
  "serde_json",
  "smithay",
  "tempfile",
+ "wayland-client",
+ "wayland-protocols-wlr",
  "wb-core",
 ]
 

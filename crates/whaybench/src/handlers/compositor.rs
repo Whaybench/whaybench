@@ -59,6 +59,9 @@ fn layer_commit(state: &mut App, surface: &WlSurface) {
     let Some(output) = state.space.outputs().find(|o| layer_map_for_output(o).layer_for_surface(surface, WindowSurfaceType::TOPLEVEL).is_some()).cloned() else { return };
     let sent = with_states(surface, |s| s.data_map.get::<LayerSurfaceData>().is_some_and(|d| d.lock().unwrap().initial_configure_sent));
     let mut map = layer_map_for_output(&output);
+    // One that moved itself above the windows (set_layer) would no longer be seen: it is closed, as a new one would be.
+    let moved = map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL).filter(|l| !super::under_windows(l.layer())).cloned();
+    if let Some(l) = moved { map.unmap_layer(&l); l.layer_surface().send_close(); return; }
     map.arrange();
     if !sent && let Some(layer) = map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL) { layer.layer_surface().send_configure(); }
 }

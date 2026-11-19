@@ -81,6 +81,8 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: 
         WinitEvent::Resized { size, .. } => {
             state.redraw = true;
             output.change_current_state(Some(Mode { size, refresh: 60_000 }), None, None, None);
+            // The background apps are laid out for the new size and told it (one that sits still would never ask).
+            smithay::desktop::layer_map_for_output(&output).arrange();
             state.window_size = (size.w, size.h);
             state.maximized = backend.window().is_maximized();
             state.fit_strips();

@@ -163,13 +163,16 @@ smithay::delegate_dispatch2!(App);
 use smithay::desktop::{LayerSurface, layer_map_for_output};
 use smithay::wayland::shell::wlr_layer::{Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler, WlrLayerShellState};
 
+/// Whether a layer is one Whaybench shows: those under the windows, drawn as the surface behind the panels.
+pub fn under_windows(layer: Layer) -> bool { matches!(layer, Layer::Background | Layer::Bottom) }
+
 /// Only the layers under the windows are taken (background, bottom): Whaybench draws them as the surface behind the
 /// panels. A bar or a notice asking for a layer above the windows is refused at once, closed, as it would not be seen.
 impl WlrLayerShellHandler for App {
     fn shell_state(&mut self) -> &mut WlrLayerShellState { &mut self.layer_shell_state }
 
     fn new_layer_surface(&mut self, surface: WlrLayerSurface, _output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>, layer: Layer, namespace: String) {
-        if !matches!(layer, Layer::Background | Layer::Bottom) { surface.send_close(); return; }
+        if !under_windows(layer) { surface.send_close(); return; }
         let Some(output) = self.space.outputs().next().cloned() else { surface.send_close(); return };
         crate::record::detail("run", "background app", &[("namespace", namespace.clone())]);
         let _ = layer_map_for_output(&output).map_layer(&LayerSurface::new(surface, namespace));
@@ -183,5 +186,88 @@ impl WlrLayerShellHandler for App {
             if let Some(l) = found { map.unmap_layer(&l); }
         }
         self.redraw = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use wayland_client::{Connection, Dispatch, QueueHandle, globals::{GlobalListContents, registry_queue_init}, protocol::{wl_compositor::WlCompositor, wl_registry::WlRegistry, wl_surface::WlSurface}};
+    use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1::{Layer, ZwlrLayerShellV1}, zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1}};
+
+    /// What the test app heard, by the namespace of each of its layer surfaces.
+    #[derive(Default)]
+    struct Heard { configured: Vec<String>, closed: Vec<String> }
+
+    impl Dispatch<WlRegistry, GlobalListContents> for Heard { fn event(_: &mut Self, _: &WlRegistry, _: wayland_client::protocol::wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {} }
+    impl Dispatch<WlCompositor, ()> for Heard { fn event(_: &mut Self, _: &WlCompositor, _: wayland_client::protocol::wl_compositor::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {} }
+    impl Dispatch<WlSurface, ()> for Heard { fn event(_: &mut Self, _: &WlSurface, _: wayland_client::protocol::wl_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {} }
+    impl Dispatch<ZwlrLayerShellV1, ()> for Heard { fn event(_: &mut Self, _: &ZwlrLayerShellV1, _: wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {} }
+    impl Dispatch<ZwlrLayerSurfaceV1, String> for Heard {
+        fn event(heard: &mut Self, l: &ZwlrLayerSurfaceV1, e: zwlr_layer_surface_v1::Event, name: &String, _: &Connection, _: &QueueHandle<Self>) {
+            match e {
+                zwlr_layer_surface_v1::Event::Configure { serial, .. } => { l.ack_configure(serial); heard.configured.push(name.clone()); }
+                zwlr_layer_surface_v1::Event::Closed => heard.closed.push(name.clone()),
+                _ => {}
+            }
+        }
+    }
+
+    /// An app asking for the bottom layer is taken and told its size once; one asking for the top layer is closed at
+    /// once; one that moves itself to the top layer later is closed then and drawn no more.
+    #[test]
+    fn background_apps_are_taken_and_others_closed() {
+        let data = tempfile::tempdir().unwrap();
+        let mut event_loop: smithay::reexports::calloop::EventLoop<crate::App> = smithay::reexports::calloop::EventLoop::try_new().unwrap();
+        let display = smithay::reexports::wayland_server::Display::<crate::App>::new().unwrap();
+        let mut state = crate::App::new(&mut event_loop, display, wb_core::paths::Data::new(data.path().to_path_buf()), Default::default());
+        let output = smithay::output::Output::new("test".into(), smithay::output::PhysicalProperties { size: (0, 0).into(), subpixel: smithay::output::Subpixel::Unknown, make: "t".into(), model: "t".into(), serial_number: "1".into() });
+        output.change_current_state(Some(smithay::output::Mode { size: (800, 600).into(), refresh: 60_000 }), None, None, Some((0, 0).into()));
+        state.space.map_output(&output, (0, 0));
+        let (server, client) = std::os::unix::net::UnixStream::pair().unwrap();
+        state.display_handle.insert_client(server, std::sync::Arc::new(crate::state::ClientState::default())).unwrap();
+
+        // The app runs in a thread of its own, as an app is a process of its own; this one serves it meanwhile.
+        let (tx, rx) = mpsc::channel();
+        // The app stays connected until the server has been looked at: when it leaves, its layers go.
+        let (done, wait) = mpsc::channel::<()>();
+        let app = std::thread::spawn(move || {
+            let conn = Connection::from_socket(client).unwrap();
+            let (globals, mut queue) = registry_queue_init::<Heard>(&conn).unwrap();
+            let qh = queue.handle();
+            let compositor: WlCompositor = globals.bind(&qh, 4..=6, ()).unwrap();
+            let shell: ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ()).unwrap();
+            let mut heard = Heard::default();
+            let layer = |name: &str, on: Layer| {
+                let s = compositor.create_surface(&qh, ());
+                let l = shell.get_layer_surface(&s, None, on, name.into(), &qh, name.to_string());
+                l.set_anchor(Anchor::all());
+                s.commit();
+                (s, l)
+            };
+            let _wall = layer("wall", Layer::Bottom);
+            let _bar = layer("bar", Layer::Top);
+            let (moving, moving_layer) = layer("moving", Layer::Background);
+            queue.roundtrip(&mut heard).unwrap();
+            queue.roundtrip(&mut heard).unwrap();
+            moving_layer.set_layer(Layer::Overlay);
+            moving.commit();
+            queue.roundtrip(&mut heard).unwrap();
+            tx.send((heard.configured, heard.closed)).unwrap();
+            let _ = wait.recv();
+        });
+        let (configured, closed) = loop {
+            event_loop.dispatch(Some(std::time::Duration::from_millis(5)), &mut state).unwrap();
+            let _ = state.display_handle.flush_clients();
+            if let Ok(heard) = rx.try_recv() { break heard; }
+        };
+        assert_eq!(configured, ["wall", "moving"], "the layers under the windows are told their size, once each");
+        assert_eq!(closed, ["bar", "moving"], "a layer above the windows is closed, also one that moves there");
+        let map = smithay::desktop::layer_map_for_output(&output);
+        let names: Vec<&str> = map.layers().map(|l| l.namespace()).collect();
+        assert_eq!(names, ["wall"], "only the one still under the windows is drawn");
+        drop(map);
+        done.send(()).unwrap();
+        app.join().unwrap();
     }
 }
