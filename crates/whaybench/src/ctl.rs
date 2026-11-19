@@ -397,6 +397,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
             let mut files: Vec<_> = files.flatten().filter(|f| f.path().extension().is_some_and(|e| e == "json")).collect();
             files.sort_by_key(|f| f.file_name());
             for f in files {
+                state.redraw = true;
                 let parsed = fs::read(f.path()).ok().and_then(|b| serde_json::from_slice::<Request>(&b).ok());
                 let _ = fs::remove_file(f.path());
                 match parsed {

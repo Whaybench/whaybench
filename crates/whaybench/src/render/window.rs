@@ -2,6 +2,9 @@
 use super::*;
 use super::shots::take_shots;
 
+/// With nothing happening and nothing moving, how often the picture is still looked at.
+const LOOK_EVERY: Duration = Duration::from_millis(100);
+
 /// Offers the window's GPU to the apps (linux-dmabuf with default feedback, as anvil's winit backend does), so they
 /// draw on it and hand over their buffers without a copy. Without a render node they keep shared memory.
 fn offer_gpu(state: &mut App, backend: &Rc<RefCell<winit::WinitGraphicsBackend<GlesRenderer>>>) {
@@ -57,20 +60,26 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: 
 
     // Only what changed goes to the desktop. A frame with nothing new is not sent at all: sending the whole window
     // every frame makes the desktop redraw it and its title bar 60 times a second, which shows as a flicker there.
-    // Without a sent frame nothing paces the next one, so a timer asks for it instead.
+    // Without a sent frame nothing paces the next one, so a timer asks for it instead: as a game or a compositor does,
+    // only when something happened (an app's request, input, a command) or something moves by itself; else a few
+    // times a second, for what is looked at by the clock (a theme file changed, the agent's state). Building the
+    // picture 60 times a second with nothing new cost several percent of a core.
     let backend = Rc::new(RefCell::new(backend));
     offer_gpu(state, &backend);
     let idle = Rc::new(Cell::new(false));
     {
         let (backend, idle) = (backend.clone(), idle.clone());
-        event_loop.handle().insert_source(Timer::from_duration(Duration::from_millis(16)), move |_, _, _| {
-            if idle.replace(false) { backend.borrow().window().request_redraw(); }
+        let mut looked = Instant::now();
+        event_loop.handle().insert_source(Timer::from_duration(Duration::from_millis(16)), move |_, _, state| {
+            let due = state.redraw || state.moving.get() || looked.elapsed() >= LOOK_EVERY;
+            if due && idle.replace(false) { looked = Instant::now(); backend.borrow().window().request_redraw(); }
             TimeoutAction::ToDuration(Duration::from_millis(16))
         })?;
     }
 
     event_loop.handle().insert_source(winit, move |event, _, state| { let mut backend = backend.borrow_mut(); match event {
         WinitEvent::Resized { size, .. } => {
+            state.redraw = true;
             output.change_current_state(Some(Mode { size, refresh: 60_000 }), None, None, None);
             state.window_size = (size.w, size.h);
             state.maximized = backend.window().is_maximized();
@@ -94,16 +103,21 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: 
         }
         WinitEvent::Ime(ime) => state.handle_ime(ime),
         WinitEvent::Focus(focused) => {
+            state.redraw = true;
             record::detail("screen", "window focus", &[("focused", focused.to_string())]);
             state.host_focused = focused;
             // Back from the desktop: what was copied there comes in, where the desktop cannot be watched.
             if focused { state.clip.read_once(); }
         }
         WinitEvent::Redraw => {
+            // What this frame finds (an event since, something moving) decides when the next is drawn.
+            state.redraw = false;
+            state.moving.set(false);
             let now = Instant::now();
             let ms = now.duration_since(last).as_secs_f64() * 1000.0;
             last = now;
-            state.frame(ms);
+            // After a quiet spell the gap is long: a glide that starts now starts from its first step, not halfway.
+            state.frame(ms.min(50.0));
             times.push(ms);
             if since.elapsed() >= Duration::from_secs(5) {
                 let mut sorted = std::mem::take(&mut times);

@@ -24,6 +24,7 @@ const LEFT: u32 = 0x110;
 
 impl App {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        self.redraw = true;
         match event {
             InputEvent::Keyboard { event, .. } => {
                 let serial = SERIAL_COUNTER.next_serial();

@@ -21,6 +21,9 @@ names another step.
   each subagent's type and last tool.
 
 ### Changed
+- A frame is built only when something happened (an app's request, input, a command) or something moves by itself;
+  else the picture is looked at 10 times a second, not 60: an idle window spent several percent of a core building
+  frames with nothing new. An app's pending events go out after every turn of the loop.
 - Drawing makes no GPU fence for each picture it draws when it has one graphics context (Smithay patch
   `patches/smithay-gles-fences.patch`): a driver that flushes at each fence (VMware SVGA) spent more on the fences
   than on the drawing, about 20% of a core with a moving theme.

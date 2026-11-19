@@ -214,7 +214,9 @@ fn serve(data: &paths::Data, run_id: &str, apps: Vec<String>, no_session: bool) 
     if state.builtin_ime { start::attach_input_method(&state.socket_name); }
     if !no_session { ctl::open_first_tabs(data); }
 
-    event_loop.run(None, &mut state, |_| {}).map_err(|e| e.to_string())?;
+    // What the apps are owed goes out after every turn of the loop, not only after a frame: with nothing to draw, a
+    // frame can be 100 ms away (a selection asked for on its way to the desktop).
+    event_loop.run(None, &mut state, |state| { let _ = state.display_handle.flush_clients(); }).map_err(|e| e.to_string())?;
     start::end_outside();
     state.save_layout();
     ctl::remember_tabs(data);

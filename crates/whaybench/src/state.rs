@@ -135,6 +135,12 @@ pub struct App {
     pub unmapped: Vec<ToplevelSurface>,
     next_tab: u64,
     pub act: Act,
+    /// Something happened that may change the picture (an app's request, input, a command): draw the next frame.
+    /// Without it, and with nothing moving, the screen is looked at only a few times a second.
+    pub redraw: bool,
+    /// Something drawn this frame moves by itself (a panel gliding, a theme's motion): the next frame is drawn at once,
+    /// not when something happens. Set while drawing, through a shared borrow.
+    pub moving: std::cell::Cell<bool>,
     pub pointer: (f64, f64),
     pub hover: Option<(u64, Edges, Vec<(u64, Side)>)>,
     /// What the window's own frame was asked to do (move, resize, minimise, maximise, close); the window does it.
@@ -270,7 +276,7 @@ impl App {
             shaders: None,
             grabbed_popups: Vec::new(),
             windows: HashMap::new(), unmapped: Vec::new(), next_tab: 1,
-            act: Act::Idle, pointer: (0.0, 0.0), hover: None, window_cmd: None, strip_pressed: None, maximized: false, guides: Vec::new(), zone: None, out_zone: false,
+            act: Act::Idle, redraw: true, moving: Default::default(), pointer: (0.0, 0.0), hover: None, window_cmd: None, strip_pressed: None, maximized: false, guides: Vec::new(), zone: None, out_zone: false,
             chrome, solid_ids: Vec::new(), shaded: Vec::new(), focus_when_open: None,
             title_zoom,
             host_focused: false,
@@ -296,9 +302,12 @@ impl App {
         let loop_handle = event_loop.handle();
         loop_handle.insert_source(listening_socket, move |client_stream, _, state| {
             // One app that cannot connect does not stop the others.
+            state.redraw = true;
             if let Err(e) = state.display_handle.insert_client(client_stream, Arc::new(ClientState::default())) { record::error("run", "app not connected", &[("error", e.to_string())]); }
         }).expect("Failed to init the wayland event source.");
         loop_handle.insert_source(Generic::new(display, Interest::READ, Mode::Level), |_, display, state| {
+            // An app's request (a new picture, a new title) may change what shows.
+            state.redraw = true;
             // Safety: we don't drop the display
             unsafe { display.get_mut().dispatch_clients(state).unwrap(); }
             Ok(PostAction::Continue)
@@ -906,7 +915,7 @@ impl App {
                 self.homes.retain(|(c, _)| *c != Comer::App(wb_core::view::FIREFOX_APP.into()));
             }
         }
-        self.surface.step(ms);
+        if self.surface.step(ms) { self.moving.set(true); }
         self.surface.keep_order();
         self.update_hold();
         let pad = self.surface.m.pad;
@@ -993,6 +1002,7 @@ impl App {
 
     /// The host's input method's text: composing shows in the app, finished text goes into it.
     pub fn handle_ime(&mut self, ime: smithay::reexports::winit::event::Ime) {
+        self.redraw = true;
         use smithay::reexports::winit::event::Ime;
         let text_input = self.seat.text_input();
         match ime {
