@@ -669,8 +669,7 @@ fn clicked(s_: &Shared, uri: &str) {
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let st = Store::new(d.clone());
     let web = webkit6::WebView::new();
-    crate::common::web_menu_in_language(&web);
-    crate::common::follow_zoom(&web, &d);
+    crate::common::set_up_web(&web, &d);
     web.set_vexpand(true);
     web.set_hexpand(true);
     if let Some(settings) = WebViewExt::settings(&web) { settings.set_default_charset("utf-8"); }

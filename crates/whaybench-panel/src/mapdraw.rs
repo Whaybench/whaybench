@@ -284,10 +284,11 @@ pub fn page(d: &Data, data: &Value, style: &Style, root: Option<&str>, picked: O
     let hex = |c: [f32; 4]| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
     let (bg, panel, ink, accent) = (hex(t.panel), hex(t.bar_bottom), format!("#{:02x}{:02x}{:02x}", t.ink[0], t.ink[1], t.ink[2]), hex(t.accent));
     let font = t.font.replace('\'', "");
+    let fill = if t.see_through() { "transparent" } else { "var(--bg)" };
     let mark = picked.map(|p| format!("[data-n=\"{}\"]{{background:color-mix(in srgb,var(--accent) 22%,transparent);border-radius:4px}}", e(p))).unwrap_or_default();
     format!(r#"<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
 :root{{--bg:{bg};--panel:{panel};--ink:{ink};--accent:{accent}}}
-body{{margin:0;padding:8px 10px;background:var(--bg);color:var(--ink);font-family:'{font}',sans-serif;font-size:13px;line-height:1.45}}
+body{{margin:0;padding:8px 10px;background:{fill};color:var(--ink);font-family:'{font}',sans-serif;font-size:13px;line-height:1.45}}
 .sub{{opacity:.6;font-size:11.5px;margin:0 0 6px}}
 ul.tree,ul.tree ul{{list-style:none;margin:0;padding-left:16px}} ul.tree{{padding-left:0}} li{{margin:2px 0}}
 .g{{display:inline-block;width:1.3em}} li.shut>.g,li.shut>.t,li.shut>.k{{opacity:.5}} li.here{{font-weight:700}} li.fold{{opacity:.5;font-size:11.5px}}

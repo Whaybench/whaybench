@@ -493,21 +493,21 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
     let t = state.theme.clone();
     let radius = t.radius;
     let app = state.surface.app_of(p.rect);
-    // A see-through panel: its frame, title, tabs and app alike; the panels behind the front one can be more so.
+    // A see-through panel: its frame and fill; its text and app stay solid. The panels behind the front one can be more so.
     f.alpha = (t.panel_opacity * if front { 1.0 } else { t.back_opacity }) as f32;
     if carried.contains(&p.pid) { f.card(shaders, p.rect, Card::plain(radius, CARRIED)); }
     if p.tabs.len() == 1 {
-        add_text(state, renderer, &mut f.out, f.alpha, "×", t.ink, Rect::new(p.rect.right() - CLOSE, p.rect.y, CLOSE, title()));
+        add_text(state, renderer, &mut f.out, 1.0, "×", t.ink, Rect::new(p.rect.right() - CLOSE, p.rect.y, CLOSE, title()));
     }
     let ink = [(t.accent[0] * 255.0) as u8, (t.accent[1] * 255.0) as u8, (t.accent[2] * 255.0) as u8];
-    if let Some(r) = undo_rect(state, p) { add_text(state, renderer, &mut f.out, f.alpha, "↩", ink, r); }
-    for (_, label, r) in back_rects(state, p) { add_text(state, renderer, &mut f.out, f.alpha, &label, ink, r); }
+    if let Some(r) = undo_rect(state, p) { add_text(state, renderer, &mut f.out, 1.0, "↩", ink, r); }
+    for (_, label, r) in back_rects(state, p) { add_text(state, renderer, &mut f.out, 1.0, &label, ink, r); }
     if p.tabs.len() > 1 {
         let rects = tab_rects(state, p);
         for (i, r) in rects.iter().enumerate() {
             let ink = if i == p.active { t.ink } else { t.ink_soft };
-            add_text(state, renderer, &mut f.out, f.alpha, "×", ink, Rect::new(r.right() - TAB_CLOSE, r.y, TAB_CLOSE, r.h));
-            add_text(state, renderer, &mut f.out, f.alpha, &p.tabs[i].name.clone(), ink, Rect::new(r.x, r.y, (r.w - TAB_CLOSE).max(1.0), r.h));
+            add_text(state, renderer, &mut f.out, 1.0, "×", ink, Rect::new(r.right() - TAB_CLOSE, r.y, TAB_CLOSE, r.h));
+            add_text(state, renderer, &mut f.out, 1.0, &p.tabs[i].name.clone(), ink, Rect::new(r.x, r.y, (r.w - TAB_CLOSE).max(1.0), r.h));
         }
         if let Some(r) = rects.get(p.active) { f.card(shaders, *r, Card::plain(radius.min(7.0), premultiplied(t.tab_front))); }
     } else {
@@ -516,9 +516,9 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
         let left = 8.0 + (radius / 2.0).max(0.0);
         let end = marks_left(state, p);
         let area = Rect::new(p.rect.x + left, p.rect.y, wide.min((end - p.rect.x - left - 6.0).max(1.0)), title());
-        add_text(state, renderer, &mut f.out, f.alpha, &p.tab().name.clone(), if front { t.ink } else { t.ink_soft }, area);
+        add_text(state, renderer, &mut f.out, 1.0, &p.tab().name.clone(), if front { t.ink } else { t.ink_soft }, area);
     }
-    f.out.extend(app_elements(state, p, renderer, app, f.alpha));
+    f.out.extend(app_elements(state, p, renderer, app, 1.0));
     // The card fills the panel too; see-through, a second fill under the app would make it more opaque than asked.
     if f.alpha >= 1.0 { f.solid(app, premultiplied(t.panel)); }
     f.card(shaders, p.rect, Card {

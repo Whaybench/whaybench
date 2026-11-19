@@ -377,8 +377,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
         cookies.set_persistent_storage(&store.join("cookies.sqlite").to_string_lossy(), webkit6::CookiePersistentStorage::Sqlite);
     }
     let web = webkit6::WebView::builder().network_session(&session).build();
-    crate::common::web_menu_in_language(&web);
-    crate::common::follow_zoom(&web, &d);
+    crate::common::set_up_web(&web, &d);
     web.set_vexpand(true);
     web.set_hexpand(true);
     if let Some(settings) = webkit6::prelude::WebViewExt::settings(&web) { settings.set_allow_file_access_from_file_urls(false); settings.set_allow_universal_access_from_file_urls(false); settings.set_default_charset("utf-8"); }

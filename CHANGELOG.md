@@ -21,6 +21,9 @@ names another step.
   each subagent's type and last tool.
 
 ### Changed
+- `panel_opacity` and `back_opacity` now fade only a panel's frame and fill: its title, tab names and app content
+  stay solid, so text no longer fades with the panel. The conversation terminal and the panels' own windows and pages
+  leave their background to the panel when it is see-through. An app that paints its own background (a web page) stays opaque.
 - Conversation map → New conversation from this map is now a submenu: Whole map, or As shown, each for an agent.
   As shown reads the main map panel at that moment (the display style, the branches folded or open) and passes on
   the nodes on screen, the screen as text with folded parts as one line, and the command that reads the whole map.

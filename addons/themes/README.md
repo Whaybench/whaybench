@@ -111,7 +111,7 @@ In percent, from 0 to 100; 100 (the default) is opaque.
 | Key | Meaning | Default |
 |---|---|---|
 | `window_opacity` | The surface behind the panels; below 100 the desktop shows through, where the desktop allows it | 100 |
-| `panel_opacity` | Every panel: its frame, title bar, tabs and app | 100 |
+| `panel_opacity` | Every panel's frame, title bar and fill; its text and app content stay solid (an app that paints its own background, such as a web page, stays opaque) | 100 |
 | `back_opacity` | The panels other than the front one, on top of `panel_opacity` | 100 |
 
 `glass_blur`, in pixels from 0 to 64 (default 0, no glass): a floating panel or dialog shows what lies under it blurred this far, where the panel is see-through.

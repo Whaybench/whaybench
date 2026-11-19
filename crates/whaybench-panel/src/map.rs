@@ -461,8 +461,7 @@ fn show_style(stack: &gtk::Stack, web: &Rc<RefCell<Option<webkit6::WebView>>>, p
     let Some(data) = data else { stack.set_visible_child_name("tree"); return };
     if web.borrow().is_none() {
         let view = webkit6::WebView::new();
-        crate::common::web_menu_in_language(&view);
-        crate::common::follow_zoom(&view, d);
+        crate::common::set_up_web(&view, d);
         if let Some(settings) = WebViewExt::settings(&view) { settings.set_default_charset("utf-8"); }
         on_web(&view);
         stack.add_named(&view, Some("page"));

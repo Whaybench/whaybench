@@ -43,6 +43,14 @@ pub fn zoom_by_wheel(win: &gtk::ApplicationWindow, d: &Data) {
     win.add_controller(scroll);
 }
 
+/// A panel's web view: its menu in the chosen language, no background of its own (the page's body paints it, or leaves
+/// it to a see-through panel), and the panel's zoom.
+pub fn set_up_web(web: &webkit6::WebView, d: &Data) {
+    web_menu_in_language(web);
+    web.set_background_color(&gdk::RGBA::TRANSPARENT);
+    follow_zoom(web, d);
+}
+
 /// A web view in the panel follows the panel's zoom, until it is gone.
 pub fn follow_zoom(web: &webkit6::WebView, d: &Data) {
     let (weak, d) = (web.downgrade(), d.clone());
@@ -67,12 +75,14 @@ fn ink(c: [u8; 3], a: f32) -> String { format!("rgba({},{},{},{a})", c[0], c[1],
 pub fn style_sheet(t: &Theme) -> String {
     let (bg, text, soft, accent, line) = (css_colour(t.panel), ink(t.ink, 1.0), ink(t.ink, 0.47), css_colour(t.accent), css_colour(t.border));
     let bar = css_colour(t.bar_bottom);
+    // See-through panels: the window and its lists leave the background to the panel's fill, so only that fades.
+    let fill = if t.see_through() { "transparent".to_string() } else { bg.clone() };
     let (font, size, mono) = (t.font.replace('\'', ""), t.font_size, t.terminal_font.replace('\'', ""));
     let (small, h1, h2, h3) = (size - 1.0, size + 5.0, size + 3.0, size + 1.0);
     format!("
 window, box, list, row, scrolledwindow, viewport, label, overlay {{ background: transparent; background-color: transparent; }}
 list {{ color: {text}; }}
-window {{ background: {bg}; color: {text}; font-family: '{font}'; font-size: {size}pt; }}
+window {{ background: {fill}; color: {text}; font-family: '{font}'; font-size: {size}pt; }}
 label {{ color: {text}; }}
 .dim {{ color: {soft}; }}
 .now {{ font-weight: bold; }}
@@ -98,7 +108,8 @@ flowboxchild {{ padding: 0; min-height: 0; }}
 .head {{ font-weight: bold; background: {bar}; }}
 .h1 {{ font-size: {h1}pt; font-weight: bold; }} .h2 {{ font-size: {h2}pt; font-weight: bold; }} .h3 {{ font-size: {h3}pt; font-weight: bold; }}
 .status {{ font-size: {small}pt; padding: 0 8px; }}
-listview, gridview, columnview, treeview, .view, window.dialog, dialog {{ background: {bg}; color: {text}; }}
+listview, gridview, columnview, treeview, .view {{ background: {fill}; color: {text}; }}
+window.dialog, dialog {{ background: {bg}; color: {text}; }}
 listview > row, gridview > child {{ color: {text}; }}
 headerbar {{ background: {bar}; color: {text}; border-bottom: 1px solid {line}; box-shadow: none; }}
 headerbar label, headerbar .title {{ color: {text}; }}
