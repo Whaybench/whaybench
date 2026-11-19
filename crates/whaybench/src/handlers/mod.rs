@@ -155,3 +155,33 @@ impl smithay::wayland::virtual_keyboard::VirtualKeyboardHandler for App {
 }
 
 smithay::delegate_dispatch2!(App);
+
+//
+// wlr-layer-shell: an app behind the panels
+//
+
+use smithay::desktop::{LayerSurface, layer_map_for_output};
+use smithay::wayland::shell::wlr_layer::{Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler, WlrLayerShellState};
+
+/// Only the layers under the windows are taken (background, bottom): Whaybench draws them as the surface behind the
+/// panels. A bar or a notice asking for a layer above the windows is refused at once, closed, as it would not be seen.
+impl WlrLayerShellHandler for App {
+    fn shell_state(&mut self) -> &mut WlrLayerShellState { &mut self.layer_shell_state }
+
+    fn new_layer_surface(&mut self, surface: WlrLayerSurface, _output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>, layer: Layer, namespace: String) {
+        if !matches!(layer, Layer::Background | Layer::Bottom) { surface.send_close(); return; }
+        let Some(output) = self.space.outputs().next().cloned() else { surface.send_close(); return };
+        crate::record::detail("run", "background app", &[("namespace", namespace.clone())]);
+        let _ = layer_map_for_output(&output).map_layer(&LayerSurface::new(surface, namespace));
+        self.redraw = true;
+    }
+
+    fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
+        for o in self.space.outputs() {
+            let mut map = layer_map_for_output(o);
+            let found = map.layers().find(|l| l.layer_surface() == &surface).cloned();
+            if let Some(l) = found { map.unmap_layer(&l); }
+        }
+        self.redraw = true;
+    }
+}

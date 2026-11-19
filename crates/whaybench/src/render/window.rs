@@ -176,6 +176,9 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: 
             state.space.elements().for_each(|window| {
                 window.send_frame(&output, state.start_time.elapsed(), Some(Duration::ZERO), |_, _| Some(output.clone()))
             });
+            for layer in smithay::desktop::layer_map_for_output(&output).layers() {
+                layer.send_frame(&output, state.start_time.elapsed(), Some(Duration::ZERO), |_, _| Some(output.clone()));
+            }
             state.space.refresh();
             state.popups.cleanup();
             let _ = state.display_handle.flush_clients();

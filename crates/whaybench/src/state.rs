@@ -206,6 +206,8 @@ pub struct App {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    /// Apps that ask to be the surface behind the panels (wlr-layer-shell: swaybg, mpvpaper and the like).
+    pub layer_shell_state: smithay::wayland::shell::wlr_layer::WlrLayerShellState,
     pub shm_state: ShmState,
     /// linux-dmabuf, offered only when the window's GPU has a render node apps can use (not under WSLg).
     pub dmabuf: Option<smithay::wayland::dmabuf::DmabufState>,
@@ -232,6 +234,7 @@ impl App {
         let dh = display.handle();
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        let layer_shell_state = smithay::wayland::shell::wlr_layer::WlrLayerShellState::new::<Self>(&dh);
         XdgDecorationState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals stay registered: the manager only holds their ids and has nothing to do when dropped.
@@ -289,7 +292,7 @@ impl App {
             browser_away: (false, now),
             shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
-            compositor_state, xdg_shell_state, shm_state, dmabuf: None, gpu: None, seat_state, data_device_state, clip,
+            compositor_state, xdg_shell_state, layer_shell_state, shm_state, dmabuf: None, gpu: None, seat_state, data_device_state, clip,
             popups: PopupManager::default(), seat, builtin_ime,
         }
     }

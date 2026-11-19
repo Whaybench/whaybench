@@ -688,6 +688,8 @@ fn surface_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<PanelEl
             f.card(shaders.as_ref(), p.rect, Card { radius, border: 0.0, bar: 0.0, margin: t.shadow_size, fill: none, top: none, bottom: none, line: none, shadow: premultiplied(t.shadow), lift: if Some(p.pid) == top { 1.0 } else { t.back_lift as f32 } });
         }
     }
+    // The background apps (wlr-layer-shell): the surface behind the panels.
+    f.out.extend(background_apps(state, renderer, (sw, sh)));
     // The surface itself, under everything.
     if let Some(sh2) = &shaders
         && (t.surface_top != t.surface_bottom || t.surface_light > 0.0 || t.surface_vignette > 0.0 || t.window_opacity < 1.0) {
@@ -789,6 +791,26 @@ fn lens_under(renderer: &mut GlesRenderer, sh: &mut Shaders, out: &mut Vec<Panel
         let mut slot = Under { id: Some(Id::new()), commit: sh.lens_under.commit, ..Under::default() };
         out.insert(at, steady(renderer, &mut slot, texture.clone(), *r, sh.lens.clone(), uniforms).into());
     }
+}
+
+/// What the background apps (wlr-layer-shell) show, at their place on the surface (the window less the menu bar),
+/// the bottom layer over the background one.
+fn background_apps(state: &App, renderer: &mut GlesRenderer, (sw, sh): (f64, f64)) -> Vec<PanelElement> {
+    use smithay::wayland::shell::wlr_layer::Layer;
+    let Some(output) = state.space.outputs().next() else { return Vec::new() };
+    let map = smithay::desktop::layer_map_for_output(output);
+    let down = state.menu_height();
+    let crop: Rectangle<i32, Physical> = Rectangle::new((0, 0).into(), (sw.round() as i32, sh.round() as i32).into());
+    let mut out = Vec::new();
+    for layer in [Layer::Bottom, Layer::Background] {
+        for l in map.layers_on(layer) {
+            let Some(g) = map.layer_geometry(l) else { continue };
+            let at = (g.loc.x, g.loc.y - down);
+            let e = AsRenderElements::<GlesRenderer>::render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(l, renderer, at.into(), Scale::from(1.0), 1.0);
+            out.extend(e.into_iter().filter_map(|e| CropRenderElement::from_element(e, 1.0, crop)).map(PanelElement::from));
+        }
+    }
+    out
 }
 
 fn window_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<WindowElement> {

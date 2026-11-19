@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- An app can stand behind the panels (wlr-layer-shell, background and bottom layers: swaybg, mpvpaper and the like):
+  it shows as the surface.
+
 ## [0.8.10] - 2026-11-19
 
 ### Changed
