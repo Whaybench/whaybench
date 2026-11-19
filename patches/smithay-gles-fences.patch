@@ -1,0 +1,38 @@
+diff --git a/src/backend/renderer/gles/mod.rs b/src/backend/renderer/gles/mod.rs
+index 913239b6..6650705a 100644
+--- a/src/backend/renderer/gles/mod.rs
++++ b/src/backend/renderer/gles/mod.rs
+@@ -2565,7 +2565,10 @@ impl GlesFrame<'_, '_> {
+             self.renderer.gl.Disable(ffi::BLEND);
+         }
+ 
+-        if let GlesTargetInternal::Texture { sync_lock, .. } = &mut self.target.0 {
++        // As for a read: a write needs a fence only when another context may read the texture.
++        if let GlesTargetInternal::Texture { sync_lock, .. } = &mut self.target.0
++            && self.renderer.egl.is_shared()
++        {
+             sync_lock.update_write(&self.renderer.gl);
+         }
+ 
+@@ -3094,11 +3097,16 @@ impl GlesFrame<'_, '_> {
+             gl.DisableVertexAttribArray(program.attrib_vert_position as u32);
+             drop(scope);
+ 
+-            if self.renderer.capabilities.contains(&Capability::Fencing) {
+-                sync_lock.update_read(gl);
+-            } else if self.renderer.egl.is_shared() {
+-                gl.Finish();
+-            };
++            // A fence only orders this read against another context's write: within one context GL keeps the
++            // order itself. Some drivers (VMware SVGA) flush every command queued at each fence, which made a fence
++            // per texture drawn cost more than the drawing.
++            if self.renderer.egl.is_shared() {
++                if self.renderer.capabilities.contains(&Capability::Fencing) {
++                    sync_lock.update_read(gl);
++                } else {
++                    gl.Finish();
++                }
++            }
+         }
+ 
+         Ok(())

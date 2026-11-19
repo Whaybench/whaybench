@@ -21,6 +21,9 @@ names another step.
   each subagent's type and last tool.
 
 ### Changed
+- Drawing makes no GPU fence for each picture it draws when it has one graphics context (Smithay patch
+  `patches/smithay-gles-fences.patch`): a driver that flushes at each fence (VMware SVGA) spent more on the fences
+  than on the drawing, about 20% of a core with a moving theme.
 - `panel_opacity` and `back_opacity` now fade only a panel's frame and fill: its title, tab names and app content
   stay solid, so text no longer fades with the panel. The conversation terminal and the panels' own windows and pages
   leave their background to the panel when it is see-through, the input field too. A panel moved out to the desktop
