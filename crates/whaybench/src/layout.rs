@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 /// out, set by the compositor when the theme or the person's title zoom changes.
 static TITLE_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x403C_0000_0000_0000);
 pub fn title() -> f64 { f64::from_bits(TITLE_BITS.load(std::sync::atomic::Ordering::Relaxed)) }
-pub fn set_title(text: f64) { TITLE_BITS.store((text * 28.0 / 13.0).round().to_bits(), std::sync::atomic::Ordering::Relaxed); }
+// Held in the tests: a test that builds the whole program (a protocol test) would change it under the layout tests
+// running beside it, which measure with the height the program starts with.
+pub fn set_title(text: f64) { if !cfg!(test) { TITLE_BITS.store((text * 28.0 / 13.0).round().to_bits(), std::sync::atomic::Ordering::Relaxed); } }
 pub const SNAP: f64 = 12.0;
 pub const GRIP: f64 = 7.0;
 pub const TOUCH: f64 = 2.0;
