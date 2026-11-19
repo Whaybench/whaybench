@@ -174,6 +174,12 @@ fn parse_hex(text: &str) -> Option<Colour> {
 /// Colours in a theme are as written; drawing wants them premultiplied.
 pub fn premultiplied(c: Colour) -> Colour { [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]] }
 
+/// A colour as CSS writes it, `#rrggbb`, its alpha left out.
+pub fn hex(c: Colour) -> String { ink_hex(bytes(c)) }
+
+/// A text colour (`Theme::ink`) as CSS writes it, `#rrggbb`.
+pub fn ink_hex(c: [u8; 3]) -> String { format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]) }
+
 fn bytes(c: Colour) -> [u8; 3] { [(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8] }
 
 impl Theme {
@@ -200,7 +206,6 @@ impl Theme {
         let surface = colour("base", "surface", "#e6e9ef");
         let text_colour = colour("base", "text", "#4c4f69");
         let accent = colour("base", "accent", "#1e66f5");
-        let hex = |c: Colour| format!("#{:02x}{:02x}{:02x}", bytes(c)[0], bytes(c)[1], bytes(c)[2]);
         let (bg, sf) = (hex(background), hex(surface));
         let surface_top = colour("frame", "surface_top", &bg);
         let bar_top = colour("frame", "bar_top", &sf);
@@ -273,7 +278,7 @@ impl Theme {
             Value::from(if c[3] >= 1.0 { format!("#{:02x}{:02x}{:02x}", b(c[0]), b(c[1]), b(c[2])) } else { format!("#{:02x}{:02x}{:02x}{:02x}", b(c[0]), b(c[1]), b(c[2]), b(c[3])) })
         };
         let pc = |x: f64| Value::from((x * 1000.0).round() / 10.0);
-        let ink = |i: [u8; 3]| Value::from(format!("#{:02x}{:02x}{:02x}", i[0], i[1], i[2]));
+        let ink = |i: [u8; 3]| Value::from(ink_hex(i));
         match key {
             "background" => c(self.background), "surface" => c(self.surface), "text" => ink(self.ink), "accent" => c(self.accent),
             "font" => self.font.clone().into(), "font_size" => self.font_size.into(), "title_size" => self.title_size.into(),
@@ -365,12 +370,11 @@ pub fn write_terminal_config(data: &Data) -> std::io::Result<PathBuf> {
 }
 
 fn terminal_config(t: &Theme) -> String {
-    let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
     // A see-through panel: the terminal leaves its background to the panel's fill, so only that fades and the text stays solid.
     let opacity = if t.see_through() { 0.0 } else { 1.0 };
     let base = include_str!("../../../config/alacritty.toml").replacen("[window]\n", &format!("[window]\nopacity = {opacity:.1}\n"), 1);
     format!("{}\n[font]\nnormal = {{ family = {:?} }}\nsize = {:.1}\n\n[colors.primary]\nbackground = {:?}\nforeground = {:?}\n",
-        base, t.terminal_font, t.terminal_size, hex(bytes(t.panel)), hex(t.ink))
+        base, t.terminal_font, t.terminal_size, hex(t.panel), ink_hex(t.ink))
 }
 
 fn valid_id(id: &str) -> bool { id != DEFAULT && crate::addons::valid_id(id) }

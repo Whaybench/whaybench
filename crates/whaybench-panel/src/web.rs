@@ -27,10 +27,10 @@ pub struct Page { pub bg: String, pub ink: String, pub accent: String, pub line:
 impl Page {
     pub fn of(d: &Data) -> Self {
         let t = theme::load_active(d);
-        let hex = |c: [f32; 4]| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
+        let hex = theme::hex;
         Page {
             // A see-through panel shows its own fill under the page.
-            bg: if t.see_through() { "transparent".into() } else { hex(t.panel) }, ink: format!("#{:02x}{:02x}{:02x}", t.ink[0], t.ink[1], t.ink[2]), accent: hex(t.accent), line: hex(t.border), surface: hex(t.surface),
+            bg: if t.see_through() { "transparent".into() } else { hex(t.panel) }, ink: theme::ink_hex(t.ink), accent: hex(t.accent), line: hex(t.border), surface: hex(t.surface),
             font: t.font.replace('\'', ""), mono: t.terminal_font.replace('\'', ""),
         }
     }

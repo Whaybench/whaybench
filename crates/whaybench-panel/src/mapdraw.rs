@@ -281,8 +281,8 @@ pub fn page(d: &Data, data: &Value, style: &Style, root: Option<&str>, picked: O
         _ => frame_tree(&nodes, current, style),
     };
     let t = theme::load_active(d);
-    let hex = |c: [f32; 4]| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
-    let (bg, panel, ink, accent) = (hex(t.panel), hex(t.bar_bottom), format!("#{:02x}{:02x}{:02x}", t.ink[0], t.ink[1], t.ink[2]), hex(t.accent));
+    let hex = theme::hex;
+    let (bg, panel, ink, accent) = (hex(t.panel), hex(t.bar_bottom), theme::ink_hex(t.ink), hex(t.accent));
     let font = t.font.replace('\'', "");
     let fill = if t.see_through() { "transparent" } else { "var(--bg)" };
     let mark = picked.map(|p| format!("[data-n=\"{}\"]{{background:color-mix(in srgb,var(--accent) 22%,transparent);border-radius:4px}}", e(p))).unwrap_or_default();
