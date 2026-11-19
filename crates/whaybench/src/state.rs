@@ -844,11 +844,29 @@ impl App {
         if self.surface.modal().is_some_and(|m| !m.rect.contains(pos.x, pos.y)) { return None; }
         if let Some(hit) = self.menu_under(pos) { return Some(hit); }
         if let Some(hit) = self.status_under(pos) { return Some(hit); }
-        let p = self.surface.top_at(pos.x, pos.y)?;
+        let Some(p) = self.surface.top_at(pos.x, pos.y) else { return self.background_under(pos) };
         if p.rect.bar().contains(pos.x, pos.y) || self.surface.edges_at(pos.x, pos.y).is_some() { return None; }
         let w = self.windows.get(&p.tab().id)?;
         let origin = self.app_origin(p)?;
         w.surface_under(pos - origin, WindowSurfaceType::ALL).map(|(s, at)| (s, at.to_f64() + origin))
+    }
+
+    /// Where no panel is, the background app seen there takes the pointer, as an interactive wallpaper does: something
+    /// behind the panels can be touched. Its input region decides where; the bottom layer before the background one.
+    fn background_under(&self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
+        use smithay::wayland::shell::wlr_layer::Layer;
+        // Only on the surface: above it the menu bar and the window's title strip hide the app.
+        if pos.x < 0.0 || pos.y < 0.0 || pos.x >= self.surface.w || pos.y >= self.surface.h { return None; }
+        let output = self.space.outputs().next()?;
+        let map = smithay::desktop::layer_map_for_output(output);
+        // The surface lies below the menu bar; the layers are laid out on the whole window.
+        let down = Point::<f64, Logical>::from((0.0, self.menu_height() as f64));
+        let at = pos + down;
+        // In the order they are drawn, each by its own input region: a hole in the newest lets an older one take it.
+        [Layer::Bottom, Layer::Background].into_iter().flat_map(|layer| map.layers_on(layer).rev()).find_map(|l| {
+            let g = map.layer_geometry(l)?;
+            l.surface_under(at - g.loc.to_f64(), WindowSurfaceType::ALL).map(|(s, p)| (s, (p + g.loc).to_f64() - down))
+        })
     }
 
     pub fn note_saved_soon(&mut self) { self.save_due = true; }
