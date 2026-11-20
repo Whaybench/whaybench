@@ -23,6 +23,12 @@ names another step.
   windows, or one that moves there, is closed.
 - Where no panel is, the background app takes the pointer: something behind the panels can be touched.
 
+### Changed
+- The answer panel names a prompt the person did not type: a finished background task as "Task notice ·
+  <its name> · done/failed/stopped", a subagent's report as "Subagent report", pasted text without its wrapping,
+  and a request of Whaybench's by its bracketed name. The session list leaves task notices and reports out of the
+  last question.
+
 ## [0.8.10] - 2026-11-19
 
 ### Changed
@@ -52,10 +58,6 @@ names another step.
   each subagent's type and last tool.
 
 ### Changed
-- The answer panel names a prompt the person did not type: a finished background task as "Task notice ·
-  <its name> · done/failed/stopped", a subagent's report as "Subagent report", pasted text without its wrapping,
-  and a request of Whaybench's by its bracketed name. The session list leaves task notices and reports out of the
-  last question.
 - Conversation map → New conversation from this map is now a submenu: Whole map, or As shown, each for an agent.
   As shown reads the main map panel at that moment (the display style, the branches folded or open) and passes on
   the nodes on screen, the screen as text with folded parts as one line, and the command that reads the whole map.
