@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.8.11] - 2026-11-20
+
 ### Added
 - An ask waiting in the answer panel shows in the session list as awaiting the person (a held-back Codex question
   too) and at the top of the notifications panel ("Waiting for a choice"; a press shows the answer panel). The
