@@ -94,8 +94,8 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
             session_record::state(data, sid, "working", None)?;
             return Ok(out);
         },
-        // A new prompt answers or passes over a question left waiting.
-        "UserPromptSubmit" => crate::ask::clear(data, sid),
+        // A new prompt answers or passes over a question left waiting; a start or an end leaves none from before.
+        "UserPromptSubmit" | "SessionStart" | "SessionEnd" => crate::ask::clear_session(data, sid),
         "PreToolUse" if is_shell(tool) => write_json(&state_file(data, "bash", sid), &json!(now_ms()))?,
         "PreToolUse" => if let Some(reason) = held_back(data, sid, a, tool, event) {
             return Ok(json!({"hookSpecificOutput": {"hookEventName": name, "permissionDecision": "deny", "permissionDecisionReason": reason}}));

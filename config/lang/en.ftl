@@ -590,3 +590,5 @@ ask-terminal = Answer in terminal
 ask-close = Close
 ask-other = Other answer…
 ask-not-sent = Answer not sent · No open conversation tab shows the session
+ask-not-saved = Answer not saved · { $a1 }
+ask-gone = This ask has already ended
