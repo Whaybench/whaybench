@@ -86,7 +86,7 @@ fn draw(p: &Panel, w: &Widgets, d: &Data) {
     let top = format!("<!doctype html><meta charset='utf-8'><style>{}</style>", style(d));
     let Some(row) = row else { return show(w, top) };
     let prompt = row.get("prompt").and_then(Value::as_str).unwrap_or("");
-    let asked = format!("{} · {}", time_of(row["at"].as_i64().unwrap_or(0), "%H:%M"), cut(prompt, 120));
+    let asked = format!("{} · {}", time_of(row["at"].as_i64().unwrap_or(0), "%H:%M"), cut(&wb_core::prompt::label(prompt), 120));
     show(w, format!("{top}<div class='asked'>{}</div>{}", web::escape(&asked), web::markdown(row.get("text").and_then(Value::as_str).unwrap_or(""), RawHtml::AsText)));
 }
 

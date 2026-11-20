@@ -11,6 +11,7 @@ pub mod map;
 pub mod map_tool;
 pub mod memory;
 pub mod paths;
+pub mod prompt;
 pub mod records;
 pub mod session_record;
 pub mod clock;

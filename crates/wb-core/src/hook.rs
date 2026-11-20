@@ -28,7 +28,7 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     if !EVENTS.contains(&name) { return Err("unsupported hook event".into()); }
     // The session list shows what the person asked: neither commands nor Whaybench's own requests.
     let prompt = if name == "UserPromptSubmit" { Some(text(event, "prompt")?) } else { None };
-    let shown = prompt.filter(|p| !p.starts_with('/') && !p.starts_with('[')).map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect::<String>());
+    let shown = prompt.and_then(crate::prompt::asked).map(|p| p.chars().take(200).collect::<String>());
     let tab = a.tab.map(safe_id).transpose()?;
     let agent = (a.name != crate::agents::CLAUDE).then_some(a.name);
     // Only a start or a prompt is activity: the other events must not undo what a record says of the past, such as

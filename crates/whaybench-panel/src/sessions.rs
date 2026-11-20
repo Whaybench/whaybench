@@ -91,10 +91,17 @@ fn respawn(d: &Data, id: &str) {
     });
 }
 
-fn describe(d: &Data, info: &Value) -> (String, String) {
+/// The sessions with a card waiting in the answer panel, read once for the whole list.
+fn asking(d: &Data) -> std::collections::BTreeSet<String> {
+    wb_core::ask::pending(&d.root).iter().filter_map(|a| a["session"].as_str().map(String::from)).collect()
+}
+
+fn describe(d: &Data, info: &Value, asking: &std::collections::BTreeSet<String>) -> (String, String) {
     let id = sid(info);
     let alive = sessions::alive(d, id);
-    let state = if alive { sessions::state_of(d, id) } else { None };
+    // A card waiting in the answer panel is a wait for the person, also a held-back Codex question whose turn ended.
+    let asking = alive && asking.contains(id);
+    let state = if asking { Some("waiting".to_string()) } else if alive { sessions::state_of(d, id) } else { None };
     let mut parts = vec![wb_core::agents::name_of(&d.root, info.get("agent").and_then(Value::as_str)), match (alive, state.as_deref()) {
         (false, _) => wb_core::i18n::t("off").to_string(),
         (_, Some("working")) => wb_core::i18n::t("working").into(),
@@ -144,7 +151,8 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let latest = sessions::latest(d);
     let open = sessions::open_tabs(d);
     let (query, show_hidden) = { let v = view.borrow(); (v.query.clone(), v.show_hidden) };
-    let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{:?}{:?}", open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
+    let waiting = asking(d);
+    let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}", open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
         let id = sid(s);
         (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id), sessions::schedules::live(&d.root, id).len(), sessions::old_version(id))
     }).collect::<Vec<_>>());
@@ -154,7 +162,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     while let Some(r) = list.row_at_index(0) { list.remove(&r); }
     let mut first = None;
     let add = |info: &Value, faded: bool, note: Option<String>| {
-        let (title, sub) = describe(d, info);
+        let (title, sub) = describe(d, info, &waiting);
         let r = row(&title, &sub, note.as_deref(), faded);
         r.set_widget_name(sid(info));
         if chosen.as_deref() == Some(sid(info)) { r.add_css_class("chosen"); }

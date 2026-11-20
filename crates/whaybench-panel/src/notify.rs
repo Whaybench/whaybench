@@ -13,17 +13,47 @@ const SECTIONS: [(&str, &str); 7] = [("due", "notify-due"), ("marked", "notify-m
 
 struct View { shown: String, trash_open: bool }
 
-fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) {
-    let board = memory::board(&d.root, wb_core::sessions::target(d).as_deref());
-    let sig = format!("{}{}", board, view.borrow().trash_open);
-    if !force && view.borrow().shown == sig { return; }
-    view.borrow_mut().shown = sig;
-    crate::common::keep_scroll(list, || rows(list, &board, &view.borrow()));
+/// The asks waiting in the answer panel (wb_core::ask), one line each: which session, and a question or which tool.
+fn asks(d: &Data) -> Vec<String> {
+    wb_core::ask::pending(&d.root).iter().map(|a| {
+        let name = crate::common::cut(&wb_core::sessions::session_name(d, a["session"].as_str().unwrap_or("")), 24);
+        if a["kind"] == "question" { wb_core::i18n::f("ask-question", &[("a1", name)]) }
+        else { wb_core::i18n::f("ask-permission", &[("a1", name), ("a2", a["tool"].as_str().unwrap_or("").to_string())]) }
+    }).collect()
 }
 
-fn rows(list: &gtk::ListBox, board: &Value, view: &View) {
+fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) {
+    let board = memory::board(&d.root, wb_core::sessions::target(d).as_deref());
+    let waiting = asks(d);
+    let sig = format!("{}{}{:?}", board, view.borrow().trash_open, waiting);
+    if !force && view.borrow().shown == sig { return; }
+    view.borrow_mut().shown = sig;
+    crate::common::keep_scroll(list, || rows(list, &board, &waiting, &view.borrow()));
+}
+
+fn rows(list: &gtk::ListBox, board: &Value, waiting: &[String], view: &View) {
     // Rows only: an open right-click menu is the list's child too, and removing it loops forever.
     while let Some(r) = list.row_at_index(0) { list.remove(&r); }
+    // First what waits for the person's choice; a press shows the answer panel, where it is answered. The answer
+    // panel comes forward by itself when an ask comes: this panel never does, so it never covers the card.
+    if !waiting.is_empty() {
+        let head = gtk::Label::new(Some(&format!("{} ({})", t("notify-asks"), waiting.len())));
+        head.set_xalign(0.0);
+        head.add_css_class("head");
+        let row = gtk::ListBoxRow::new();
+        row.set_child(Some(&head));
+        row.set_widget_name("__head__");
+        list.append(&row);
+        for line in waiting {
+            let label = gtk::Label::new(Some(line));
+            label.set_xalign(0.0);
+            label.set_wrap(true);
+            let row = gtk::ListBoxRow::new();
+            row.set_child(Some(&label));
+            row.set_widget_name("__ask__");
+            list.append(&row);
+        }
+    }
     for (key, title) in SECTIONS {
         let items = board[key].as_array().cloned().unwrap_or_default();
         // An empty section is left out; with all of them empty one line says so.
@@ -189,6 +219,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     {
         let (d, list2, view) = (d.clone(), list.clone(), view.clone());
         list.connect_row_activated(move |_, r| {
+            if r.widget_name() == "__ask__" { status::focus_app(&d, "dev.whaybench.answer"); }
             if r.widget_name() == "__trash__" { let o = view.borrow().trash_open; view.borrow_mut().trash_open = !o; redraw(&d, &list2, &view, true); }
             if let Some(sid) = r.widget_name().strip_prefix("__sched__\t").filter(|s| !s.is_empty()) {
                 wb_core::sessions::set_focus(&d, sid, "person's click");

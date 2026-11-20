@@ -108,6 +108,15 @@ fn agent_bundle() -> &'static Bundle {
 }
 
 /// A text for the agent (a request, a worker's prompt), with nothing to fill in. Always English.
+/// How Whaybench's own requests to an agent begin ('[Map update]', '[Project work ', ...): the bracketed head of each
+/// text for the agent, up to its first value. A message one session's agent sent another ('[From the ...') is not one.
+pub fn request_heads() -> Vec<&'static str> {
+    FOR_AGENT.lines().filter(|l| !l.starts_with("typed-from-session")).filter_map(|l| l.split_once(" = ")).map(|(_, v)| v)
+        .filter(|v| v.starts_with('['))
+        .map(|v| { let end = v.find(['{', ']']).unwrap_or(v.len()); &v[..end] })
+        .collect()
+}
+
 pub fn ai(key: &str) -> &'static str {
     static M: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
     let mut m = M.get_or_init(Default::default).lock().unwrap();

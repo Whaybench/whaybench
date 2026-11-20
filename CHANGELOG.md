@@ -8,6 +8,9 @@ names another step.
 ## [Unreleased]
 
 ### Added
+- An ask waiting in the answer panel shows in the session list as awaiting the person (a held-back Codex question
+  too) and at the top of the notifications panel ("Waiting for a choice"; a press shows the answer panel). The
+  answer panel comes forward for a card; the notifications panel never does, so it never covers it.
 - The answer panel takes an agent's questions and permission asks: Claude Code's AskUserQuestion and tool
   permissions, and Codex's tool permissions, can be answered there (allow, deny, or the options chosen). Claude
   Code keeps its own terminal dialog open beside the card, and whichever is answered first counts; a card goes
@@ -49,6 +52,10 @@ names another step.
   each subagent's type and last tool.
 
 ### Changed
+- The answer panel names a prompt the person did not type: a finished background task as "Task notice ·
+  <its name> · done/failed/stopped", a subagent's report as "Subagent report", pasted text without its wrapping,
+  and a request of Whaybench's by its bracketed name. The session list leaves task notices and reports out of the
+  last question.
 - Conversation map → New conversation from this map is now a submenu: Whole map, or As shown, each for an agent.
   As shown reads the main map panel at that moment (the display style, the branches folded or open) and passes on
   the nodes on screen, the screen as text with folded parts as one line, and the command that reads the whole map.
