@@ -248,6 +248,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let web = webkit6::WebView::new();
     crate::common::set_up_web(&web, &d);
     web.set_vexpand(true);
+    // Never squeezed to nothing by the card: a web view left with no height stops showing new pages.
+    web.set_size_request(-1, 80);
     web.set_hexpand(true);
     if let Some(settings) = WebViewExt::settings(&web) { settings.set_default_charset("utf-8"); settings.set_enable_javascript(false); }
     // A link in the answer opens in the view panel; the answer's own page stays.
@@ -269,7 +271,13 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     card.set_visible(false);
     let area = gtk::Box::new(gtk::Orientation::Vertical, 0);
     area.append(&bar);
-    area.append(&card);
+    // A long card scrolls in its place, so the answer below keeps its room.
+    let card_room = gtk::ScrolledWindow::new();
+    card_room.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    card_room.set_propagate_natural_height(true);
+    card_room.set_max_content_height(260);
+    card_room.set_child(Some(&card));
+    area.append(&card_room);
     area.append(&web);
     win.set_child(Some(&area));
 
@@ -323,8 +331,22 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             let mine = if asks.is_empty() { Vec::new() } else { sessions::target(&d).map(|s| records::lineage(&d, &s)).unwrap_or_default() };
             let next = asks.iter().find(|a| a["session"].as_str().is_some_and(|s| mine.iter().any(|m| m == s))).or(asks.first());
             match next {
-                Some(a) => { fill_card(&card, &d, a); status::focus_app(&d, "dev.whaybench.answer"); }
-                None => card.set_visible(false),
+                Some(a) => {
+                    fill_card(&card, &d, a);
+                    // The whole card up to 260 px, so its options are never scrolled out of sight; the answer keeps 80 px.
+                    let (_, natural, _, _) = card.measure(gtk::Orientation::Vertical, card_room.width().max(1));
+                    card_room.set_min_content_height(natural.min(260));
+                    status::focus_app(&d, "dev.whaybench.answer");
+                }
+                None => {
+                    // Once a card goes (answered here or elsewhere), its room goes too and the answer is loaded
+                    // again: what came while it showed is drawn for sure.
+                    if shown.is_some() {
+                        w.shown.borrow_mut().clear();
+                        card_room.set_min_content_height(-1);
+                    }
+                    card.set_visible(false);
+                }
             }
             *card_of.borrow_mut() = next.map(id_of);
         }

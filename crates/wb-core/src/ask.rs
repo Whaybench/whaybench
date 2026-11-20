@@ -65,12 +65,45 @@ pub fn clear(data: &Path, id: &str) {
     let _ = fs::remove_file(answer_file(data, id));
 }
 
-/// Takes away a session's held-back questions: a new prompt answers or passes over them, a new start or an end
-/// leaves none. An ask a hook waits on is not touched: a subagent may still wait on it, and it ends with its hook.
-pub fn clear_session(data: &Path, sid: &str) {
+/// Which of a session's asks a moment takes away. Claude Code shows its own dialog beside the card and does not tell
+/// the hook when the person answers there, so what is left is cleared when it can no longer be answered.
+pub enum Clear<'a> {
+    /// The main turn ended (stopped, or idle after an interrupt or a denial): its own asks. A held-back Codex question
+    /// waits past it (Codex ends its turn right after holding it), and so does a subagent's ask.
+    TurnEnded,
+    /// A new prompt: the held-back questions too; a subagent may still wait.
+    Prompt,
+    /// The session starts or ends: everything.
+    All,
+    /// A subagent stopped: its asks.
+    Subagent(&'a str),
+}
+
+pub fn clear_session(data: &Path, sid: &str, which: Clear) {
     for r in fs::read_dir(dir(data)).into_iter().flatten().flatten().filter_map(|f| read_json(&f.path(), Value::Null).ok()) {
-        if r["session"] == sid && r["via"] == "prompt" && let Some(id) = r["id"].as_str() { clear(data, id); }
+        if r["session"] != sid { continue; }
+        let (held, sub) = (r["via"] == "prompt", !r["subagent"].is_null());
+        let goes = match which {
+            Clear::TurnEnded => !held && !sub,
+            Clear::Prompt => !sub,
+            Clear::All => true,
+            Clear::Subagent(a) => r["subagent"] == a,
+        };
+        if goes && let Some(id) = r["id"].as_str() { clear(data, id); }
     }
+}
+
+/// The call ran or failed: it was allowed elsewhere (in the terminal, or by auto mode), so its card goes and its hook
+/// ends. Only the oldest same call: another one alike (a parallel subagent's) still waits.
+pub fn ran(data: &Path, sid: &str, event: &Value) {
+    // A question answered in the terminal comes back with its answers and annotations added (Claude Code 2.1.329).
+    let bare = |v: &Value| { let mut v = v.clone(); if let Some(o) = v.as_object_mut() { o.remove("answers"); o.remove("annotations"); } v };
+    let input = bare(&event["tool_input"]);
+    let mut same: Vec<Value> = fs::read_dir(dir(data)).into_iter().flatten().flatten().filter_map(|f| read_json(&f.path(), Value::Null).ok())
+        .filter(|r| r["session"] == sid && r["via"] != "prompt" && r["tool"] == event["tool_name"] && r["subagent"] == event["agent_id"] && bare(&r["input"]) == input)
+        .collect();
+    same.sort_by_key(|r| r["at"].as_i64().unwrap_or(0));
+    if let Some(id) = same.first().and_then(|r| r["id"].as_str()) { clear(data, id); }
 }
 
 /// A PermissionRequest inside Whaybench: shows it in the panel and waits. None when the person answers in the
@@ -81,7 +114,8 @@ pub fn wait(data: &Path, sid: &str, agent: &str, event: &Value) -> Result<Option
     let input = &event["tool_input"];
     let kind = if tool == "AskUserQuestion" { "question" } else { "permission" };
     let (id, at) = (new_id(sid), now_ms());
-    write_json(&request_file(data, &id), &json!({"id": id, "session": sid, "agent": agent, "kind": kind, "tool": tool, "input": input, "at": at, "pid": std::process::id()}))?;
+    // A subagent's ask (it shares the session id) is told apart, so the main turn's end leaves it.
+    write_json(&request_file(data, &id), &json!({"id": id, "session": sid, "agent": agent, "subagent": event["agent_id"], "kind": kind, "tool": tool, "input": input, "at": at, "pid": std::process::id()}))?;
     let got = loop {
         if let Ok(a) = read_json(&answer_file(data, &id), Value::Null) && !a.is_null() { break Some(a); }
         // A new prompt took the ask away.
@@ -159,7 +193,9 @@ mod tests {
         assert!(pending(&root).is_empty(), "nothing left once answered");
         hold(&root, "s2", "codex", &event).unwrap().unwrap();
         assert_eq!(pending(&root).len(), 1, "a held-back question waits without a process");
-        clear_session(&root, "s2");
+        clear_session(&root, "s2", Clear::TurnEnded);
+        assert_eq!(pending(&root).len(), 1, "a turn's end leaves a held-back question");
+        clear_session(&root, "s2", Clear::Prompt);
         assert!(pending(&root).is_empty());
         // Two asks of one session at once: each gets its own answer.
         let (a, b) = (root.clone(), root.clone());
@@ -180,14 +216,26 @@ mod tests {
         assert_eq!(first.join().unwrap().unwrap()["hookSpecificOutput"]["decision"]["behavior"], "allow");
         assert_eq!(second.join().unwrap().unwrap()["hookSpecificOutput"]["decision"]["behavior"], "deny");
         assert!(fs::read_dir(dir(&root)).unwrap().flatten().all(|f| f.file_name() == "panel"), "nothing left behind");
-        // A new prompt leaves an ask a hook still waits on; an ended ask takes no answer.
-        let c = root.clone();
-        let waiting = std::thread::spawn(move || wait(&c, "s4", "claude", &json!({"tool_name": "Bash", "tool_input": {}})).unwrap());
-        let id = loop { if let Some(r) = pending(&root).first() { break r["id"].as_str().unwrap().to_string(); } std::thread::sleep(Duration::from_millis(20)); };
-        clear_session(&root, "s4");
-        answer(&root, &id, "deny", &json!({})).unwrap();
-        assert!(waiting.join().unwrap().is_some(), "the hook still got its answer");
-        assert!(answer(&root, &id, "allow", &json!({})).is_err(), "the ask is over");
+        // The call ran (allowed in the terminal): the oldest same call's hook ends with no decision, and its ask
+        // takes no answer; the same call of another waits on.
+        let spawn = |root: &PathBuf, sub: Value| { let c = root.clone(); std::thread::spawn(move || wait(&c, "s4", "claude", &json!({"tool_name": "Bash", "tool_input": {"command": "x"}, "agent_id": sub})).unwrap()) };
+        let first = spawn(&root, Value::Null);
+        while pending(&root).is_empty() { std::thread::sleep(Duration::from_millis(20)); }
+        let second = spawn(&root, Value::Null);
+        let sub = spawn(&root, json!("a1"));
+        while pending(&root).len() < 3 { std::thread::sleep(Duration::from_millis(20)); }
+        let id = pending(&root)[0]["id"].as_str().unwrap().to_string();
+        ran(&root, "s4", &json!({"tool_name": "Bash", "tool_input": {"command": "other"}}));
+        assert_eq!(pending(&root).len(), 3, "another call leaves them");
+        ran(&root, "s4", &json!({"tool_name": "Bash", "tool_input": {"command": "x"}}));
+        assert!(first.join().unwrap().is_none(), "the oldest one's hook ends");
+        assert!(answer(&root, &id, "allow", &json!({})).is_err(), "its ask is over");
+        assert_eq!(pending(&root).len(), 2, "the same call of another still waits");
+        clear_session(&root, "s4", Clear::TurnEnded);
+        assert!(second.join().unwrap().is_none());
+        assert_eq!(pending(&root).len(), 1, "a subagent's ask outlives the main turn");
+        clear_session(&root, "s4", Clear::Subagent("a1"));
+        assert!(sub.join().unwrap().is_none());
         assert!(valid_id(&format!("{}-1-2-3", "a".repeat(128))).is_ok(), "a session id at its limit still makes an ask id");
         let _ = fs::remove_dir_all(&root);
     }

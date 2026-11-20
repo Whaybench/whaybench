@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use crate::{i18n, map::{self, Result, now_ms, read_json, safe_id, text, write_json}, memory, session_record};
 
-pub const EVENTS: [&str; 12] = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
+pub const EVENTS: [&str; 13] = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure",
     "Notification", "Stop", "Interrupt", "SessionEnd", "PreCompact", "SubagentStart", "SubagentStop"];
 /// Claude Code's notifications that wait for the person; the others (signed in, an agent done, a quota resumed) do not.
 /// An agent add-on's notification carries no type and counts as waiting.
@@ -42,7 +42,7 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         // AskUserQuestion and Codex's request_user_input both have their tool hooks around it (seen in a Claude Code
         // 2.1.326 transcript; Codex 0.169.0 source); a question never shown leaves it to the next event to settle.
         "PreToolUse" if matches!(event["tool_name"].as_str(), Some("AskUserQuestion" | "request_user_input")) => ("waiting", None),
-        "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => ("working", None),
+        "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => ("working", None),
         "PermissionRequest" => ("waiting", None),
         "Notification" if event["notification_type"].as_str().is_none_or(|t| ASKS.contains(&t)) => ("waiting", event.get("message").and_then(Value::as_str)),
         // Idle after a turn: settles a turn that ended without a Stop (interrupted).
@@ -80,6 +80,7 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     let tool = event["tool_name"].as_str().unwrap_or("");
     match name {
         "Stop" => {
+            crate::ask::clear_session(data, sid, crate::ask::Clear::TurnEnded);
             stop(data, a, sid, event, &mut record)?;
             if a.name != crate::agents::CLAUDE && crate::agents::load(data, a.name).is_ok_and(|g| g.usage.as_deref() == Some("codex-rollout")) {
                 crate::usage::from_codex_rollout(data, sid, a.name, event);
@@ -94,13 +95,22 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
             session_record::state(data, sid, "working", None)?;
             return Ok(out);
         },
-        // A new prompt answers or passes over a question left waiting; a start or an end leaves none from before.
-        "UserPromptSubmit" | "SessionStart" | "SessionEnd" => crate::ask::clear_session(data, sid),
+        // What is answered elsewhere goes from the panel: a call that ran, what a turn left, all at a prompt, start or end.
+        "UserPromptSubmit" => crate::ask::clear_session(data, sid, crate::ask::Clear::Prompt),
+        "SessionStart" | "SessionEnd" => crate::ask::clear_session(data, sid, crate::ask::Clear::All),
+        // Idle after an interrupt or a denial in the terminal: no Stop comes.
+        "Notification" if event["notification_type"] == "idle_prompt" => crate::ask::clear_session(data, sid, crate::ask::Clear::TurnEnded),
+        "SubagentStop" => if let Some(agent) = event["agent_id"].as_str() { crate::ask::clear_session(data, sid, crate::ask::Clear::Subagent(agent)); },
+        // A call allowed in the terminal that failed.
+        "PostToolUseFailure" => crate::ask::ran(data, sid, event),
         "PreToolUse" if is_shell(tool) => write_json(&state_file(data, "bash", sid), &json!(now_ms()))?,
         "PreToolUse" => if let Some(reason) = held_back(data, sid, a, tool, event) {
             return Ok(json!({"hookSpecificOutput": {"hookEventName": name, "permissionDecision": "deny", "permissionDecisionReason": reason}}));
         },
-        "PostToolUse" => if let Some(context) = after_tool(data, sid, a, tool, event)? { return Ok(context_out(name, &context)); },
+        "PostToolUse" => {
+            crate::ask::ran(data, sid, event);
+            if let Some(context) = after_tool(data, sid, a, tool, event)? { return Ok(context_out(name, &context)); }
+        }
         _ => {}
     }
     if name == "SessionStart" || name == "UserPromptSubmit" {

@@ -9,10 +9,11 @@ names another step.
 
 ### Added
 - The answer panel takes an agent's questions and permission asks: Claude Code's AskUserQuestion and tool
-  permissions, and Codex's tool permissions, are answered there (allow, deny, or the options chosen) and no
-  terminal dialog shows. "Answer in terminal", ten minutes without an answer, or a closed answer panel leaves the
-  ask to the terminal as before. Codex's own questions are held back, shown in the panel, and the answer goes to
-  the session as its next prompt.
+  permissions, and Codex's tool permissions, can be answered there (allow, deny, or the options chosen). Claude
+  Code keeps its own terminal dialog open beside the card, and whichever is answered first counts; a card goes
+  when its call runs or fails, or when the turn ends. Codex asks in the terminal only after the panel: "Answer in
+  terminal", ten minutes without an answer, or a closed answer panel. Codex's own questions are held back, shown
+  in the panel, and the answer goes to the session as its next prompt.
 - An app can stand behind the panels (wlr-layer-shell, background and bottom layers: swaybg, mpvpaper and the like):
   it shows as the surface. It is laid out on the whole window (under the menu bar and the status line, as a
   wallpaper under a desktop's bars) and again when the window is resized; the newest is on top. A layer above the
