@@ -118,7 +118,9 @@ function Run-Native([string]$exe, [string[]]$arguments) {
 function Work-Disk([string]$what) { Run-Native $wsl @("-d", $Distro, "-u", "root", "--", "/usr/local/sbin/whaybench-work-disk", $what) }
 # Not there on a first install: no error for the log, which would read as a failure.
 $task = Get-ScheduledTask -TaskPath "\Whaybench\" -TaskName "MountWork" -ErrorAction SilentlyContinue
-if (-not ($task -and (Test-Path $vhd))) {
+# A task from before it ran wsl.exe through a headless console (a window flashed at each start) is made again.
+$hidden = $task -and ($task.Actions | Where-Object { $_.Execute -like "*\conhost.exe" })
+if (-not ($task -and $hidden -and (Test-Path $vhd))) {
     # diskpart reads its script in the system code page: the folder's short (8.3) name keeps a profile folder named in
     # another script readable. Without short names an ASCII path is still fine.
     $short = $wbDir
@@ -145,7 +147,9 @@ if (-not (Test-Path $vhd)) {
 }
 $wsl = "$env:SystemRoot\System32\wsl.exe"
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
-$action = New-ScheduledTaskAction -Execute $wsl -Argument "--mount --vhd `"$vhd`" --bare"
+# wsl.exe is a console program: run by the task it would flash a console window at each start; conhost --headless
+# gives it a console without a window.
+$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument "--headless `"$wsl`" --mount --vhd `"$vhd`" --bare"
 $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Highest
 Register-ScheduledTask -TaskPath "\Whaybench\" -TaskName "MountWork" -Action $action -Principal $principal -Settings $settings -Force | Out-Null
 $ErrorActionPreference = "Continue"
