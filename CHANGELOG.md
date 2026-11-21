@@ -7,7 +7,15 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- The computer does not go to sleep while an agent works (Preferences → "Keep the computer awake while an agent
+  works", on at first): a turn worked or waiting on the person (a command approved in the terminal runs meanwhile),
+  or a subagent still running after it. On Linux a `systemd-inhibit` block on sleep and the lid switch, under WSL
+  Windows' `SetThreadExecutionState` held by PowerShell. The screen may still turn off and lock. A Claude Code
+  session whose process is gone, or a state not written for two hours, no longer holds.
+
 ### Fixed
+- A background subagent's tool call after the turn ended no longer marks the session working again.
 - The input panel draws with GTK's Cairo renderer: under the GL one the top of a just-typed glyph went missing
   until the next full redraw (themes on the default font, Noto Sans CJK). `GSK_RENDERER` set by hand still wins.
 

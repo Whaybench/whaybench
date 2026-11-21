@@ -7,6 +7,7 @@ mod layout;
 mod mcp;
 mod render;
 mod agent;
+mod awake;
 mod chrome;
 mod notify;
 mod clipboard;

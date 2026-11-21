@@ -4,7 +4,7 @@ use std::{collections::HashMap, path::Path, process::{Command, Stdio}, time::{Du
 
 use wb_core::{log as record, paths::Data};
 
-const POWERSHELL: &str = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+pub const POWERSHELL: &str = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 
 pub fn wsl() -> bool { Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists() || std::env::var_os("WSL_DISTRO_NAME").is_some() }
 
@@ -18,7 +18,7 @@ fn show(title: &str, body: &str) {
             $x=$m::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); $t=$x.GetElementsByTagName('text'); \
             $null=$t.Item(0).AppendChild($x.CreateTextNode((& $d '{}'))); $null=$t.Item(1).AppendChild($x.CreateTextNode((& $d '{}'))); \
             $m::CreateToastNotifier('{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x))",
-            b64(title), b64(body));
+            b64(title.as_bytes()), b64(body.as_bytes()));
         let mut c = Command::new(POWERSHELL);
         c.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
         c
@@ -34,10 +34,10 @@ fn show(title: &str, body: &str) {
 /// A string in GVariant text, as gdbus reads its arguments.
 fn quoted(s: &str) -> String { format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")) }
 
-fn b64(s: &str) -> String {
+pub fn b64(s: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
-    for chunk in s.as_bytes().chunks(3) {
+    for chunk in s.chunks(3) {
         let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | (*b as u32) << (16 - 8 * i));
         for i in 0..4 { out.push(if i <= chunk.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' }); }
     }
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn base64_and_quotes() {
-        assert_eq!([b64(""), b64("f"), b64("fo"), b64("foo"), b64("\u{d55c}")], ["", "Zg==", "Zm8=", "Zm9v", "7ZWc"]);
+        assert_eq!([b64(b""), b64(b"f"), b64(b"fo"), b64(b"foo"), b64("\u{d55c}".as_bytes())], ["", "Zg==", "Zm8=", "Zm9v", "7ZWc"]);
         assert_eq!(quoted("it's a\\b"), "'it\\'s a\\\\b'");
     }
 

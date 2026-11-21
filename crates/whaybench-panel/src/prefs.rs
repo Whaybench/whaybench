@@ -54,6 +54,11 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     { let d = d.clone(); update.connect_toggled(move |b| save(&d, "auto_update", (!b.is_active()).then_some(json!(false)))); }
     add(t("prefs-auto-update"), "", update.upcast());
 
+    let awake = gtk::CheckButton::new();
+    awake.set_active(now["keep_awake"] != Value::Bool(false));
+    { let d = d.clone(); awake.connect_toggled(move |b| save(&d, "keep_awake", (!b.is_active()).then_some(json!(false)))); }
+    add(t("prefs-keep-awake"), t("prefs-keep-awake-hint"), awake.upcast());
+
     let input = gtk::DropDown::from_strings(&[t("prefs-input-built-in"), t("prefs-input-desktop")]);
     input.set_selected(u32::from(now["input_method"] == "host"));
     { let d = d.clone(); input.connect_selected_notify(move |b| save(&d, "input_method", (b.selected() == 1).then(|| json!("host")))); }

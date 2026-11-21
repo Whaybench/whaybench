@@ -54,7 +54,11 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         "PreCompact" => ("", None),
         _ => ("done", None),
     };
-    if !state.is_empty() { session_record::state(data, sid, state, note)?; }
+    // A background subagent's tool call after the turn ended is the subagent's, not a new turn: the session stays
+    // done and the subagent shows (and keeps the computer awake) on its own, settled by its SubagentStop.
+    let after_turn = event.get("agent_id").is_some()
+        && crate::sessions::state_of(&crate::paths::Data { root: data.to_path_buf() }, sid).as_deref() == Some("done");
+    if !state.is_empty() && !(state == "working" && after_turn) { session_record::state(data, sid, state, note)?; }
     subagent(data, sid, name, event)?;
     // What a session scheduled is only shown: failing to write it down must not stop the rest of the hook.
     if let Err(e) = crate::sessions::schedules::on_event(data, sid, name, event) { eprintln!("whaybench: schedule not noted: {e}"); }
@@ -860,6 +864,9 @@ mod tests {
         assert_eq!(crate::sessions::subagents_running(&d, "s").len(), 1, "started again under the same id");
         sub("SubagentStop", json!({}));
         assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("working"), "a subagent's stop is not the turn's");
+        run(dir.path(), &a, &ev("s", "Stop", json!({}))).unwrap();
+        sub("PostToolUse", json!({"tool_name": "Read", "tool_input": {}}));
+        assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("done"), "a background subagent after the turn is no new turn");
         run(dir.path(), &a, &ev("s", "SessionEnd", json!({}))).unwrap();
         assert!(!crate::sessions::subagents_dir(dir.path(), "s").exists());
     }
