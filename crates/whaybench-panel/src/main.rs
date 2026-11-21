@@ -24,20 +24,10 @@ mod view;
 
 use gtk::{gio, glib, prelude::*};
 
-/// Whether this WebKit puts WSL's GPU (/dev/dxg) in its web process sandbox: from 2.54.2.
-fn webkit_has_dxg(version: (u32, u32, u32)) -> bool { version >= (2, 54, 2) }
-
 fn main() -> glib::ExitCode {
     wb_core::paths::private_files();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let kind = args.first().cloned().unwrap_or_default();
-    // Under WSL the compositor asks for d3d12 (the GPU is /dev/dxg). WebKit before 2.54 leaves /dev/dxg out of its web
-    // process sandbox, where d3d12 then fails and the page stays blank: panels with web views draw on the CPU there.
-    let web = matches!(kind.as_str(), "answer" | "view" | "project" | "map");
-    if web && std::env::var("GALLIUM_DRIVER").is_ok_and(|d| d == "d3d12") && !webkit_has_dxg((webkit6::functions::major_version(), webkit6::functions::minor_version(), webkit6::functions::micro_version())) {
-        // SAFETY: no other thread exists yet.
-        unsafe { std::env::remove_var("GALLIUM_DRIVER") };
-    }
     // GTK's GL renderer leaves the top of a just-typed glyph undrawn in a text view until the next full redraw
     // (GTK 4.22, fonts without their own top room such as Noto Sans CJK); the Cairo one does not. One small field.
     if kind == "input" && std::env::var_os("GSK_RENDERER").is_none() {
@@ -107,15 +97,4 @@ fn main() -> glib::ExitCode {
         win.present();
     });
     app.run_with_args(&["whaybench-panel"])
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn webkit_puts_the_wsl_gpu_in_its_sandbox_from_2_54_2() {
-        assert!(!super::webkit_has_dxg((2, 52, 6)));
-        assert!(!super::webkit_has_dxg((2, 54, 1)));
-        assert!(super::webkit_has_dxg((2, 54, 2)));
-        assert!(super::webkit_has_dxg((2, 56, 0)));
-    }
 }

@@ -380,6 +380,8 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
     // A request left by an earlier run is not for this one.
     for f in fs::read_dir(&dir)?.flatten() { let _ = fs::remove_file(f.path()); }
     crate::awake::start(data.clone());
+    // The Windows start script could not attach the work disk (3.20): ~/work is on the distribution's own disk now.
+    if std::env::var("WHAYBENCH_WORK_DISK").as_deref() == Ok("missing") { wb_core::status::say(data, wb_core::i18n::t("work-disk-missing"), 30); }
     let mut ticks = 0u32;
     let asked_data = data.clone();
     event_loop.handle().insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, state| {

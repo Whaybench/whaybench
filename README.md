@@ -51,7 +51,8 @@ To type in Korean, Japanese, Chinese or another language, also install its fcitx
 
 Whaybench updates itself and says so in its status line; **Whaybench → Restart** starts the new version.
 
-- Windows: remove it in **Settings → Apps**.
+- Windows: remove it in **Settings → Apps**. Your projects stay in `%LOCALAPPDATA%\Whaybench\work.vhdx`; see
+  [docs/windows.md](docs/windows.md#removing-everything) to remove them too.
 - Linux: delete `~/.local/lib/whaybench`, `~/.local/lib/whaybench-versions` and `~/.local/bin/whaybench`. Remove the
   Claude Code plugin with `claude plugin uninstall context-map@whaybench`.
 

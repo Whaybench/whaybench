@@ -130,7 +130,7 @@ if [ -n "$missing" ]; then
             after="Restart the computer to use them (rpm-ostree applies packages at the next boot)." ;;
         *" fedora "*) cmd="${S}dnf install -y webkitgtk6.0 wl-clipboard firefox fcitx5 google-noto-color-emoji-fonts" ;;
         *" arch "*) cmd="${S}pacman -S --needed --noconfirm webkitgtk-6.0 wl-clipboard firefox fcitx5 noto-fonts-emoji" ;;
-        # Firefox from Mozilla's archive, put before Ubuntu's snap one (as in setup-wsl.sh); only when it is missing,
+        # Firefox from Mozilla's archive, put before Ubuntu's snap one; only when it is missing,
         # so a system with a Firefox of its own (Linux Mint) keeps it.
         # Ubuntu's snap package has the epoch 1:, so apt counts Mozilla's as a downgrade.
         *" ubuntu "*) case " $missing " in

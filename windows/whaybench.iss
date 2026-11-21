@@ -42,8 +42,10 @@ Type: files; Name: "{userdesktop}\Whaybench.lnk"
 Type: files; Name: "{userprograms}\Whaybench.lnk"
 
 [CustomMessages]
-Stopped=The setup stopped before it finished. Why is written in %1. Run Whaybench Setup again to continue from there.
-RemoveLinux=Also delete the Whaybench Linux system, with everything kept in it (conversations, settings, files made there)?
+Stopped=Setup stopped. Log: %1%nRun Whaybench Setup again to continue.
+RemoveLinux=Delete the Whaybench Linux system?%n%nDeleted: conversations, settings, files in the Linux system, ~/work.before-disk, ~/work.unmounted-*%nKept: ~/work (work disk %1)
+RemoveLinuxNoDisk=Delete the Whaybench Linux system?%n%nDeleted: conversations, settings, ~/work, all files in the Linux system
+TaskLeft=Scheduled task Whaybench\MountWork not removed: administrator rights required.%nTask action: attach %1. Remove: Task Scheduler.
 
 [Code]
 var Restart: Boolean;
@@ -67,11 +69,23 @@ end;
 
 // The distribution holds the person's work: deleted only when they say so.
 procedure CurUninstallStepChanged(Step: TUninstallStep);
-var Code: Integer;
+var Code: Integer; Disk, Question: String;
 begin
   if Step <> usUninstall then exit;
   RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\RunOnce', 'WhaybenchSetup');
+  Disk := ExpandConstant('{localappdata}\Whaybench\work.vhdx');
+  // The scheduled task that attaches the work disk; work.vhdx itself stays (the projects outlive the program). Made
+  // with administrator rights, it may refuse to go without them: then it is said, and it stays harmless (it attaches
+  // the disk, nothing more).
+  Exec(ExpandConstant('{sys}\schtasks.exe'), '/delete /tn Whaybench\MountWork /f', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if (Code <> 0) and Exec(ExpandConstant('{sys}\schtasks.exe'), '/query /tn Whaybench\MountWork', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then
+    SuppressibleMsgBox(FmtMessage(CustomMessage('TaskLeft'), [Disk]), mbInformation, MB_OK, IDOK);
+  // ~/work is on the work disk only once it was mounted there (the flag whaybench-work-disk leaves): a work.vhdx that
+  // never was leaves ~/work inside the Linux system. Unknown counts as inside.
+  if FileExists(Disk) and Exec(ExpandConstant('{sys}\wsl.exe'), '-d Whaybench -u root -- test -f /etc/whaybench/work-on-disk', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then
+    Question := FmtMessage(CustomMessage('RemoveLinux'), [Disk])
+  else Question := CustomMessage('RemoveLinuxNoDisk');
   // A silent uninstall keeps it.
-  if SuppressibleMsgBox(CustomMessage('RemoveLinux'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
+  if SuppressibleMsgBox(Question, mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
     Exec(ExpandConstant('{sys}\wsl.exe'), '--unregister Whaybench', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;

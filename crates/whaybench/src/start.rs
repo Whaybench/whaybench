@@ -97,8 +97,8 @@ pub fn attach_input_method(socket: &OsStr) {
         // --keep: it outlives this display, so the next Whaybench (a restart starts it before this one ends) finds it.
         // Without it fcitx5 exits with its first display and the new one is left attached to nothing. The long form:
         // fcitx5 before 5.1.15 (Ubuntu 24.04 has 5.1.7) lists -k but its parser refuses it, and then does not start.
-        // Its texts (input method names, engine settings) in Whaybench's language when a locale of it exists: under
-        // WSL everything runs in C.UTF-8, and in a C locale programs leave their translations out.
+        // Its texts (input method names, engine settings) in Whaybench's language when a locale of it exists: the
+        // system's own locale (English under WSL, C in some images) would give fcitx5 those texts instead.
         let messages = messages_locale(wb_core::i18n::lang());
         let start = |args: &[&str]| {
             let mut c = Command::new("fcitx5");

@@ -16,7 +16,7 @@ fn about(d: &Data, lang: &str) -> Value {
 }
 
 /// A package name as distributions allow it. Anything else is not installed: a name starting with `-` would be an
-/// option to apt-get (`-oDPkg::Pre-Invoke::=...` runs a command as root), and add-ons come from other people.
+/// option to the package manager (dnf's `--setopt=...`, which runs as root), and add-ons come from other people.
 fn valid_package(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
         && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+.-".contains(c))
@@ -189,26 +189,44 @@ fn data_dirs() -> Vec<PathBuf> {
     dirs.split(':').filter(|s| !s.is_empty()).map(PathBuf::from).collect()
 }
 
+/// Whether this runs in WSL. Any sign: the interop registration can be gone or registered late under another name
+/// when systemd-binfmt reloads binfmt_misc, and a service may not have WSL's variables.
+pub fn wsl() -> bool {
+    ["WSLInterop", "WSLInterop-late"].iter().any(|n| Path::new("/proc/sys/fs/binfmt_misc").join(n).exists()) || std::env::var_os("WSL_DISTRO_NAME").is_some()
+}
+
+/// wsl.exe and this distribution's name, for running a command in it as root.
+fn wsl_root() -> (PathBuf, String) {
+    let exe = which("wsl.exe").unwrap_or_else(|| PathBuf::from("/mnt/c/Windows/System32/wsl.exe"));
+    let distro = std::env::var("WSL_DISTRO_NAME").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "Whaybench".into());
+    (exe, distro)
+}
+
 /// The commands that install the package, run in order, or None when there is no way without a terminal (or the
-/// name is not a package name). Under WSL the account has no sudo: wsl.exe runs apt-get as root in this distribution,
-/// the package lists first (the ones from the setup go stale), without Recommends (those are setting programs). On a
-/// desktop PackageKit installs, its lists first too, and the system asks for the password (polkit).
+/// name is not a package name). Under WSL (Whaybench's Fedora) the account has no sudo: wsl.exe runs dnf as root in
+/// this distribution, without weak dependencies (those are setting programs). On a desktop PackageKit installs, its
+/// lists first (after a change made with dnf or apt they no longer know the package), and the system asks for the
+/// password (polkit).
 pub fn install_commands(package: &str) -> Option<Vec<Command>> {
     if !valid_package(package) { return None; }
-    if Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists() {
-        let exe = which("wsl.exe").unwrap_or_else(|| PathBuf::from("/mnt/c/Windows/System32/wsl.exe"));
-        let distro = std::env::var("WSL_DISTRO_NAME").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "Whaybench".into());
-        let apt = |args: &[&str]| { let mut c = Command::new(&exe); c.args(["-d", &distro, "-u", "root", "--", "apt-get"]).args(args); c };
-        return Some(vec![apt(&["update", "-q"]), apt(&["install", "-y", "-q", "--no-install-recommends", "--", package])]);
+    if wsl() {
+        let (exe, distro) = wsl_root();
+        return Some(vec![wsl_install(&exe, &distro, package)]);
     }
     let pkcon = which("pkcon")?;
     let run = |args: &[&str]| { let mut c = Command::new(&pkcon); c.args(args); c };
-    // PackageKit keeps lists of its own: after a change made with dnf or apt they no longer know the package.
     Some(vec![run(&["refresh"]), run(&["install", "-y", "--", package])])
 }
 
+/// No `--` before the name: the dnf in Fedora 44's WSL image (5.4.1) refuses it; `valid_package` keeps options out.
+fn wsl_install(exe: &Path, distro: &str, package: &str) -> Command {
+    let mut c = Command::new(exe);
+    c.args(["-d", distro, "-u", "root", "--", "dnf", "install", "-y", "-q", "--setopt=install_weak_deps=False", package]);
+    c
+}
+
 /// Installs the package: its commands in order, stopping at the first that fails; Err says why (pkcon writes it on
-/// its output, apt-get on its errors).
+/// its output, dnf on its errors).
 pub fn install(package: &str) -> Result<(), String> {
     let steps = install_commands(package).ok_or("no PackageKit and not WSL")?;
     for mut c in steps {
@@ -221,13 +239,18 @@ pub fn install(package: &str) -> Result<(), String> {
 }
 
 /// The fcitx5 engine packages the distribution has and this system has not installed, by name. Asked of the package
-/// manager each time, so there is no list to keep: apt-cache under WSL, PackageKit on a desktop.
+/// manager each time, so there is no list to keep: dnf under WSL, PackageKit on a desktop.
 pub fn installable() -> Vec<String> {
     let out = |c: &mut Command| c.env("LANG", "C").output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
-    let mut names: Vec<String> = if Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists() {
-        let installed = out(Command::new("dpkg-query").args(["-W", "-f", "${Package}\n", "fcitx5-*"]));
-        out(Command::new("apt-cache").args(["search", "--names-only", "^fcitx5-"])).lines()
-            .filter_map(|l| l.split(" - ").next()).filter(|n| !installed.lines().any(|i| i == *n)).map(String::from).collect()
+    let mut names: Vec<String> = if wsl() {
+        let installed = out(Command::new("rpm").args(["-qa", "--qf", "%{NAME}\n", "fcitx5-*"]));
+        // As root, as the install runs: root's metadata is there from the setup, a user's own would be downloaded first
+        // (over 100 MB), and offline it fails.
+        let (exe, distro) = wsl_root();
+        let found = out(Command::new(exe).args(["-d", &distro, "-u", "root", "--", "dnf", "repoquery", "-q", "--qf", "%{name}\n", "fcitx5-*"]));
+        if found.trim().is_empty() { crate::log::warn("input", "no engine packages listed", "dnf repoquery gave nothing", &[]); }
+        found.lines()
+            .map(str::trim).filter(|n| !n.is_empty() && !installed.lines().any(|i| i == *n)).map(String::from).collect()
     } else if let Some(pkcon) = which("pkcon") {
         // "Available   fcitx5-anthy-5.1.10-1.fc44.x86_64 (fedora)": the name is before the version and release. Another
         // version of an installed package is listed as available too, so the installed names are taken out.
@@ -305,6 +328,13 @@ mod tests {
             "Keys": {"type": "a{sv}", "data": {"0": {"type": "s", "data": "F9"}}}}});
         assert_eq!(plain(&got), serde_json::json!({"Keyboard": "Dubeolsik", "Keys": {"0": "F9"}}));
     }
+    #[test]
+    fn under_wsl_dnf_runs_as_root() {
+        let c = wsl_install(Path::new("wsl.exe"), "Whaybench", "fcitx5-hangul");
+        let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        assert_eq!(args.join(" "), "-d Whaybench -u root -- dnf install -y -q --setopt=install_weak_deps=False fcitx5-hangul");
+    }
+
     #[test]
     fn only_a_package_name_is_installed() {
         assert!(valid_package("fcitx5-hangul") && valid_package("libstdc++6") && valid_package("fcitx5-m17n"));

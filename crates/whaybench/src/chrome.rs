@@ -195,7 +195,7 @@ mod tests {
     use super::*;
     #[test]
     fn a_character_the_title_font_lacks_comes_from_a_fallback_font() {
-        // A Latin-only title font, as "sans" is on Ubuntu under WSL; skipped where this machine has none.
+        // A Latin-only title font; skipped where this machine has none.
         let Some(latin) = ["DejaVu Sans:bold", "Adwaita Sans:bold", "Cantarell:bold"].iter()
             .find_map(|p| load(p, 700.0, "test").filter(|f| f.glyph_id('a').0 != 0 && f.glyph_id('\u{AC00}').0 == 0)) else { return };
         let mut chrome = Chrome { fonts: vec![latin], looked: HashSet::new(), size: 14.0, family: "sans".into(), weight: 700.0, spacing: 0.0, texts: HashMap::new(), widths: HashMap::new() };

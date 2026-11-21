@@ -1,16 +1,14 @@
 //! Desktop notifications: a session starts waiting on the person while Whaybench is not the window in front. On a
 //! Linux desktop through its notification service, under WSL as a Windows toast (WSLg passes no notifications on).
-use std::{collections::HashMap, path::Path, process::{Command, Stdio}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, process::{Command, Stdio}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use wb_core::{log as record, paths::Data};
 
 pub const POWERSHELL: &str = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 
-pub fn wsl() -> bool { Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists() || std::env::var_os("WSL_DISTRO_NAME").is_some() }
-
 /// Shows a notification and waits until it is handed over; a desktop without a notification service shows nothing.
 fn show(title: &str, body: &str) {
-    let mut c = if wsl() {
+    let mut c = if wb_core::input::wsl() {
         // The texts go as base64, so nothing in them is read as PowerShell. Sent as PowerShell, which has a
         // registered app id; shortcut: the toast names PowerShell, until the installer gives Whaybench's shortcut one.
         let script = format!("$d={{param($s)[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s))}}; \

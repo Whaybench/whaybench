@@ -86,7 +86,7 @@ fn busy(d: &Data, now: SystemTime, runs: &dyn Fn(&str) -> bool) -> bool {
 
 /// The program that holds the computer awake until its input ends.
 fn hold() -> Command {
-    if crate::notify::wsl() {
+    if wb_core::input::wsl() {
         // ES_CONTINUOUS | ES_SYSTEM_REQUIRED in decimal (PowerShell reads 0x80000001 as a negative int). A failure
         // ends PowerShell, so it is seen and tried again. Sent encoded: no quote has to survive WSL's command line.
         let script = "$ErrorActionPreference = 'Stop'; \

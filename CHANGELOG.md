@@ -8,11 +8,27 @@ names another step.
 ## [Unreleased]
 
 ### Added
-- The computer does not go to sleep while an agent works (Preferences → "Keep the computer awake while an agent
-  works", on at first): a turn worked or waiting on the person (a command approved in the terminal runs meanwhile),
+- The computer does not go to sleep while an agent works (Preferences → "Prevent sleep while an agent works", on
+  at first): a turn worked or waiting on the person (a command approved in the terminal runs meanwhile),
   or a subagent still running after it. On Linux a `systemd-inhibit` block on sleep and the lid switch, under WSL
   Windows' `SetThreadExecutionState` held by PowerShell. The screen may still turn off and lock. A Claude Code
   session whose process is gone, or a state not written for two hours, no longer holds.
+
+### Changed
+- Windows: Whaybench's WSL distribution is Fedora (FedoraLinux-44, the release the development machine runs) instead
+  of Ubuntu: WebKitGTK 2.54.2 lets the web panels draw on the GPU, and Firefox is the distribution's own package.
+  Installing an input engine from inside Whaybench uses dnf there.
+- Windows: ~/work is on a work disk of its own (%LOCALAPPDATA%\Whaybench\work.vhdx, btrfs, or XFS without the
+  btrfs module), so projects stay when Whaybench or its Linux system is removed, and working copies can share their
+  data. The installer makes it once with administrator rights (the same Windows account), and each start attaches it
+  again through the scheduled task Whaybench\MountWork, which only attaches it: mounting it on ~/work runs without
+  those rights. Only a blank disk of exactly 1 TiB (the size work.vhdx is made with) is ever formatted. ~/work is the
+  disk's folder work: what was in ~/work before is copied there whole (or not at all) and kept as ~/work.before-disk;
+  files written while the disk was away are moved to ~/work.unmounted-<date>. Without the disk Whaybench starts on the
+  distribution's own disk and says so. Uninstalling keeps the disk, tries to remove the task and says when it cannot,
+  and asks about the Linux system by where ~/work really is.
+- Windows: the installer needs WSL 2.4.4 or newer, and a Windows account named like a Linux system account (root,
+  adm...) gets the Linux account whaybench.
 
 ### Fixed
 - A background subagent's tool call after the turn ended no longer marks the session working again.

@@ -63,7 +63,8 @@ The setup turns these on by itself. If it says **WSL could not be installed**, t
 | `0x8007019e` | Windows Subsystem for Linux is not on | Step 3 |
 | `0x80070003` | Windows saves new apps on a drive other than `C:` | **Settings → System → Storage → Advanced storage settings → Where new content is saved**: set **New apps will save to** to `C:` (Windows 10: **Settings → System → Storage → Change where new content is saved**). Then run the setup again |
 | `wslg.exe was not found` | WSL is old | Open **Command Prompt**, run `wsl --update`, then run the setup again |
-| `Ubuntu could not be installed` | No internet, or virtualization is off | Check the internet connection, then step 2 |
+| `Fedora could not be installed` | No internet, or virtualization is off | Check the internet connection, then step 2 |
+| `WSL 2.4.4 or newer is needed` | WSL is old | Open **Command Prompt** as administrator, run `wsl --update`, then run the setup again |
 
 ## Other cases
 
@@ -71,6 +72,31 @@ The setup turns these on by itself. If it says **WSL could not be installed**, t
 - **Windows inside a virtual machine** (VMware, VirtualBox, Hyper-V): turn on nested virtualization for that virtual
   machine on the host, for example **Virtualize Intel VT-x/EPT or AMD-V/RVI** in VMware.
 - **Very old processors** (before about 2010, such as Intel Core 2 Duo) cannot run WSL 2.
+
+## The work disk
+
+Your projects (`~/work` inside Whaybench) are kept on a disk of their own, `%LOCALAPPDATA%\Whaybench\work.vhdx`. It
+grows as it fills, up to 1 TB, and stays when Whaybench or its Linux system is removed.
+
+- The setup asks once for **administrator rights** to make and attach it. Without them Whaybench still runs, with
+  `~/work` on its Linux system's own disk; run the setup again to make the disk later. It has to be your own Windows
+  account with administrator rights: another account's password makes no disk for you.
+- Each start attaches it through the scheduled task **Whaybench\MountWork**, without asking. If it does not come,
+  the status line says **Work disk not attached**; why is in `~/.local/share/whaybench/logs/work-disk.log`
+  inside Whaybench, and the setup's own steps in `%LOCALAPPDATA%\Whaybench\work-disk.log`.
+- The first time, what was in `~/work` is copied onto the disk and the original is kept as `~/work.before-disk`.
+  Files written to `~/work` while the disk was not attached are moved to `~/work.unmounted-<date>` when it comes
+  back. Neither is deleted; remove them when you have checked them.
+
+## Removing everything
+
+**Settings → Apps → Whaybench → Uninstall** removes the program and its shortcuts, and asks whether to delete its
+Linux system too. The work disk stays. To remove the rest by hand:
+
+1. `wsl --unregister Whaybench` in **Command Prompt** (if you kept the Linux system): this deletes it and everything
+   in it.
+2. `wsl --shutdown`, then delete `%LOCALAPPDATA%\Whaybench\work.vhdx` (your projects) and the folder.
+3. If the uninstaller said so, delete **Whaybench\MountWork** in **Task Scheduler**.
 
 ## Still stuck
 
