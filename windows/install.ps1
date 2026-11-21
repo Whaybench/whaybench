@@ -116,8 +116,8 @@ function Run-Native([string]$exe, [string[]]$arguments) {
     return $code
 }
 function Work-Disk([string]$what) { Run-Native $wsl @("-d", $Distro, "-u", "root", "--", "/usr/local/sbin/whaybench-work-disk", $what) }
-$task = $null
-try { $task = Get-ScheduledTask -TaskPath "\Whaybench\" -TaskName "MountWork" -ErrorAction Stop } catch {}
+# Not there on a first install: no error for the log, which would read as a failure.
+$task = Get-ScheduledTask -TaskPath "\Whaybench\" -TaskName "MountWork" -ErrorAction SilentlyContinue
 if (-not ($task -and (Test-Path $vhd))) {
     # diskpart reads its script in the system code page: the folder's short (8.3) name keeps a profile folder named in
     # another script readable. Without short names an ASCII path is still fine.

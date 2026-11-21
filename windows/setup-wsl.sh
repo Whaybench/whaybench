@@ -82,7 +82,8 @@ if { [ -f /etc/whaybench/work-disk ] || [ -f /etc/whaybench/work-disk-expected ]
     log="$HOME/.local/share/whaybench/logs/work-disk.log"
     mkdir -p "$(dirname "$log")"
     echo "$(date '+%F %T') attaching" >> "$log"
-    schtasks.exe /run /tn 'Whaybench\MountWork' >> "$log" 2>&1 || true
+    # Its text is in the Windows code page: only whether it ran goes to the log.
+    if schtasks.exe /run /tn 'Whaybench\MountWork' >/dev/null 2>&1; then echo "$(date '+%F %T') task run" >> "$log"; else echo "$(date '+%F %T') task not run" >> "$log"; fi
     i=0
     while [ $i -lt 20 ]; do
         # wsl.exe's own messages in UTF-8, as the rest of the log.
