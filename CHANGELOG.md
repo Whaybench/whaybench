@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+### Fixed
+- The input panel draws with GTK's Cairo renderer: under the GL one the top of a just-typed glyph went missing
+  until the next full redraw (themes on the default font, Noto Sans CJK). `GSK_RENDERER` set by hand still wins.
+
 ## [0.8.11] - 2026-11-20
 
 ### Added

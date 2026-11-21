@@ -38,6 +38,12 @@ fn main() -> glib::ExitCode {
         // SAFETY: no other thread exists yet.
         unsafe { std::env::remove_var("GALLIUM_DRIVER") };
     }
+    // GTK's GL renderer leaves the top of a just-typed glyph undrawn in a text view until the next full redraw
+    // (GTK 4.22, fonts without their own top room such as Noto Sans CJK); the Cairo one does not. One small field.
+    if kind == "input" && std::env::var_os("GSK_RENDERER").is_none() {
+        // SAFETY: no other thread exists yet.
+        unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
+    }
     let view_name = args.get(1).cloned().unwrap_or_else(|| wb_core::view::FIRST_VIEW.to_string());
     let view_app = wb_core::view::app_of(&view_name);
     let view_title = wb_core::view::panel_title(&view_name);
