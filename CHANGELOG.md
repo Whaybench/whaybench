@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-21
+
 ### Added
 - The computer does not go to sleep while an agent works (Preferences → "Prevent sleep while an agent works", on
   at first): a turn worked or waiting on the person (a command approved in the terminal runs meanwhile),
