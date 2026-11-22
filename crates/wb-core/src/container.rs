@@ -13,7 +13,8 @@ use crate::{paths::Data, roots::{CLAUDE_DIR, PROJECT_DATA, Stub}};
 pub fn name(s: &Stub) -> String {
     let place = s.open_at.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     let hash = place.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
-    format!("whaybench-{}-{:08x}", s.id, hash as u32)
+    // The whole 64 bits: two data folders must not share a container.
+    format!("whaybench-{}-{:016x}", s.id, hash)
 }
 
 fn os_value<'a>(os_release: &'a str, key: &str) -> Option<&'a str> {

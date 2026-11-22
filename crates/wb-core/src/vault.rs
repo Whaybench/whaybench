@@ -11,13 +11,16 @@ use std::{
 use crate::roots::Stub;
 
 /// The keyring entry of a project's vault key: one per project of one data folder.
-pub fn key_name(s: &Stub) -> String { format!("vault-{}", crate::container::name(s)) }
+pub fn key_name(s: &Stub) -> String { format!("vault-{}-{}", s.id, s.made) }
 
 /// The folder bound into the project's container over its `cache/open` (`rslave`: the vault mounted in it shows
 /// there), private to the person.
 pub fn run_dir(s: &Stub) -> PathBuf {
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    runtime.join("whaybench").join(crate::container::name(s))
+    // The person's runtime folder by their user number, not by a variable each program may have or not (it would
+    // put the vault somewhere else, or in /tmp where another user could be first): the same for every program.
+    // Safety: getuid has no preconditions.
+    let uid = unsafe { libc::getuid() };
+    PathBuf::from(format!("/run/user/{uid}/whaybench")).join(format!("{}-{}", s.id, s.made))
 }
 
 /// Where the vault is open: the project's data root then.

@@ -24,11 +24,14 @@ pub const MARKER: &str = "briefsafe.json";
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stub { pub id: String, pub name: String, pub folder: PathBuf, pub open_at: PathBuf,
     /// Its data is encrypted (a gocryptfs vault in `<folder>/.whaybench`), open only while the project is.
-    pub vault: bool }
+    pub vault: bool,
+    /// When this project was made (its marker's `made`): told apart from another made with the same id at the same
+    /// place, and its vault's key and run folder named by it. Empty for a stub from before it was kept.
+    pub made: String }
 
 impl Stub {
     pub fn new(host: &Data, id: &str, name: &str, folder: &Path) -> Self {
-        Stub { id: id.into(), name: name.into(), folder: folder.to_path_buf(), open_at: open_dir(host, id), vault: false }
+        Stub { id: id.into(), name: name.into(), folder: folder.to_path_buf(), open_at: open_dir(host, id), vault: false, made: String::new() }
     }
     /// Where the project's data rests.
     /// Where the project's data is as files: in its folder, or for a vault where the vault opens.
@@ -54,7 +57,7 @@ impl Stub {
         // A vault's is beside its encrypted data (readable closed, and out of its agents' reach).
         let at = if self.vault { crate::vault::cipher_dir(self) } else { self.stored().root };
         crate::beneath::read(&at, Path::new(MARKER), 4096).ok().and_then(|t| serde_json::from_slice::<Value>(&t).ok())
-            .is_some_and(|v| v["id"] == self.id.as_str())
+            .is_some_and(|v| v["id"] == self.id.as_str() && (self.made.is_empty() || v["made"] == self.made.as_str()))
     }
 }
 
@@ -86,13 +89,16 @@ pub fn close_plain(s: &Stub) -> std::io::Result<()> {
 fn stub_path(host: &Data, id: &str) -> PathBuf { host.root.join("projects").join(format!("{id}.json")) }
 
 pub fn write_stub(host: &Data, s: &Stub) -> std::io::Result<()> {
-    write_atomic(&stub_path(host, &s.id), serde_json::to_string_pretty(&json!({"id": s.id, "name": s.name, "kind": "briefsafe", "folder": s.folder, "vault": s.vault})).unwrap_or_default())
+    write_atomic(&stub_path(host, &s.id), serde_json::to_string_pretty(&json!({"id": s.id, "name": s.name, "kind": "briefsafe", "folder": s.folder, "vault": s.vault, "made": s.made})).unwrap_or_default())
 }
 
 /// Marks a data folder as a project's own (written where the project's data rests).
-pub fn write_marker(stored: &Data, id: &str) -> std::io::Result<()> {
-    // `made` tells this making of the project from an earlier one with the same id (its snapshots are not this one's).
-    let made = format!("{}-{}", crate::clock::now_ms(), std::process::id());
+pub fn write_marker(stored: &Data, id: &str) -> std::io::Result<()> { write_marker_as(stored, id, &new_made()) }
+
+/// A new `made`: this making of a project, told from an earlier one with the same id (its snapshots are not this one's).
+pub fn new_made() -> String { format!("{}-{}", crate::clock::now_ms(), std::process::id()) }
+
+pub fn write_marker_as(stored: &Data, id: &str, made: &str) -> std::io::Result<()> {
     write_atomic(&stored.root.join(MARKER), json!({"id": id, "made": made}).to_string())
 }
 
@@ -127,7 +133,7 @@ fn read_stubs(host: &Data) -> Vec<Stub> {
         .filter(|e| e.path().extension().is_some_and(|x| x == "json") && e.path().is_file())
         .filter_map(|e| serde_json::from_str::<Value>(&fs::read_to_string(e.path()).ok()?).ok())
         .filter(|v| v["kind"] == "briefsafe")
-        .filter_map(|v| Some(Stub { vault: v["vault"] == true, ..Stub::new(host, v["id"].as_str()?, v["name"].as_str().unwrap_or_default(), Path::new(v["folder"].as_str()?)) }))
+        .filter_map(|v| Some(Stub { vault: v["vault"] == true, made: v["made"].as_str().unwrap_or_default().to_string(), ..Stub::new(host, v["id"].as_str()?, v["name"].as_str().unwrap_or_default(), Path::new(v["folder"].as_str()?)) }))
         .collect();
     all.sort_by(|a, b| a.id.cmp(&b.id));
     all

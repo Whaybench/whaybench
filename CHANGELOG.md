@@ -173,7 +173,13 @@ names another step.
   and opened again by the next `open`, and a failed open leaves nothing open. `close` closes the vault before the open
   place: when something still holds a file in it, the project stays open and says so. Restore and forget refuse a
   mounted vault, a start finding a lost container closes the vault before the link, and a container left paused is
-  resumed. `snapshot`, `snapshots` and `restore` take, list and go back to
+  resumed.
+  Each project's making (`made`) is kept in its stub: snapshots and restores count only a folder of that making, and a
+  vault's keyring entry and run folder are named by it, so a project made again with a forgotten id never touches the
+  old vault's key. The run folder is the person's `/run/user/<uid>/whaybench`, the same for every program whatever its
+  environment (no fallback to /tmp), and container names carry a 64-bit hash of the data folder. A restore puts the
+  vault's current key file into the restored folder before the swap, or changes nothing. A project is created in turn
+  with an open of the same id. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -47,7 +47,7 @@ impl Store {
         if folder.contains(':') { return Err(format!("a project folder's path cannot hold ':' ({folder})")); }
         let dir = Path::new(folder);
         let subvolume = crate::folder::make(dir, from)?;
-        let stub = Stub { vault, ..Stub::new(&self.data, pid, name, dir) };
+        let stub = Stub { vault, made: roots::new_made(), ..Stub::new(&self.data, pid, name, dir) };
         let mut recovery = None;
         let made = (|| -> Res<Value> {
             // A copied folder's own Whaybench data (another project's, or a link to one) is not this project's.
@@ -61,11 +61,11 @@ impl Store {
                 recovery = Some(wb_core::vault::create(&stub)?);
                 // Whose the vault is, readable without its key (the snapshots are told apart by it); the agents never
                 // see where it rests.
-                roots::write_marker(&wb_core::paths::Data::new(wb_core::vault::cipher_dir(&stub)), pid).map_err(|e| e.to_string())?;
+                roots::write_marker_as(&wb_core::paths::Data::new(wb_core::vault::cipher_dir(&stub)), pid, &stub.made).map_err(|e| e.to_string())?;
                 wb_core::vault::mount(&stub)?;
             }
             let inner = Store::new(stub.stored());
-            roots::write_marker(&inner.data, pid).map_err(|e| e.to_string())?;
+            roots::write_marker_as(&inner.data, pid, &stub.made).map_err(|e| e.to_string())?;
             if !paths.iter().any(|p| p == folder) { paths.insert(0, folder.to_string()); }
             inner.create_project(pid, name, desc, parent, paths, always)?;
             let p = inner.set_folder(pid, folder, subvolume)?;
@@ -86,7 +86,8 @@ impl Store {
             Ok(p) => p,
             Err(e) => {
                 roots::remove_stub(&self.data, pid);
-                if vault { let _ = wb_core::vault::unmount(&stub); let _ = wb_core::secret::delete(&wb_core::vault::key_name(&stub)); }
+                // Only the key this making stored (its name is this making's own: no other vault's key goes).
+                if vault { let _ = wb_core::vault::unmount(&stub); if recovery.is_some() { let _ = wb_core::secret::delete(&wb_core::vault::key_name(&stub)); } }
                 return Err(match crate::folder::discard(dir, subvolume) { Ok(()) => e, Err(e2) => format!("{e}; the folder made is left at {folder}: {e2}") });
             }
         };

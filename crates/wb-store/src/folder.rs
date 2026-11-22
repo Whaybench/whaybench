@@ -210,18 +210,21 @@ fn restore_keeping(dir: &Path, name: &str, limit: usize) -> Res<Restored> {
     if fs::symlink_metadata(&fresh).is_ok() { return Err(format!("{} is in the way: restore again", fresh.display())); }
     btrfs(&["subvolume".as_ref(), "snapshot".as_ref(), snap.as_os_str(), fresh.as_os_str()])?;
     if !is_subvolume(&fresh) { return Err(format!("{} is not the restored snapshot; nothing was changed", fresh.display())); }
+    // A vault keeps the key file it has now, put in before the swap: its key (in the keyring) may have been changed
+    // since the snapshot, and the data's own key, the recovery key, never changes, so today's file opens the restored
+    // data. Not put in: nothing is swapped. (gocryptfs leaves it read-only: replaced, not written over.)
+    let conf = Path::new(wb_core::roots::PROJECT_DATA).join("gocryptfs.conf");
+    if dir.join(&conf).is_file() {
+        let put = fs::remove_file(fresh.join(&conf)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }).and_then(|_| fs::copy(dir.join(&conf), fresh.join(&conf)));
+        if let Err(e) = put { let _ = discard(&fresh, true); return Err(format!("the vault's key file could not be kept: {e}; nothing was changed")); }
+    }
     if let Err(e) = rename_new(dir, &aside) { let _ = discard(&fresh, true); return Err(e); }
     if let Err(e) = rename_new(&fresh, dir) {
         let back = rename_new(&aside, dir);
         let _ = discard(&fresh, true);
         return Err(match back { Ok(()) => e, Err(e2) => format!("{e}; and the folder could not be put back from {}: {e2}", aside.display()) });
     }
-    // A vault keeps the key file it has now: its key (in the keyring) may have been changed since the snapshot, and the
-    // data's own key, the recovery key, never changes, so today's file opens the restored data.
-    let conf = Path::new(wb_core::roots::PROJECT_DATA).join("gocryptfs.conf");
     let mut warnings = Vec::new();
-    // (It is read-only, as gocryptfs leaves it: replaced, not written over.)
-    if aside.join(&conf).is_file() && let Err(e) = fs::remove_file(dir.join(&conf)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }).and_then(|_| fs::copy(aside.join(&conf), dir.join(&conf))) { warnings.push(format!("the vault's key file was not kept: {e}; open it with its recovery key")); }
     // The state before is in snapshot `before`, so the copy set aside can go.
     if let Err(e) = discard(&aside, true) { warnings.push(format!("the old folder is left at {}: {e}", aside.display())); }
     if let Err(e) = prune(dir, limit) { warnings.push(e); }

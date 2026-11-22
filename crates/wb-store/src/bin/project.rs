@@ -134,7 +134,9 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             // One creation at a time: two with the same id must not both pass the check, nor one undo the other's.
             // A vault only where the project runs in a container: its key must never reach a host-run agent (spec 3.22).
             if encrypt && !wb_core::container::isolation() { return Err("--encrypt needs podman and a container image for this system".into()); }
-            let (p, first, recovery) = wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new), encrypt))?;
+            // In turn with an open of the same id too: it must not find the project half made.
+            let would_be = wb_core::roots::Stub::new(&st.data, pid, name, Path::new(&folder));
+            let (p, first, recovery) = wb_core::container::life(&would_be, || wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new), encrypt)))?;
             // The recovery key, once: it opens the vault when the keyring has lost its key. Kept by the person, nowhere here.
             let note = recovery.as_ref().map(|_| "Keep this recovery key somewhere safe, apart from this computer: it is shown only now.");
             out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning),
