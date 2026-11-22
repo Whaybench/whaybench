@@ -13,6 +13,9 @@ use std::{
 /// What host programs read from a project at most, per file.
 pub const READ_LIMIT: u64 = 4 << 20;
 
+/// What host programs list of a project's folder at most.
+pub const LIST_LIMIT: usize = 10_000;
+
 /// The open project root `path` is in, and the path below it; None for a path in no project's open place.
 pub fn split(path: &Path) -> Option<(PathBuf, PathBuf)> {
     // The outermost: a `cache/open/<x>` the agents made inside a project's data is a folder of that project, not a root
@@ -107,7 +110,8 @@ pub fn rename(root: &Path, from: &Path, to: &Path) -> io::Result<()> {
 pub fn list(root: &Path, rel: &Path) -> io::Result<Vec<String>> {
     let fd = dir_of(root, rel)?;
     // The opened folder, read by its descriptor: what is listed is that folder, whatever its path now points to.
-    let names = std::fs::read_dir(format!("/proc/self/fd/{}", fd.as_raw_fd()))?.flatten().filter_map(|e| e.file_name().into_string().ok()).collect();
+    // A few thousand at most: a folder the agents filled with millions must not hold a host program up.
+    let names = std::fs::read_dir(format!("/proc/self/fd/{}", fd.as_raw_fd()))?.flatten().take(LIST_LIMIT).filter_map(|e| e.file_name().into_string().ok()).collect();
     drop(fd);
     Ok(names)
 }

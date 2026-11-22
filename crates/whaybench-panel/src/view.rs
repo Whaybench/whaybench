@@ -128,7 +128,7 @@ fn write_taken(v: &V) {
     let Some(s) = &v.followed else { return };
     let own = own_picture(&v.d, s).to_string_lossy().to_string();
     let kept: HashMap<&String, &u128> = v.seen.iter().filter(|(k, _)| **k == own).collect();
-    let _ = std::fs::create_dir_all(&v.hist.dir);
+    let _ = wb_core::paths::create_dir_all(&v.hist.dir);
     let _ = wb_core::paths::write_atomic(&v.hist.dir.join("taken.json"), json!(kept).to_string());
 }
 

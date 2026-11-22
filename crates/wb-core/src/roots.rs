@@ -95,7 +95,12 @@ pub fn stubs(host: &Data) -> Vec<Stub> {
     static KEPT: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
     let dir = host.root.join("projects");
     let Ok(changed) = fs::metadata(&dir).and_then(|m| m.modified()) else { return Vec::new() };
-    let mut names: Vec<std::ffi::OsString> = fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.file_name()).collect();
+    // Each file's name and change time: a stub edited in place counts too.
+    let mut names: Vec<std::ffi::OsString> = fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| {
+        let mut n = e.file_name();
+        if let Ok(t) = e.metadata().and_then(|m| m.modified()) { n.push(format!("@{:?}", t)); }
+        n
+    }).collect();
     names.sort();
     let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((.., all)) = kept.iter().find(|(d, t, n, _)| *d == dir && *t == changed && *n == names) { return all.clone(); }

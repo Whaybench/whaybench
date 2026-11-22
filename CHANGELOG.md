@@ -152,7 +152,10 @@ names another step.
   The Files panel opens (view, vim, an app) only a project's own files for its conversation and empties when no
   conversation is in front; the Map panel empties for a conversation with no map yet instead of keeping another's;
   a project node's source opens only from that project; a desktop notice of a project's conversation names the project
-  only (en, ko: briefsafe-outside-project). `snapshot`, `snapshots` and `restore` take, list and go back to
+  only (en, ko: briefsafe-outside-project).
+  Last plain steps on project data made safe (heartbeat and answer-log folders, the view's taken list); a project's
+  node file patterns take no `**` (a folder link could lead the walk anywhere); a listing of a project's folder stops
+  at 10,000 names; the projects list is read again when a stub is edited in place. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

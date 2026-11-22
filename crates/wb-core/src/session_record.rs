@@ -1,7 +1,7 @@
 //! What a session leaves for the panels besides its map: its record, its state, its
 //! heartbeat and its answers. Every agent writes them through here (`whaybench record`, or the Codex hook
 //! directly), so the files keep one form whichever agent wrote them.
-use std::{fs::{self, OpenOptions}, io::Write, path::Path};
+use std::{fs::OpenOptions, io::Write, path::Path};
 
 use serde_json::{Value, json};
 
@@ -66,7 +66,7 @@ pub fn set(data: &Path, sid: &str, key: &str, value: Value) -> Result<()> {
 /// The heartbeat: fresh while a process holds the session, "0" once none does.
 pub fn alive(data: &Path, sid: &str, on: bool) -> Result<()> {
     let path = data.join("cache/alive").join(safe_id(sid)?);
-    fs::create_dir_all(path.parent().unwrap())?;
+    crate::paths::create_dir_all(path.parent().unwrap())?;
     crate::paths::write_atomic(&path, if on { now_ms().to_string() } else { "0".into() })?;
     Ok(())
 }
@@ -88,7 +88,7 @@ pub fn answer(data: &Path, sid: &str, input: &Value) -> Result<bool> {
     // The kept line first: the latest answer is what a resent turn is checked against, so written first it would
     // stop the resend from adding a line that failed. One write, so two hooks appending at once do not mix lines.
     let log = data.join("answer-log").join(format!("{sid}.jsonl"));
-    fs::create_dir_all(log.parent().unwrap())?;
+    crate::paths::create_dir_all(log.parent().unwrap())?;
     OpenOptions::new().create(true).append(true).open(log)?.write_all(format!("{}\n", json!({"at": at, "prompt": prompt, "text": text})).as_bytes())?;
     write_json(&path, &a)?;
     Ok(true)
@@ -127,6 +127,7 @@ pub fn carry_from(data: &Path, sid: &str, from: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn an_active_session_does_not_stay_moved_to_itself() -> Result<()> {

@@ -63,7 +63,9 @@ fn attached(d: &Data, pattern: &str) -> Vec<std::path::PathBuf> {
     let host = Data::new(d.root.ancestors().nth(3).map(std::path::Path::to_path_buf).unwrap_or_default());
     let Some(folder) = crate::roots::stubs(&host).into_iter().find(|s| s.id == id).and_then(|s| fs::canonicalize(s.folder).ok()) else { return Vec::new() };
     let p = std::path::Path::new(pattern);
-    if !p.starts_with(&folder) || p.components().any(|c| c == std::path::Component::ParentDir) { return Vec::new(); }
+    // shortcut: no `**` for a project (glob follows folder links all the way, `/` included); a walk of its own that
+    // stays beneath the folder if projects need deep patterns.
+    if !p.starts_with(&folder) || p.components().any(|c| c == std::path::Component::ParentDir) || pattern.contains("**") { return Vec::new(); }
     hits(pattern).filter(|h| fs::canonicalize(h).is_ok_and(|r| r.starts_with(&folder))).take(MOST).collect()
 }
 
