@@ -234,8 +234,10 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             // `--project ID SESSION`: a Briefsafe project's conversation, opened only as that project's while it is open.
             (Some("--project"), Some(p), Some(id)) => {
                 if !wb_core::roots::stubs(data).iter().any(|s| &s.id == p && s.open()) { return Err(wb_core::i18n::t("briefsafe-project-closed").into()); }
-                if wb_core::roots::Roots::new(data.clone()).project_of(id).as_deref() != Some(p.as_str()) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
                 let located = sessions::locate(data, id);
+                // Both the one asked for and where its moves lead are the project's.
+                let roots = wb_core::roots::Roots::new(data.clone());
+                if [id.as_str(), located.as_str()].iter().any(|s| roots.project_of(s).as_deref() != Some(p.as_str())) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
                 if let Some(t) = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(located.as_str())) { return post(data, &Request::FocusTerm { tab: t.tab }); }
                 open_session_of(data, &located, Some(p.clone()))
             }
@@ -325,6 +327,10 @@ fn open_session(data: &Data, id: &str) -> Result<(), String> { open_session_of(d
 /// `project`: the one the session is known to be of (a tab of last time); else found by its record.
 fn open_session_of(data: &Data, id: &str, project: Option<String>) -> Result<(), String> {
     let project = project.or_else(|| wb_core::roots::Roots::new(data.clone()).project_of(id));
+    // Known nowhere (a project's whose project has closed since its row was drawn): not opened on the host instead.
+    if project.is_none() && wb_core::roots::known_session(data, id).is_none() && sessions::agent(id).is_none() {
+        return Err(wb_core::i18n::t("briefsafe-project-closed").into());
+    }
     match sessions::agent(id) {
         Some(a) if a.get("kind").and_then(|k| k.as_str()) == Some("interactive") => {
             Err(wb_core::i18n::t("running-in-another-terminal-type-bg").into())

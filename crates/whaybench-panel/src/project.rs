@@ -49,8 +49,8 @@ thread_local! {
 }
 fn render(text: &str) -> String {
     if PROJECT_PAGE.with(|c| c.get()) {
-        // A project's text is its agents' to write: no markup of its own, and no link of the panel's kind (wb:) in it.
-        return crate::web::markdown(text, crate::web::RawHtml::AsText).replace("href=\"wb:", "href=\"#");
+        // A project's text is its agents' to write: no markup of its own, links only to web pages, no images fetched.
+        return crate::web::markdown(text, crate::web::RawHtml::Untrusted);
     }
     crate::web::markdown(text, crate::web::RawHtml::Kept)
 }
@@ -72,6 +72,7 @@ fn doc_page(st: &Store, pid: &str, d: &Value, anchors: &mut HashMap<String, Hash
     let at_head: HashMap<usize, (usize, String)> = heads.iter().map(|h| (h.0, (h.1, h.2.clone()))).collect();
     let hide = Hidden::new();
     let (mut toc, mut out, mut mine) = (Vec::new(), Vec::new(), HashMap::new());
+    let mut mine_marks: Vec<(String, String, String, String)> = Vec::new();
     for (n, line) in lines.iter().enumerate() {
         if let Some((level, title)) = at_head.get(&n) {
             let path = md::path_at(&heads, n).join(" > ");
@@ -79,7 +80,10 @@ fn doc_page(st: &Store, pid: &str, d: &Value, anchors: &mut HashMap<String, Hash
             mine.insert(path.clone(), anchor.clone());
             if *level > 1 { toc.push(format!("{}<a href='#{anchor}'>{}</a>", "&nbsp;".repeat(4 * (level - 2)), e(title))); }
             let ask = if *level > 1 { format!(" <small>{}</small>", link("req", &format!("{did}:{n}"), wb_core::i18n::t("request-change"))) } else { String::new() };
-            out.push(format!("{} <a id='{anchor}'></a>{}{ask}", "#".repeat(*level), title));
+            // The panel's own markup goes in after the Markdown is drawn: in the text it would be the document's (and
+            // shown as text for a Briefsafe project). A marker of characters no Markdown makes stands for it.
+            mine_marks.push((format!("\u{E000}{n}\u{E000}"), format!("<a id='{anchor}'></a>"), format!("\u{E001}{n}\u{E001}"), ask));
+            out.push(format!("{} \u{E000}{n}\u{E000}{}\u{E001}{n}\u{E001}", "#".repeat(*level), title));
             continue;
         }
         if hide.guide.is_match(line) || hide.source.is_match(line) { continue; }
@@ -89,7 +93,9 @@ fn doc_page(st: &Store, pid: &str, d: &Value, anchors: &mut HashMap<String, Hash
     let mut head = wb_core::i18n::f("lines-written-by-ai", &[("a1", (lines.len()).to_string()), ("a2", (link("dreq", did, wb_core::i18n::t("request-change-to-this-document"))).to_string())]);
     if !s(d, "original").is_empty() { head += &wb_core::i18n::f("original", &[("a1", (e(s(d, "original"))).to_string())]); }
     head += &wb_core::i18n::f("contents", &[("a1", (toc.join("<br>")).to_string())]);
-    format!("{head}<div id='body'></div>{}", render(&out.join("\n")))
+    let mut body = render(&out.join("\n"));
+    for (mark, html, ask_mark, ask) in &mine_marks { body = body.replacen(mark.as_str(), html, 1).replacen(ask_mark.as_str(), ask, 1); }
+    format!("{head}<div id='body'></div>{body}")
 }
 
 fn map_page(st: &Store, pid: &str) -> String {
@@ -303,22 +309,27 @@ fn choose(p: &mut P, key: Option<String>) {
 /// `input` goes to its standard input (a recovery key), never on its command line. One at a time: another is said.
 fn start_job(p: &mut P, id: &str, kind: &str, what: &str, args: &[&str], input: Option<String>) {
     if let Some(j) = &p.job { status::say(&p.d, &wb_core::i18n::f("briefsafe-busy", &[("what", j.what.clone())]), 5); return; }
-    let Ok(exe) = std::env::current_exe() else { return };
+    // Said when it cannot even start (no program, a full disk), not left as a press that did nothing.
+    let fail = |p: &mut P, why: String| p.bs_msg = Some((id.into(), kind.into(), why));
+    let Ok(exe) = std::env::current_exe() else { return fail(p, "whaybench-project not found".into()) };
     let dir = p.d.cache().join("project-jobs");
     let _ = std::fs::create_dir_all(&dir);
     let (out, err) = (dir.join(format!("{id}.out")), dir.join(format!("{id}.err")));
     let files = std::fs::File::create(&out).and_then(|o| std::fs::File::create(&err).map(|e| (o, e)));
-    let Ok((o, e)) = files else { return };
+    let (o, e) = match files { Ok(f) => f, Err(e) => return fail(p, e.to_string()) };
     let mut c = std::process::Command::new(exe.with_file_name("whaybench-project"));
+    // Its own process group: stopped past its time, what it started (podman, gocryptfs) goes with it.
+    std::os::unix::process::CommandExt::process_group(&mut c, 0);
     c.args(args).env(wb_core::paths::ENV_DATA_DIR, &p.d.root).stdin(std::process::Stdio::piped()).stdout(o).stderr(e);
     match c.spawn() {
         Ok(mut child) => {
             if let Some(mut i) = child.stdin.take() { let _ = std::io::Write::write_all(&mut i, input.unwrap_or_default().as_bytes()); }
             p.job = Some(Job { id: id.into(), kind: kind.into(), what: what.into(), child, started: std::time::Instant::now(), out, err });
-            p.bs_msg = None;
+            // Another project's message stays for it.
+            if p.bs_msg.as_ref().is_some_and(|m| m.0 == id) { p.bs_msg = None; }
             p.stamp.clear();
         }
-        Err(e) => p.bs_msg = Some((id.into(), kind.into(), e.to_string())),
+        Err(e) => fail(p, e.to_string()),
     }
 }
 
@@ -331,8 +342,14 @@ fn poll_job(p: &mut P) -> bool {
     let late = !done && job.started.elapsed().as_secs() > limit;
     if !done && !late { return false; }
     let Some(mut job) = p.job.take() else { return false };
-    if late { let _ = job.child.kill(); }
-    let ok = !late && job.child.wait().is_ok_and(|st| st.success());
+    if late {
+        // Safety: kill on the process group the job leads (made with process_group(0)); its own id is that group's.
+        unsafe { libc::kill(-(job.child.id() as i32), libc::SIGKILL) };
+        // A snapshot stopped half way would leave the project's container paused.
+        if job.kind == "snapshot" && let Some(st) = stub_of(&p.d, &job.id) { wb_core::container::unpause(&st); }
+    }
+    let status = job.child.wait();
+    let ok = !late && status.is_ok_and(|st| st.success());
     let said = std::fs::read_to_string(&job.err).unwrap_or_default().trim().trim_start_matches("error: ").to_string();
     let out: Value = std::fs::read_to_string(&job.out).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     let _ = (std::fs::remove_file(&job.out), std::fs::remove_file(&job.err));
@@ -479,8 +496,12 @@ fn page_for(p: &mut P) -> String {
 /// The map, then the documents, then recent changes, then the way to add one.
 fn set_tabs(s_: &Shared, keys: Vec<(String, String)>) {
     let mut p = s_.borrow_mut();
+    // The way to add a document depends on whether a Briefsafe project is shown, not only on the tabs.
+    let mut keys = keys;
+    if p.bs.is_some() && !keys.is_empty() { keys.push((BS.to_string(), String::new())); }
     if p.tab_keys != keys {
         p.tab_keys = keys.clone();
+        keys.retain(|k| k.0 != BS);
         // No tabs (a locked project): not even the way to add a document. Nor for an open Briefsafe project: its
         // documents are its agents' to add, in its container, not the host's to write there.
         let any = !keys.is_empty() && p.bs.is_none();
@@ -512,6 +533,8 @@ fn set_tabs(s_: &Shared, keys: Vec<(String, String)>) {
 }
 
 fn add_doc_menu(s_: &Shared, on: &gtk::Button) {
+    // A Briefsafe project's documents are its agents' to add (the button is not there; nor is this way in).
+    if s_.borrow().bs.is_some() { return; }
     let p = s_.borrow();
     let Some(pid) = p.pid.clone() else { p.path.set_text(wb_core::i18n::t("no-project-create-a-new-project")); return };
     let project = p.st.get_project(&pid).unwrap_or_default();
@@ -619,8 +642,11 @@ fn redraw(s_: &Shared) {
     if s_.borrow().shown == page { return; }
     // Where the page stands now, then the new page at the place its key last stood.
     let s2 = s_.clone();
+    let drawn_for = { let p = s_.borrow(); (p.pid.clone(), p.bs.clone()) };
     web.evaluate_javascript("window.scrollY", None, None, None::<&gtk::gio::Cancellable>, move |r| {
         let mut p = s2.borrow_mut();
+        // Another project, or this one locked, since it was drawn: its page is not put back over that.
+        if (p.pid.clone(), p.bs.clone()) != drawn_for || p.bs.as_ref().and_then(|id| stub_of(&p.d, id)).is_some_and(|st| !st.open()) { return; }
         let was = p.key_now.clone();
         if let Ok(v) = r { p.scroll.insert(was, v.to_double()); }
         let top = p.scroll.get(&key).copied().unwrap_or(0.0);
@@ -713,10 +739,12 @@ fn fill_list(s_: &Shared) {
     // The same project stays as it is (its change page, its message); only another is chosen anew.
     let now = p.bs.as_ref().map(|id| format!("{BS}{id}")).or(p.pid.clone());
     if key != now { choose(&mut p, key); } else { p.stamp.clear(); }
+    // Kept borrowed while the list is set: the dropdown's own handler (try_borrow_mut) then leaves the choice alone
+    // (setting a list selects its first row on its way).
     let pick = p.pick.clone();
-    drop(p);
     pick.set_model(Some(&model));
     pick.set_selected(at_row as u32);
+    drop(p);
 }
 
 fn tick(s_: &Shared) {
@@ -956,6 +984,10 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         let s2 = s_.clone();
         web.connect_decide_policy(move |_, decision, kind| {
             let Some(uri) = crate::web::pressed_link(decision, kind) else { return false };
+            // A Briefsafe project's page is its agents' text: what it asks for by itself (a script, a refresh, a frame)
+            // does nothing, only the person's press does (spec 3.22).
+            let project_page = s2.borrow().bs.is_some();
+            if project_page && !uri.starts_with("about:") && !crate::web::by_person(decision) { decision.ignore(); return true; }
             if uri.starts_with("wb:") {
                 decision.ignore();
                 let s3 = s2.clone();
@@ -974,7 +1006,13 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             let Ok(mut p) = s2.try_borrow_mut() else { return };
             let chosen = p.rows.get(dd.selected() as usize).map(|r| r.0.clone()).filter(|x| !x.is_empty());
             let shown = p.bs.as_ref().map(|id| format!("{BS}{id}")).or(p.pid.clone());
-            if chosen != shown { choose(&mut p, chosen); }
+            if chosen != shown {
+                choose(&mut p, chosen);
+                // Its page at once: the one before must not stay to be pressed under the new name.
+                drop(p);
+                let s3 = s2.clone();
+                glib::idle_add_local_once(move || tick(&s3));
+            }
         });
     }
     { let s2 = s_.clone(); new.connect_clicked(move |_| new_project(&s2)); }

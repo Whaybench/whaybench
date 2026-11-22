@@ -181,12 +181,15 @@ pub fn refresh_programs(s: &Stub, home: &Path) -> Result<(), String> { locked(s,
 
 /// Noted while a project is being closed: its tabs close first, ending their agents, before its container stops.
 fn closing_mark(s: &Stub) -> PathBuf { s.open_at.with_extension("closing") }
-pub fn closing(s: &Stub) -> bool { std::fs::symlink_metadata(closing_mark(s)).is_ok() }
+/// Only while the close that made the mark runs: one left by a close that was killed does not keep tabs away.
+pub fn closing(s: &Stub) -> bool {
+    std::fs::read_to_string(closing_mark(s)).ok().and_then(|t| t.trim().parse::<u32>().ok()).is_some_and(|pid| Path::new(&format!("/proc/{pid}")).exists())
+}
 
 /// Asks the project's tabs to close and waits for them, `wait` at most (an answer being written is let finish its
 /// file; a tab that will not go is left to the container's stop).
 pub fn close_tabs(s: &Stub, host: &Data, wait: std::time::Duration) {
-    let _ = std::fs::write(closing_mark(s), "");
+    let _ = std::fs::write(closing_mark(s), std::process::id().to_string());
     let until = std::time::Instant::now() + wait;
     while std::time::Instant::now() < until {
         let mine = crate::sessions::open_tabs(host).iter().any(|t| crate::sessions::tab_project(host, &t.tab).as_deref() == Some(s.id.as_str()));
@@ -398,11 +401,17 @@ pub fn paused<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T
     out
 }
 
+/// Lets a project's container go on if it was left paused (a snapshot stopped half way).
+pub fn unpause(s: &Stub) {
+    if status(s).as_deref() == Some("paused") { let _ = Command::new("podman").args(["unpause", &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status(); }
+}
+
 /// Ends a tab's agent in the project's container (the tab closed).
 pub fn hang_up(s: &Stub, tab: &str) {
     if crate::map::safe_id(tab).is_err() { return; }
-    let script = format!("p=$(cat /tmp/whaybench-tab-{tab}.pid 2>/dev/null) && kill -HUP \"$p\" && rm -f /tmp/whaybench-tab-{tab}.pid");
-    let _ = Command::new("podman").args(["exec", &name(s), "sh", "-c", &script]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    // Waited for, five seconds at most: the agent writes what it has as it ends, before its project closes under it.
+    let script = format!("p=$(cat /tmp/whaybench-tab-{tab}.pid 2>/dev/null) && kill -HUP \"$p\" && i=0; while [ $i -lt 50 ] && kill -0 \"$p\" 2>/dev/null; do sleep 0.1; i=$((i+1)); done; rm -f /tmp/whaybench-tab-{tab}.pid");
+    let _ = Command::new("podman").args(["exec", &name(s), "sh", "-c", &script]).stdout(Stdio::null()).stderr(Stdio::null()).status();
 }
 
 /// Where a tab's agent runs (spec 3.22): a project's conversation only in the project's container. Without

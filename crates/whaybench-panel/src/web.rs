@@ -1,21 +1,28 @@
 //! What the panels' web pages share: Markdown as HTML, the theme's colours and fonts as CSS, and the address of
 //! a link that was pressed.
 use gtk::prelude::*;
-use pulldown_cmark::{html, Event, Options, Parser};
+use pulldown_cmark::{html, CowStr, Event, Options, Parser, Tag, TagEnd};
 use wb_core::{paths::Data, theme};
 
 pub fn escape(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;") }
 
 /// What happens to HTML written in the Markdown: a document of the person's keeps it, an answer shows it as text.
 #[derive(Clone, Copy, PartialEq)]
-pub enum RawHtml { Kept, AsText }
+pub enum RawHtml { Kept, AsText, Untrusted }
 
 pub fn markdown(md: &str, raw: RawHtml) -> String {
     let md = crate::common::table_pipes(md);
-    let events = Parser::new_ext(&md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS).map(|ev| match ev {
-        Event::Html(t) | Event::InlineHtml(t) if raw == RawHtml::AsText => Event::Text(t),
+    let events = Parser::new_ext(&md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS).filter_map(|ev| Some(match ev {
+        Event::Html(t) | Event::InlineHtml(t) if raw != RawHtml::Kept => Event::Text(t),
+        // Text someone else wrote (a Briefsafe project's): a link leads only to a web page, whatever its case or scheme
+        // (javascript:, wb:, file:); an image is its words, never fetched.
+        Event::Start(Tag::Link { link_type, dest_url, title, id }) if raw == RawHtml::Untrusted => {
+            let web = { let d = dest_url.to_ascii_lowercase(); d.starts_with("http://") || d.starts_with("https://") };
+            Event::Start(Tag::Link { link_type, dest_url: if web { dest_url } else { CowStr::Borrowed("#") }, title, id })
+        }
+        Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) if raw == RawHtml::Untrusted => return None,
         other => other,
-    });
+    }));
     let mut out = String::new();
     html::push_html(&mut out, events);
     out
@@ -46,16 +53,26 @@ impl Page {
 pub fn pressed_link(decision: &webkit6::PolicyDecision, kind: webkit6::PolicyDecisionType) -> Option<String> {
     if kind != webkit6::PolicyDecisionType::NavigationAction && kind != webkit6::PolicyDecisionType::NewWindowAction { return None; }
     let nav = decision.downcast_ref::<webkit6::NavigationPolicyDecision>()?;
-    let action = nav.navigation_action()?;
-    // The person's own press only: a page's script, refresh or frame is not one, whatever it names (spec 3.22).
-    if !action.is_user_gesture() { return None; }
-    Some(action.request().and_then(|r| r.uri()).map(|u| u.to_string()).unwrap_or_default())
+    Some(nav.navigation_action().and_then(|a| a.request()).and_then(|r| r.uri()).map(|u| u.to_string()).unwrap_or_default())
+}
+
+/// Whether the navigation the web view asks about comes from the person's own press (not a page's script, refresh
+/// or frame): a page whose text is someone else's acts only on those.
+pub fn by_person(decision: &webkit6::PolicyDecision) -> bool {
+    decision.downcast_ref::<webkit6::NavigationPolicyDecision>().and_then(|n| n.navigation_action()).is_some_and(|a| a.is_user_gesture())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use RawHtml::{AsText, Kept};
+    use RawHtml::{AsText, Kept, Untrusted};
+    #[test]
+    fn untrusted_markdown_links_only_to_web_pages_and_fetches_nothing() {
+        let h = markdown("[a](javascript:alert(1)) [b](WB:bs:close) [c](file:///etc/passwd) [d](HTTPS://example.org) ![e](http://x/y.png) <b>x</b>", Untrusted);
+        assert!(!h.to_lowercase().contains("javascript:") && !h.to_lowercase().contains("wb:") && !h.contains("file:"), "{h}");
+        assert!(h.contains("HTTPS://example.org") && !h.contains("<img") && h.contains("e") && h.contains("&lt;b&gt;"), "{h}");
+    }
+
     #[test]
     fn paragraphs_headings_inline() {
         assert_eq!(markdown("# Title\n\ntext **bold** `code`\n", AsText), "<h1>Title</h1>\n<p>text <strong>bold</strong> <code>code</code></p>\n");

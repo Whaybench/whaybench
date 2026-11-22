@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+libc.workspace = true
 wb-core.workspace = true
 wb-store = { path = "../wb-store" }
 serde_json.workspace = true

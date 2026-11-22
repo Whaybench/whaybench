@@ -206,7 +206,16 @@ names another step.
   ends its agent), then stops the container. A tab that cannot note its project does not start; `--project` needs a
   value; store ids are single plain names; Briefsafe projects take no document added from the panel; program links are
   replaced in turn and atomically; a container left paused is resumed at start; answers from the future do not hide
-  later ones. `snapshot`, `snapshots` and `restore` take, list and go back to
+  later ones.
+  From the second review: a Briefsafe project's text keeps only links to web pages (http, https; whatever its case,
+  javascript:, wb: and file: lead nowhere) and fetches no image; its document headings keep the panel's own anchors
+  and requests. In the Projects panel a Briefsafe page acts only on the person's press; other panels' own scripted
+  menus work as before. A session no root knows is not opened (a closed project's, clicked late); a project's
+  conversation and where its moves lead must both be the project's. A tab's agent is waited for as it ends before its
+  project closes; a mark left by a killed close no longer keeps tabs away, and no tab starts into a closing project. A
+  recovery key is tried read-only before the vault's key file is touched. A step past its time is stopped with all it
+  started, and a snapshot stopped so leaves the container going. The panel draws the chosen project at once, keeps
+  other projects' messages, says when a step cannot start, and adds no document control to a Briefsafe project. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

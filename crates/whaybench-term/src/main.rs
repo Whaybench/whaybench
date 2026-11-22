@@ -103,7 +103,7 @@ impl Relay {
         // A tab already a project's (asked for as one, or started in one before) stays it: closed, it does not open.
         let noted = sessions::tab_project(&self.data, &self.tab);
         let project = match &noted {
-            Some(id) => Some(wb_core::roots::stubs(&self.data).into_iter().find(|st| &st.id == id).filter(wb_core::roots::Stub::open)
+            Some(id) => Some(wb_core::roots::stubs(&self.data).into_iter().find(|st| &st.id == id).filter(|st| st.open() && !wb_core::container::closing(st))
                 .ok_or_else(|| wb_core::i18n::t("briefsafe-project-closed").to_string())?),
             None => self.session.as_deref().and_then(|s| wb_core::roots::Roots::new(self.data.clone()).project_of(s))
                 .and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|st| st.id == id))
@@ -599,7 +599,7 @@ fn main() {
             "--attach" => attach = args.next(),
             "--resume" => resume = args.next(),
             "--map-from" => map_from = args.next(),
-            "--project" => project = args.next(),
+            "--project" => { project = args.next(); if project.is_none() { let _ = writeln!(std::io::stderr(), "whaybench-term: --project needs a project"); std::process::exit(2); } }
             other => { let _ = writeln!(std::io::stderr(), "whaybench-term: unknown argument {other}"); std::process::exit(2); }
         }
     }

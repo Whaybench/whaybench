@@ -135,6 +135,12 @@ pub fn mount_with_recovery(s: &Stub, recovery: &str) -> Result<(), String> {
     let recovery: String = recovery.trim().chars().filter(|c| *c != '-').collect();
     if recovery.len() != 64 || !recovery.chars().all(|c| c.is_ascii_hexdigit()) { return Err("a recovery key is 64 hexadecimal digits on one line".into()); }
     if mounted(s) { return Err("the vault is open already".into()); }
+    // Tried first, read-only, before the vault's key file is touched: a key that does not show this project's marker
+    // changes nothing at all.
+    let tried = mount_with(s, &["-masterkey=stdin", "-ro"], &recovery).map(|_| s.intact_open());
+    let _ = unmount(s);
+    if mounted(s) { return Err("the vault could not be closed after trying the recovery key".into()); }
+    if !matches!(tried, Ok(true)) { return Err("that recovery key does not open this project's vault".into()); }
     let cipher = cipher_dir(s);
     let (conf, bak) = (cipher.join("gocryptfs.conf"), cipher.join("gocryptfs.conf.bak"));
     // One left by an earlier try that stopped half way: kept aside, never thrown away (it may be the one that opens).
