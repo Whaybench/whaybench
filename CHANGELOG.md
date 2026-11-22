@@ -182,7 +182,11 @@ names another step.
   with an open of the same id.
   The recovery key is never in `new --encrypt`'s output (an AI running the command would keep it in its transcript): it
   is shown once on a page in the view panel, from a private file in the person's runtime folder that goes once the
-  panel has it; without a panel on the terminal; without either the file stays there and its path is said (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
+  panel has it; without a panel on the terminal; without either the file stays there and its path is said (en, ko).
+  `--encrypt` without `--folder` is refused instead of making a plain project. In a vault project the agents spoiling
+  their home's program folder no longer keeps the project from opening; rustup finds its toolchains (`RUSTUP_HOME`);
+  the add-on folder variable counts only inside a container; gocryptfs's messages go to a private file, so opening
+  cannot hang on its output; the panels never show where a project's data rests in its folder (a vault's key file). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

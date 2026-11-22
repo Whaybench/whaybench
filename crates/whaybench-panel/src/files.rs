@@ -87,6 +87,8 @@ fn may_open(d: &Data, path: &str) -> bool {
     let Some(st) = sessions::target(d).and_then(|t| wb_core::roots::Roots::new(d.clone()).project_of(&t)).and_then(|id| wb_core::roots::stubs(d).into_iter().find(|s| s.id == id)) else { return true };
     let Ok(real) = std::fs::canonicalize(path) else { return false };
     [st.folder.clone(), st.stored().root].iter().filter_map(|r| std::fs::canonicalize(r).ok()).any(|r| real.starts_with(r))
+        // Never where the data rests in its folder (a vault's encrypted files and key file): it is shown at its open place.
+        && !std::fs::canonicalize(st.folder.join(wb_core::roots::PROJECT_DATA)).is_ok_and(|r| real.starts_with(&r) && !st.stored().root.starts_with(&r))
 }
 
 fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dyn Fn()>) {

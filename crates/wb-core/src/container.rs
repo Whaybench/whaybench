@@ -98,6 +98,8 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
     for (k, v) in [
         ("HOME", if s.vault { format!("{data}/home") } else { path(home) }),
         (crate::agents::ENV_ADDONS, crate::agents::ADDONS_IN_CONTAINER.into()),
+        // rustup finds its toolchains where they are mounted, not in the vault's home.
+        ("RUSTUP_HOME", path(&home.join(".rustup"))),
         ("PATH", format!("{}:{}:/usr/bin:/bin", path(&home.join(".local/bin")), path(&home.join(".cargo/bin")))),
         ("WHAYBENCH_DATA_DIR", data.clone()),
         ("CLAUDE_CONFIG_DIR", format!("{data}/{CLAUDE_DIR}")),
@@ -150,7 +152,10 @@ pub fn programs_bin(s: &Stub, home: &Path) -> Result<(), String> {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         for (name, real) in agent_programs(home) { std::os::unix::fs::symlink(&real, dir.join(name)).map_err(|e| e.to_string())?; }
         // Its home is in the vault: `$HOME/.local/bin` (the plugins' hooks name it) leads to the same links.
-        crate::beneath::link(&s.stored().root, Path::new("home/.local/bin"), &home.join(".local/bin")).map_err(|e| e.to_string())?;
+        // A convenience only (PATH names the links' own folder): the agents can spoil it in their home, never the open.
+        if let Err(e) = crate::beneath::link(&s.stored().root, Path::new("home/.local/bin"), &home.join(".local/bin")) {
+            crate::log::warn("session", "program links not named in the vault's home", &e.to_string(), &[("project", s.id.clone())]);
+        }
         return Ok(());
     }
     let rest = s.stored().root;

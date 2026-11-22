@@ -114,8 +114,17 @@ fn mount_with(s: &Stub, flags: &[&str], secret: &str) -> Result<(), String> {
     private_dir(&run_dir(s))?;
     private_dir(&mountpoint(s))?;
     let (c, m) = (cipher_dir(s).to_string_lossy().to_string(), mountpoint(s).to_string_lossy().to_string());
-    let args: Vec<&str> = ["gocryptfs", "-q"].into_iter().chain(flags.iter().copied()).chain([c.as_str(), m.as_str()]).collect();
-    run(&args, &format!("{secret}\n")).map(|_| ())
+    // Its messages to a file of the person's, not a pipe: gocryptfs going to the background may keep its output open
+    // (when it cannot hand it to syslog), and a pipe would then never end.
+    let log = run_dir(s).join("mount.log");
+    let errs = std::fs::File::create(&log).map_err(|e| e.to_string())?;
+    let mut child = Command::new("gocryptfs").arg("-q").args(flags).args([&c, &m]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(errs)
+        .spawn().map_err(|e| format!("gocryptfs: {e}"))?;
+    child.stdin.take().ok_or("no input")?.write_all(format!("{secret}\n").as_bytes()).map_err(|e| e.to_string())?;
+    let status = child.wait().map_err(|e| e.to_string())?;
+    let said = std::fs::read_to_string(&log).unwrap_or_default();
+    let _ = std::fs::remove_file(&log);
+    if status.success() { Ok(()) } else { Err(format!("gocryptfs: {}", said.trim())) }
 }
 
 /// Opens the vault with its recovery key, then gives it a new key, kept in the keyring (the old one is gone).

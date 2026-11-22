@@ -126,6 +126,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let (pid, name) = (arg(&rest, 0)?, arg(&rest, 1)?);
             let Some(folder) = folder else {
                 if from.is_some() { return Err("--from needs --folder".into()); }
+                if encrypt { return Err("--encrypt needs --folder".into()); }
                 // One id for one project: a Briefsafe project's id is taken too.
                 if wb_core::roots::stubs(&st.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
                 out(st.create_project(pid, name, &desc, &parent, paths, always)?);

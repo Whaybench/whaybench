@@ -158,6 +158,8 @@ fn in_project(s: &wb_core::roots::Stub, path: &str) -> bool {
     if path.starts_with("http://") || path.starts_with("https://") { return true; }
     let Ok(real) = std::fs::canonicalize(path.strip_prefix("file://").unwrap_or(path)) else { return false };
     [s.folder.clone(), s.stored().root].iter().filter_map(|r| std::fs::canonicalize(r).ok()).any(|r| real.starts_with(r))
+        // Never where the data rests in its folder (a vault's encrypted files and key file): it is shown at its open place.
+        && !std::fs::canonicalize(s.folder.join(wb_core::roots::PROJECT_DATA)).is_ok_and(|r| real.starts_with(&r) && !s.stored().root.starts_with(&r))
 }
 
 fn lasting(v: &V, path: &str) -> Option<String> {

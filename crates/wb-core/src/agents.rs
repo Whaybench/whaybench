@@ -101,7 +101,9 @@ pub const ADDONS_IN_CONTAINER: &str = "/opt/whaybench/agents";
 pub fn load(data: &Path, id: &str) -> Result<Agent> {
     if id == CLAUDE || !crate::addons::valid_id(id) { return Err(format!("not an agent add-on: {id}").into()); }
     // In a project's container the host's add-ons are mounted read-only apart from the project's data (`ADDONS_IN_CONTAINER`).
-    let base = std::env::var_os(ENV_ADDONS).filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| data.join("addons/agents"));
+    // Only inside a container (podman's /run/.containerenv): on the host the add-ons are the data folder's, checked.
+    let in_container = Path::new("/run/.containerenv").exists();
+    let base = std::env::var_os(ENV_ADDONS).filter(|v| in_container && !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| data.join("addons/agents"));
     let dir = base.join(id);
     let text = fs::read_to_string(dir.join("agent.json")).map_err(|e| format!("agent add-on {id}: {e}"))?;
     let mut agent: Agent = serde_json::from_str(&text).map_err(|e| format!("agent add-on {id}: {e}"))?;
