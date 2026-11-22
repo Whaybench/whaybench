@@ -133,6 +133,8 @@ impl Roots {
 
     /// The project a session belongs to; none: a host session.
     pub fn project_of(&self, session: &str) -> Option<String> {
+        // A host conversation stays the host's, whatever a project writes under its number.
+        if has_session(&self.host, session) { return None; }
         self.projects().into_iter().find(|(_, d)| has_session(d, session)).map(|p| p.0)
     }
 
@@ -166,7 +168,7 @@ pub fn known_session(d: &Data, session: &str) -> Option<Data> {
     if is_project_root(d) { has_session(d, session).then(|| d.clone()) } else { Roots::new(d.clone()).known(session) }
 }
 
-fn has_session(d: &Data, session: &str) -> bool { d.root.join("sessions").join(format!("{session}.json")).is_file() }
+fn has_session(d: &Data, session: &str) -> bool { fs::symlink_metadata(d.root.join("sessions").join(format!("{session}.json"))).is_ok_and(|m| m.is_file()) }
 
 /// The project data root a folder is in, if it is inside a Briefsafe project folder.
 pub fn project_root_of(host: &Data, dir: &Path) -> Option<Stub> {
@@ -184,6 +186,24 @@ mod tests {
         let d = std::env::temp_dir().join(format!("wb-roots-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn a_project_cannot_take_a_host_conversations_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Data::new(dir.path().join("host"));
+        let stub = Stub::new(&host, "up", "Up", &dir.path().join("up"));
+        write_stub(&host, &stub).unwrap();
+        write_marker(&stub.stored(), "up").unwrap();
+        open_plain(&stub).unwrap();
+        for d in [&host, &stub.root()] { fs::create_dir_all(d.root.join("sessions")).unwrap(); fs::write(d.root.join("sessions/s1.json"), r#"{"id":"s1"}"#).unwrap(); }
+        fs::write(stub.root().root.join("sessions/p1.json"), r#"{"id":"p1"}"#).unwrap();
+        let roots = Roots::new(host.clone());
+        assert_eq!(roots.project_of("s1"), None, "the host's own");
+        assert_eq!(roots.project_of("p1").as_deref(), Some("up"));
+        // A link named like a record is no record.
+        std::os::unix::fs::symlink(host.root.join("sessions/s1.json"), stub.root().root.join("sessions/p2.json")).unwrap();
+        assert_eq!(roots.project_of("p2"), None);
     }
 
     #[test]

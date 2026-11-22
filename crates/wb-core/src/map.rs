@@ -293,7 +293,13 @@ pub fn saved_nodes(nodes: &[Value]) -> Vec<Value> {
 /// session's. A node the file holds whole (a file from elsewhere, or one saved before nodes had numbers) is shown
 /// as the file has it; one named by a number the memory no longer has is skipped.
 pub fn view_file(data: &Path, path: &Path) -> Result<Value> {
-    let mut file: Value = serde_json::from_slice(&fs::read(path)?)?;
+    // A file in a project's open place is read beneath it, its nodes from that project's memory.
+    let (bytes, data) = match crate::beneath::split(path) {
+        Some((root, rel)) => (crate::beneath::read(&root, &rel, crate::beneath::READ_LIMIT)?, root),
+        None => (fs::read(path)?, data.to_path_buf()),
+    };
+    let data = data.as_path();
+    let mut file: Value = serde_json::from_slice(&bytes)?;
     let listed = file.get("nodes").and_then(Value::as_array).cloned().ok_or("map requires nodes array")?;
     let conn = crate::db::open(data)?;
     let entries: Vec<(String, String)> = listed.iter().filter(|n| n.get("label").is_none())

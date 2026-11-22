@@ -93,7 +93,14 @@ names another step.
   container.
   Opening or going back to a project's conversation carries the project with the request, and a tab that is a
   project's stays it: when the project has closed meanwhile it does not open (said in the status line), never on the
-  host. A tab starts the project's container only while the project is open, in turn with opening and closing it. `snapshot`, `snapshots` and `restore` take, list and go back to
+  host. A tab starts the project's container only while the project is open, in turn with opening and closing it.
+  Panels: an answer is the project's by the root it was read from, and a log under a number of another root (a host
+  conversation's) is not taken; related answers from a project's node, pages in a project's open place and a page held
+  on its own leave when the project closes; an imported map in a project is read beneath it with the project's memory,
+  goes empty when it closes, is not noted in the host's panel list, and exports into the project. A map that could not
+  be read this once stays drawn (only an unknown session's map goes empty). A project's memory database is opened by
+  SQLite without following links, and a host conversation's number or a link in a project's records is never taken as
+  the project's. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

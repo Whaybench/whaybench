@@ -125,7 +125,8 @@ fn maps_dir(d: &Data) -> std::path::PathBuf { d.maps() }
 /// Writes the branch, or the whole map, as a file in the data directory; returns its path.
 fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str) -> std::io::Result<std::path::PathBuf> {
     // A project's map is saved in the project: nothing of it goes to the host's data folder (spec 3.22).
-    let d = &wb_core::roots::for_session(d, data.get("sessionId").and_then(Value::as_str).unwrap_or(""));
+    // A kept copy names where it came from instead of a session of its own.
+    let d = &wb_core::roots::for_session(d, data.get("sessionId").or_else(|| data.get("from")).and_then(Value::as_str).unwrap_or(""));
     if wb_core::beneath::split(&maps_dir(d)).is_none() { std::fs::create_dir_all(maps_dir(d))?; }
     let tree = tree_of(data);
     let nodes: Vec<Value> = match root {
@@ -660,7 +661,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
     // Kept over a restart; closing it for good forgets it. The program ending is not a close.
     if let Some((a, b)) = &scope {
         let args = vec![a.clone(), b.clone()];
-        mapimport::remember(&d, &args);
+        // A project's map panel is not written down on the host (its path and title are the project's).
+        if wb_core::beneath::split(std::path::Path::new(a.trim_start_matches('@'))).is_none() { mapimport::remember(&d, &args); }
         let d2 = d.clone();
         win.connect_close_request(move |_| { mapimport::forget(&d2, &args); glib::Propagation::Proceed });
     }
@@ -845,12 +847,23 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         // No session chosen: the map that changed last. A session without a map: the screen stays as it is.
         // An imported map's file and a session's map both list nodes; their content comes from the memory.
         let (shown, mut data): (String, Option<Value>) = match imported_of(scope.as_ref()) {
-            Some(path) => { let Ok(m) = wb_core::map::view_file(&d.root, std::path::Path::new(path)) else { return }; (path.to_string(), Some(m)) }
+            Some(path) => match wb_core::map::view_file(&d.root, std::path::Path::new(path)) {
+                Ok(m) => (path.to_string(), Some(m)),
+                // A project's map whose project closed: nothing of it stays on screen.
+                Err(_) if wb_core::beneath::split(std::path::Path::new(path)).is_some() => (path.to_string(), Some(serde_json::json!({"nodes": []}))),
+                Err(_) => return,
+            },
             // A tab without a session in front: an empty map, not the one seen before.
             None if sessions::empty_chosen(&d) => (String::new(), Some(serde_json::json!({"nodes": []}))),
             // No map to read (a project that closed among them): an empty map, not the one drawn before.
             None => match sessions::target(&d) {
-                Some(t) => { let m = sessions::map_of(&d, &t).unwrap_or_else(|| serde_json::json!({"nodes": []})); (t, Some(m)) }
+                // Empty only for a session no root knows (a project's that closed); a map that could not be read this
+                // time stays as drawn.
+                Some(t) => match sessions::map_of(&d, &t) {
+                    Some(m) => (t, Some(m)),
+                    None if wb_core::roots::known_session(&d, &t).is_none() => (t, Some(serde_json::json!({"nodes": []}))),
+                    None => return,
+                },
                 None => (String::new(), Some(serde_json::json!({"nodes": []}))),
             },
         };

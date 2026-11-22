@@ -29,13 +29,17 @@ struct Panel {
 /// Answers in the logs after `since`, oldest first, as (session, row). A log not written to since `scanned` is not read.
 fn logged_after(d: &Data, since: i64, scanned: i64) -> Vec<(String, Value)> {
     let mut out = Vec::new();
-    for f in wb_core::roots::all_of(d).iter().flat_map(|r| wb_core::paths::list_dir(&r.root.join("answer-log"))) {
+    for (r, f) in wb_core::roots::all_of(d).into_iter().flat_map(|r| wb_core::paths::list_dir(&r.root.join("answer-log")).into_iter().map(move |f| (r.clone(), f))) {
         let Some(sid) = f.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".jsonl")).map(String::from) else { continue };
+        // A log counts only in the root its session is of: a project cannot log under a host conversation's number,
+        // and what came from a project is marked the project's by where it was read.
+        let project = wb_core::roots::is_project_root(&r);
+        if wb_core::roots::known_session(d, &sid).is_some_and(|k| k.root != r.root) || (project && wb_core::roots::known_session(&r, &sid).is_none()) { continue; }
         let modified = std::fs::symlink_metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(i64::MAX, |t| t.as_millis() as i64);
         // A second of slack: the file's time and the clock read at the last look can differ a little.
         if modified < scanned - 1000 { continue; }
         let Ok(text) = wb_core::paths::read_text(&f) else { continue };
-        out.extend(text.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l).ok()).take_while(|r| r["at"].as_i64().unwrap_or(0) > since).map(|r| (sid.clone(), r)));
+        out.extend(text.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l).ok()).take_while(|r| r["at"].as_i64().unwrap_or(0) > since).map(|mut r| { r["fromProject"] = project.into(); (sid.clone(), r) }));
     }
     out.sort_by_key(|(_, r)| r["at"].as_i64().unwrap_or(0));
     out
@@ -409,10 +413,12 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 let rows = records::answers_of(&d, &records::lineage(&d, &session));
                 match records::related_index(&rows, at) {
                     Some(i) => {
-                        wb_core::log::decide("answer", "related answers", "found", &[("session", session), ("kept_answers", rows.len().to_string())]);
+                        wb_core::log::decide("answer", "related answers", "found", &[("session", session.clone()), ("kept_answers", rows.len().to_string())]);
                         // A node made while tidying the map has that turn's time, not the time it was talked about.
                         let tidied = rows[i]["prompt"].as_str().is_some_and(|t| t.starts_with(wb_core::i18n::ai("map-update")));
                         status::say(&d, &if tidied { wb_core::i18n::f("related-answers-node-created-at-map", &[("a1", (i + 1).to_string()), ("a2", (rows.len()).to_string())]) } else { wb_core::i18n::f("related-answers-2", &[("a1", (i + 1).to_string()), ("a2", (rows.len()).to_string())]) }, 8);
+                        let mut rows = rows;
+                        if of_project(&d, &session) { for r in &mut rows { r["ofProject"] = session.clone().into(); } }
                         p.related = Some((rows, i));
                         status::focus_app(&d, "dev.whaybench.answer");
                     }
@@ -436,14 +442,16 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             // A project that closed takes its answers off the panel too: nothing of it stays on screen.
             let before = p.history.len();
             p.history.retain(|e| e["project"] != true || e["session"].as_str().is_some_and(|s| of_project(&d, s)));
-            if p.history.len() != before { p.pos = p.pos.min(p.history.len().saturating_sub(1)); p.related = None; w.shown.borrow_mut().clear(); }
+            // Related answers opened from a project's node go with it too.
+            let related_closed = p.related.as_ref().is_some_and(|(rows, _)| rows.first().and_then(|r| r["ofProject"].as_str()).is_some_and(|s| !of_project(&d, s)));
+            if p.history.len() != before || related_closed { p.pos = p.pos.min(p.history.len().saturating_sub(1)); p.related = None; w.shown.borrow_mut().clear(); }
             if !fresh.is_empty() {
                 let first = p.history.is_empty();
                 for (sid, a) in fresh.iter().rev().take(KEEP).rev() {
                     let at = a["at"].as_i64().unwrap_or(0);
                     p.seen = p.seen.max(at);
                     if p.history.iter().any(|r| same(r, at, sid)) { continue; }
-                    p.history.push(json!({"at": at, "session": sid, "prompt": a["prompt"], "text": a["text"], "title": cut(&sessions::session_name(&d, sid), 24), "project": of_project(&d, sid)}));
+                    p.history.push(json!({"at": at, "session": sid, "prompt": a["prompt"], "text": a["text"], "title": cut(&sessions::session_name(&d, sid), 24), "project": a["fromProject"] == true}));
                     // Another session's answer waits in the list.
                     if on_newest && mine.contains(sid) { p.pos = p.history.len() - 1; p.last_at = at; }
                 }

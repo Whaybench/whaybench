@@ -66,7 +66,8 @@ pub fn open(data: &Path) -> Result<Connection> {
             // in the last moments and not yet moved into the file may be missing, and writes are refused.
             Err(e) if e.downcast_ref::<rusqlite::Error>().is_some_and(|e| e.sqlite_error_code() == Some(rusqlite::ErrorCode::CannotOpen)) => {
                 let path = data.join("memory").join("memory.db");
-                if !path.exists() { return Err(e); }
+                // Not for a project's database: the host does not read one past its checks.
+                if !path.exists() || crate::beneath::split(&path).is_some() { return Err(e); }
                 // A URI: the characters it gives a meaning to are escaped in the path.
                 let escaped = path.display().to_string().replace('%', "%25").replace('?', "%3f").replace('#', "%23");
                 let uri = format!("file:{escaped}?immutable=1");
@@ -86,7 +87,9 @@ fn open_once(data: &Path) -> Result<Connection> {
         }
     }
     std::fs::create_dir_all(&dir)?;
-    let mut conn = Connection::open(dir.join("memory.db"))?;
+    // And SQLite itself refuses a link there, should one be put in place after the look above.
+    let flags = if crate::beneath::split(&dir).is_some() { rusqlite::OpenFlags::default() | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW } else { rusqlite::OpenFlags::default() };
+    let mut conn = Connection::open_with_flags(dir.join("memory.db"), flags)?;
     // Nothing a file could carry (views, triggers calling functions) runs here, whoever wrote the file.
     conn.set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
     conn.set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;

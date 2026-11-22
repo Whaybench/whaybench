@@ -373,6 +373,13 @@ fn tick(s: &Shared) {
     }
     let now = session_now(&v);
     let project_of = |s: Option<&str>| s.is_some_and(|s| wb_core::roots::Roots::new(d.clone()).project_of(s).is_some());
+    // A page in a project's open place, the project closed since (its file differences, a page held on its own).
+    let closed = |p: &str| wb_core::beneath::split(Path::new(p)).is_some_and(|(r, _)| std::fs::symlink_metadata(&r).is_err());
+    if v.hist.items.iter().any(|(p, _)| closed(p)) || matches!(&v.link, Link::Target(p, _) if closed(p)) {
+        if matches!(v.link, Link::Target(..)) { v.link = Link::Follow; view::set_view(&d, &name, &v.link); }
+        v.hist = History::default();
+        display(&v);
+    }
     if v.of_project && !project_of(v.followed.as_deref()) {
         // The project closed: nothing of it stays on screen (spec 3.22).
         v.of_project = false;
