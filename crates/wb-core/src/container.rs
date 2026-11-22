@@ -157,8 +157,11 @@ pub fn programs_bin(s: &Stub, home: &Path) -> Result<(), String> {
         for (name, real) in programs {
             let at = dir.join(name);
             if std::fs::read_link(&at).is_ok_and(|t| t == real) { continue; }
-            let _ = std::fs::remove_file(&at);
-            std::os::unix::fs::symlink(&real, &at).map_err(|e| e.to_string())?;
+            // Made beside and renamed over: a tab starting meanwhile finds the old link or the new one, never none.
+            let tmp = dir.join(format!(".{name}.{}", std::process::id()));
+            let _ = std::fs::remove_file(&tmp);
+            std::os::unix::fs::symlink(&real, &tmp).map_err(|e| e.to_string())?;
+            std::fs::rename(&tmp, &at).map_err(|e| e.to_string())?;
         }
         // Its home is in the vault: `$HOME/.local/bin` (the plugins' hooks name it) leads to the same links.
         // A convenience only (PATH names the links' own folder): the agents can spoil it in their home, never the open.
@@ -172,6 +175,26 @@ pub fn programs_bin(s: &Stub, home: &Path) -> Result<(), String> {
     for (name, real) in agent_programs(home) { crate::beneath::link(&rest, &Path::new("cache/bin").join(name), &real).map_err(|e| e.to_string())?; }
     Ok(())
 }
+
+/// `programs_bin` for a tab opening into a running container: in turn with a start or another tab doing the same.
+pub fn refresh_programs(s: &Stub, home: &Path) -> Result<(), String> { locked(s, || programs_bin(s, home)) }
+
+/// Noted while a project is being closed: its tabs close first, ending their agents, before its container stops.
+fn closing_mark(s: &Stub) -> PathBuf { s.open_at.with_extension("closing") }
+pub fn closing(s: &Stub) -> bool { std::fs::symlink_metadata(closing_mark(s)).is_ok() }
+
+/// Asks the project's tabs to close and waits for them, `wait` at most (an answer being written is let finish its
+/// file; a tab that will not go is left to the container's stop).
+pub fn close_tabs(s: &Stub, host: &Data, wait: std::time::Duration) {
+    let _ = std::fs::write(closing_mark(s), "");
+    let until = std::time::Instant::now() + wait;
+    while std::time::Instant::now() < until {
+        let mine = crate::sessions::open_tabs(host).iter().any(|t| crate::sessions::tab_project(host, &t.tab).as_deref() == Some(s.id.as_str()));
+        if !mine { break; }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+pub fn closing_done(s: &Stub) { let _ = std::fs::remove_file(closing_mark(s)); }
 
 /// The agents' programs and where they really are.
 fn agent_programs(home: &Path) -> Vec<(&'static str, PathBuf)> {
@@ -280,6 +303,9 @@ pub fn reconcile(host: &Data) {
       // being done right now is left to finish (the window does not wait for an image to download).
       let _ = flock_with(&s.open_at.with_extension("life"), libc::LOCK_EX | libc::LOCK_NB, || {
         let (open, runs) = (s.open(), podman && running(&s));
+        // Left paused by a snapshot that did not finish: going again, before any tab comes back to it.
+        if runs && status(&s).as_deref() == Some("paused") { let _ = Command::new("podman").args(["unpause", &name(&s)]).stdout(Stdio::null()).stderr(Stdio::null()).status(); }
+        let _ = std::fs::remove_file(closing_mark(&s));
         // Opened in its container and the container is gone (or podman is): closed, not left for the host to run.
         // (A vault: its link goes only once the vault is off, so its data is never left in the clear unseen.)
         let gone = !runs && opened_isolated(&s) && fs_link(&s);

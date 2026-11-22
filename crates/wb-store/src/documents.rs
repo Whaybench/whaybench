@@ -6,13 +6,13 @@ use serde_json::{Value, json};
 use crate::{Res, Store, arr, markdown::{changed_paths, without_mark, removed_paths, section_text}, new_id, read, s, sha, text, write_json, write_text};
 
 impl Store {
-    fn doc_dir(&self, pid: &str, did: &str) -> PathBuf { self.pdir(pid).join("docs").join(did) }
+    fn doc_dir(&self, pid: &str, did: &str) -> PathBuf { self.pdir(pid).join("docs").join(crate::part(did)) }
     pub fn doc_path(&self, pid: &str, did: &str) -> PathBuf { self.doc_dir(pid, did).join("document.md") }
     pub fn document(&self, pid: &str, did: &str) -> String { text(&self.doc_path(pid, did)) }
     fn meta_path(&self, pid: &str, did: &str) -> PathBuf { self.doc_dir(pid, did).join("meta.json") }
     pub fn meta(&self, pid: &str, did: &str) -> Value { read(&self.meta_path(pid, did)).unwrap_or_else(|| json!({"sha":"","sections":{}})) }
     fn work(&self, pid: &str, did: &str, session: &str) -> PathBuf {
-        self.pdir(pid).join("work").join(if session.is_empty() { "user" } else { session }).join(format!("{did}.md"))
+        self.pdir(pid).join("work").join(if session.is_empty() { "user" } else { crate::part(session) }).join(format!("{}.md", crate::part(did)))
     }
 
     fn base_path(work: &Path) -> PathBuf {

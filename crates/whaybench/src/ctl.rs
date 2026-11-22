@@ -206,7 +206,10 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
         Some("new") => {
             // `--project ID`: a new conversation in that Briefsafe project (it must be open; the tab refuses otherwise).
             let mut words = words.to_vec();
-            let project = words.iter().position(|w| w == "--project").and_then(|i| { let v = words.get(i + 1).cloned(); words.drain(i..(i + 2).min(words.len())); v });
+            let project = match words.iter().position(|w| w == "--project") {
+                Some(i) => { let v = words.get(i + 1).cloned().ok_or("session new --project needs a project")?; words.drain(i..i + 2); Some(v) }
+                None => None,
+            };
             if let Some(p) = &project && !wb_core::roots::stubs(data).iter().any(|s| &s.id == p && s.open()) { return Err(wb_core::i18n::t("briefsafe-project-closed").into()); }
             let (agent, map_from) = match &words[1..] {
                 [flag, id, rest @ ..] if flag == "--agent" => (Some(id.clone()), rest.first().cloned()),
@@ -227,7 +230,18 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             }
             post(data, &Request::OpenTerm { open: TermOpen { map_from, agent, project, ..Default::default() } })
         }
-        Some("show") => show_session(data, words.get(1).ok_or("session show needs an id")?),
+        Some("show") => match (words.get(1).map(String::as_str), words.get(2), words.get(3)) {
+            // `--project ID SESSION`: a Briefsafe project's conversation, opened only as that project's while it is open.
+            (Some("--project"), Some(p), Some(id)) => {
+                if !wb_core::roots::stubs(data).iter().any(|s| &s.id == p && s.open()) { return Err(wb_core::i18n::t("briefsafe-project-closed").into()); }
+                if wb_core::roots::Roots::new(data.clone()).project_of(id).as_deref() != Some(p.as_str()) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
+                let located = sessions::locate(data, id);
+                if let Some(t) = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(located.as_str())) { return post(data, &Request::FocusTerm { tab: t.tab }); }
+                open_session_of(data, &located, Some(p.clone()))
+            }
+            (Some("--project"), _, _) => Err("session show --project needs a project and a session".into()),
+            _ => show_session(data, words.get(1).ok_or("session show needs an id")?),
+        },
         Some("type") => {
             let id = words.get(1).ok_or("session type needs an id")?;
             let text = words.get(2).ok_or("session type needs text")?;

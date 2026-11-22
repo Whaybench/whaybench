@@ -128,7 +128,7 @@ impl Relay {
         };
         if let wb_core::container::Place::Refused(why) = &place { return Err(why.clone()); }
         // Which root this tab's sessions are looked for in: a project's records count only for its own tabs.
-        sessions::set_tab_project(&self.data, &self.tab, project.as_ref().map(|p| p.id.as_str()));
+        if !sessions::set_tab_project(&self.data, &self.tab, project.as_ref().map(|p| p.id.as_str())) { return Err(wb_core::i18n::t("briefsafe-project-closed").to_string()); }
         // The map is kept every turn: its tool (the plugin's MCP server) runs without asking. Attaching to a session
         // in the background takes no options; that session was started with them.
         if !addon && args.first().is_none_or(|a| a != "attach") {
@@ -185,7 +185,7 @@ impl Relay {
         }
         if let (Some(s), wb_core::container::Place::Container) = (&project, &place) {
             // The agents' programs as they are now: an update since the container started moved them.
-            if let Some(home) = std::env::var_os("HOME") { let _ = wb_core::container::programs_bin(s, std::path::Path::new(&home)); }
+            if let Some(home) = std::env::var_os("HOME") { let _ = wb_core::container::refresh_programs(s, std::path::Path::new(&home)); }
             let podman = wb_core::versions::find_program("podman", &std::env::var("PATH").unwrap_or_default(), None).ok_or("podman is not installed")?;
             let names: Vec<String> = env.iter().map(|(k, _)| k.clone()).collect();
             // By its name: in there it is found among the program links, wherever the host has it.
@@ -343,7 +343,7 @@ impl Relay {
         if self.closing { return; }
         // The tab's project closed: its tab goes too, nothing of it stays on screen or is found again by a later open.
         if let Some(id) = sessions::tab_project(&self.data, &self.tab)
-            && !wb_core::roots::stubs(&self.data).iter().any(|s| s.id == id && s.open()) {
+            && !wb_core::roots::stubs(&self.data).iter().any(|s| s.id == id && s.open() && !wb_core::container::closing(s)) {
                 record::decide("session", "tab closed", "its project closed", &[("tab", self.tab.clone()), ("project", id)]);
                 self.closing = true;
                 self.leave_at = Some(Instant::now());
@@ -607,7 +607,7 @@ fn main() {
     let Some(root) = paths::resolve(None, |k| std::env::var(k).ok()) else { std::process::exit(2) };
     let data = Data::new(root);
     // Noted before anything starts: the tab is that project's, whatever its records say later.
-    if project.is_some() { sessions::set_tab_project(&data, &tab, project.as_deref()); }
+    if project.is_some() && !sessions::set_tab_project(&data, &tab, project.as_deref()) { std::process::exit(1); }
     let run = record::run_id(&data);
     record::open(&data, &format!("term-{tab}"), &run, "first");
     record::install_panic_hook();

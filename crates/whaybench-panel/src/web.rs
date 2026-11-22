@@ -46,7 +46,10 @@ impl Page {
 pub fn pressed_link(decision: &webkit6::PolicyDecision, kind: webkit6::PolicyDecisionType) -> Option<String> {
     if kind != webkit6::PolicyDecisionType::NavigationAction && kind != webkit6::PolicyDecisionType::NewWindowAction { return None; }
     let nav = decision.downcast_ref::<webkit6::NavigationPolicyDecision>()?;
-    Some(nav.navigation_action().and_then(|a| a.request()).and_then(|r| r.uri()).map(|u| u.to_string()).unwrap_or_default())
+    let action = nav.navigation_action()?;
+    // The person's own press only: a page's script, refresh or frame is not one, whatever it names (spec 3.22).
+    if !action.is_user_gesture() { return None; }
+    Some(action.request().and_then(|r| r.uri()).map(|u| u.to_string()).unwrap_or_default())
 }
 
 #[cfg(test)]

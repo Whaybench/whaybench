@@ -45,8 +45,13 @@ pub fn write_tab(d: &Data, tab: &str, session: Option<&str>, attached: bool) {
 /// host's. What a project's records say about tabs counts only for that project's own tabs.
 fn tab_project_file(d: &Data, tab: &str) -> PathBuf { tabs_dir(d).join(format!("{tab}.project")) }
 
-pub fn set_tab_project(d: &Data, tab: &str, project: Option<&str>) {
-    match project { Some(p) => { let _ = write_atomic(&tab_project_file(d, tab), p); } None => { let _ = fs::remove_file(tab_project_file(d, tab)); } }
+/// Notes (or forgets) the project a tab is of. Whether the note is there now: a tab that cannot note its project does
+/// not start (it would be taken for a host tab later).
+pub fn set_tab_project(d: &Data, tab: &str, project: Option<&str>) -> bool {
+    match project {
+        Some(p) => write_atomic(&tab_project_file(d, tab), p).is_ok() && tab_project(d, tab).as_deref() == Some(p),
+        None => { let _ = fs::remove_file(tab_project_file(d, tab)); true }
+    }
 }
 
 pub fn tab_project(d: &Data, tab: &str) -> Option<String> { fs::read_to_string(tab_project_file(d, tab)).ok().filter(|p| !p.is_empty()) }

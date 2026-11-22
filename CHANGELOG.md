@@ -194,7 +194,19 @@ names another step.
   conversation, Snapshot and Log out; logging out with its conversation tabs open asks first. The Sessions panel lists
   each Briefsafe project under its name after the host's conversations, a locked one by its name only.
   `whaybench ctl session new --project ID` opens a conversation in an open project. Each tab opening into a running
-  vault project no longer empties the program links its container sees (the folder stays, its links are replaced). `snapshot`, `snapshots` and `restore` take, list and go back to
+  vault project no longer empties the program links its container sees (the folder stays, its links are replaced).
+  From the first review of the panels: an open Briefsafe project's pages show its own HTML as text and drop links of
+  the panel's kind from its text, and only the person's own press counts as following a link in any panel (a page's
+  script, refresh or frame does not), so a project's document cannot log out, take snapshots or open things by itself.
+  Requests from its pages go only to its own conversations; its sources open only from it; its conversation opens
+  from the list as the project's (`ctl session show --project ID SESSION`), refused once it has closed. A step runs for
+  one project and is shown only on its page; a snapshot or a failed log out keeps the open page with a line saying so;
+  a recovery key that did not fit leaves Enter recovery key there; steps write their output to files and are stopped
+  after a time limit. New projects always go to the host's store. Logging out closes the project's tabs first (each
+  ends its agent), then stops the container. A tab that cannot note its project does not start; `--project` needs a
+  value; store ids are single plain names; Briefsafe projects take no document added from the panel; program links are
+  replaced in turn and atomically; a container left paused is resumed at start; answers from the future do not hide
+  later ones. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

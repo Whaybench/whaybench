@@ -36,7 +36,7 @@ pub struct Store { pub data: Data, pub root: PathBuf }
 
 impl Store {
     pub fn new(data: Data) -> Self { let root = data.root.join("projects"); Store { data, root } }
-    pub fn pdir(&self, pid: &str) -> PathBuf { self.root.join(pid) }
+    pub fn pdir(&self, pid: &str) -> PathBuf { self.root.join(part(pid)) }
     pub fn get_project(&self, pid: &str) -> Option<Value> { read(&self.pdir(pid).join("project.json")) }
     pub fn list_projects(&self) -> Vec<Value> {
         // Through `paths`: a Briefsafe project's store is in its data, which its agents can change (no links, no pipes).
@@ -44,6 +44,12 @@ impl Store {
         names.sort();
         names.iter().filter_map(|p| read(p)).collect()
     }
+}
+
+/// An id as one plain name in a path. Ids come from project data too (a Briefsafe project's is its agents' to write):
+/// an absolute one or one with `/` or `..` would lead out of the store, so it names nothing there.
+pub(crate) fn part(id: &str) -> &str {
+    if id.is_empty() || id == "." || id == ".." || id.contains(['/', '\0']) { "_not-a-name_" } else { id }
 }
 
 pub fn read(path: &Path) -> Option<Value> { serde_json::from_str(&wb_core::paths::read_text(path).ok()?).ok() }

@@ -194,7 +194,9 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         "close" => {
             let st2 = stub_of(st, arg(&rest, 0)?)?;
             // The open place goes only once the container is gone: a project is never taken for closed while it runs.
-            wb_core::container::life(&st2, || {
+            // Its tabs first: each ends its agent (which writes what it has), then the container stops (spec 3.22).
+            wb_core::container::close_tabs(&st2, &st.data, std::time::Duration::from_secs(8));
+            let closed = wb_core::container::life(&st2, || {
                 if wb_core::container::podman_found() { wb_core::container::stop(&st2)?; }
                 // The vault before the open place: one that will not close (a panel holds a file in it) leaves the
                 // project open, said so, and never closed in name with its data still in the clear.
@@ -202,7 +204,9 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())?;
                 wb_core::container::note_isolated(&st2, false).map_err(|e| e.to_string())?;
                 Ok(())
-            })?;
+            });
+            wb_core::container::closing_done(&st2);
+            closed?;
             out(json!({"closed": st2.id}));
         }
         "snapshot" => {

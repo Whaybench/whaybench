@@ -456,7 +456,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 let first = p.history.is_empty();
                 for (sid, a) in fresh.iter().rev().take(KEEP).rev() {
                     let at = a["at"].as_i64().unwrap_or(0);
-                    p.seen = p.seen.max(at);
+                    // Never past now: a log row from the future (a project's is its agents' to write) must not hide later answers.
+                    p.seen = p.seen.max(at.min(wb_core::clock::now_ms()));
                     if p.history.iter().any(|r| same(r, at, sid)) { continue; }
                     p.history.push(json!({"at": at, "session": sid, "prompt": a["prompt"], "text": a["text"], "title": cut(&sessions::session_name(&d, sid), 24), "project": a["fromProject"] == true}));
                     // Another session's answer waits in the list.
