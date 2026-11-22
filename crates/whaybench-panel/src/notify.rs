@@ -15,7 +15,7 @@ struct View { shown: String, trash_open: bool }
 
 /// The asks waiting in the answer panel (wb_core::ask), one line each: which session, and a question or which tool.
 fn asks(d: &Data) -> Vec<String> {
-    wb_core::ask::pending(&d.root).iter().map(|a| {
+    wb_core::ask::pending_all(d).iter().map(|a| {
         let name = crate::common::cut(&wb_core::sessions::session_name(d, a["session"].as_str().unwrap_or("")), 24);
         if a["kind"] == "question" { wb_core::i18n::f("ask-question", &[("a1", name)]) }
         else { wb_core::i18n::f("ask-permission", &[("a1", name), ("a2", a["tool"].as_str().unwrap_or("").to_string())]) }

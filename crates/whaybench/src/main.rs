@@ -45,7 +45,7 @@ struct Args {
 fn parse_args(mut args: Vec<String>) -> Result<Args, String> {
     let mut out = Args { data_dir: None, apps: Vec::new(), no_session: false, ctl: None };
     // ctl, map, record and hook take the words after them as their own; map, record and hook stay as the first of them.
-    if args.first().is_some_and(|a| matches!(a.as_str(), "ctl" | "map" | "record" | "hook" | "memory" | "statusline" | "mcp" | "token")) {
+    if args.first().is_some_and(|a| matches!(a.as_str(), "ctl" | "map" | "record" | "hook" | "memory" | "statusline" | "mcp" | "token" | "tidy")) {
         if args[0] == "ctl" { args.remove(0); }
         out.ctl = Some(Vec::new());
     }
@@ -108,6 +108,8 @@ fn main() {
             Some("statusline") => agent::statusline(&data),
             Some("mcp") => mcp::serve(&data),
             Some("token") => token(&rest[1..]),
+            // The start's own clean-up, for a project's data: run in the project, by `whaybench-project open`.
+            Some("tidy") => { wb_core::sessions::save_lost_maps(&data); wb_core::sessions::prune(&data); Ok(()) }
             _ => ctl::send(&data, &rest),
         };
         if let Err(e) = done { fail(&e); }

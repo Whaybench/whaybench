@@ -77,6 +77,7 @@ pub fn prune(d: &Data) -> usize {
 /// kept fall back to its answers, then to its map's own stamps (which, in a map carried over from another
 /// conversation, are that one's), then to now.
 pub fn span(d: &Data, id: &str, nodes: &[Value]) -> (i64, i64) {
+    let d = &crate::roots::for_session(d, id);
     let rec = record_of(d, id).unwrap_or(Value::Null);
     let all = all_here(d);
     // /resume makes a new record; the conversation began with the first of its numbers.

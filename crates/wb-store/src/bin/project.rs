@@ -142,6 +142,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 if isolated { let _ = wb_core::container::stop(&st2); }
                 return Err(e.to_string());
             }
+            wb_core::container::tidy(&st2, isolated);
             out(json!({"open": st2.id, "data": st2.open_at, "isolated": isolated}));
         }
         "close" => {

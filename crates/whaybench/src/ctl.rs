@@ -208,6 +208,8 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 [flag, id, rest @ ..] if flag == "--agent" => (Some(id.clone()), rest.first().cloned()),
                 rest => (None, rest.first().cloned()),
             };
+            if let Some(m) = map_from.as_deref().filter(|m| !m.starts_with('/'))
+                && wb_core::roots::Roots::new(data.clone()).project_of(m).is_some() { return Err(wb_core::i18n::t("briefsafe-map-stays").into()); }
             if let Some(m) = &map_from
                 && !m.starts_with('/') && !data.root.join(format!("{m}.json")).exists() {
                     return Err(wb_core::i18n::t("new-tab-keep-map-not-opened-2").into());
@@ -249,12 +251,13 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             let asked = fs::read_to_string(asked_file(data, id)).ok().and_then(|t| t.trim().parse::<i64>().ok()).filter(|at| now - at < 3_600_000);
             let since = asked.unwrap_or(now);
             let since_newer = |file: std::path::PathBuf| -> Option<serde_json::Value> {
-                let v: serde_json::Value = serde_json::from_slice(&fs::read(file).ok()?).ok()?;
+                let v: serde_json::Value = serde_json::from_str(&wb_core::paths::read_text(&file).ok()?).ok()?;
                 (v["at"].as_i64()? >= since).then_some(v)
             };
             for _ in 0..limit {
                 let now = sessions::current_id(data, id);
-                if let Some(v) = since_newer(data.root.join("answers").join(format!("{now}.json"))) { println!("{}", v["text"].as_str().unwrap_or("")); return Ok(()); }
+                // In the conversation's own root (a project's answers are in the project).
+                if let Some(v) = since_newer(wb_core::roots::for_session(data, &now).root.join("answers").join(format!("{now}.json"))) { println!("{}", v["text"].as_str().unwrap_or("")); return Ok(()); }
                 // Stopped on a question to the person (a permission, an input): the asker is told, not left waiting.
                 // Already waiting when the wait began counts too: it went on to ask between `type` and `wait`.
                 let state: Option<serde_json::Value> = fs::read(sessions::state_dir(&wb_core::roots::for_session(data, &now)).join(format!("{now}.json"))).ok().and_then(|b| serde_json::from_slice(&b).ok());

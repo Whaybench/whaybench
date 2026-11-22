@@ -581,7 +581,7 @@ fn open_source(p: &P, o: &Value) {
     if session.is_empty() { return; }
     // Opening a source is looking at its map, which is a file: the chosen session stays, and no session is woken.
     let sid = sessions::current_id(&p.d, session);
-    let path = p.d.root.join(format!("{sid}.json"));
+    let path = wb_core::roots::for_session(&p.d, &sid).root.join(format!("{sid}.json"));
     if path.is_file() { crate::mapimport::show(&p.d, &path, &sessions::session_name(&p.d, &sid), Some(node)); }
     else { status::say(&p.d, &wb_core::i18n::f("source-not-opened-no-file", &[("path", path.display().to_string())]), 8); }
 }

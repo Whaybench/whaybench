@@ -213,6 +213,22 @@ pub fn exec_args(s: &Stub, cwd: &Path, pass: &[String], program: &str, args: &[S
     a
 }
 
+/// Old conversations' clean-up for a project's data (what the host does for its own at start), run where the project's
+/// agents run: in its container, never by a host program walking folders they can change. In the background.
+pub fn tidy(s: &Stub, isolated: bool) {
+    let mut c = if isolated {
+        let mut c = Command::new("podman");
+        c.args(["exec", "-d", &name(s), "whaybench", "tidy"]);
+        c
+    } else {
+        let Ok(own) = crate::paths::own_exe() else { return };
+        let mut c = Command::new(own.with_file_name("whaybench"));
+        c.arg("tidy").env(crate::paths::ENV_DATA_DIR, &s.open_at);
+        c
+    };
+    let _ = c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+}
+
 /// Ends a tab's agent in the project's container (the tab closed).
 pub fn hang_up(s: &Stub, tab: &str) {
     if crate::map::safe_id(tab).is_err() { return; }

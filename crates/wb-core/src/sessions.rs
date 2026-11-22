@@ -64,7 +64,8 @@ pub fn current_id(d: &Data, id: &str) -> String {
 /// The numbers this conversation had before, nearest first. Only moves of the conversation itself: a new session that
 /// took over another's map is a conversation of its own.
 pub fn moved_from(d: &Data, id: &str) -> Vec<String> {
-    let records = all(d);
+    // In the conversation's own root: another root's records do not move it.
+    let records = all_here(&crate::roots::for_session(d, id));
     let (mut out, mut frontier) = (Vec::new(), vec![id.to_string()]);
     while let Some(here) = frontier.pop() {
         for r in &records {

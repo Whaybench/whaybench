@@ -198,15 +198,18 @@ pub fn take_requests(d: &Data, to: &str) -> Vec<Value> {
 /// A session goes on under a new number (/background, a restart): its views and what waits for them go with it, older
 /// entries first when it already has some.
 pub fn session_moved(d: &Data, old: &str, new: &str) {
+    let d = &crate::roots::for_session(d, new);
     let root = d.root.join("view/history");
+    // In a project: only when no part of the way is a link (the agents can put links there).
+    if let Some((r, rel)) = crate::beneath::split(&root) && crate::beneath::mkdir(&r, &rel).is_err() { return; }
     let mut dirs = vec![(root.join(format!("s-{old}")), root.join(format!("s-{new}")))];
     if let Ok(rd) = std::fs::read_dir(&root) {
         for e in rd.flatten() {
-            if e.path().is_dir() { dirs.push((e.path().join(format!("s-{old}")), e.path().join(format!("s-{new}")))); }
+            if e.file_type().is_ok_and(|t| t.is_dir()) { dirs.push((e.path().join(format!("s-{old}")), e.path().join(format!("s-{new}")))); }
         }
     }
     for (from, to) in dirs {
-        if !from.is_dir() { continue; }
+        if !std::fs::symlink_metadata(&from).is_ok_and(|m| m.is_dir()) { continue; }
         if !to.exists() {
             if let Some(parent) = to.parent() { let _ = std::fs::create_dir_all(parent); }
             if std::fs::rename(&from, &to).is_ok() {

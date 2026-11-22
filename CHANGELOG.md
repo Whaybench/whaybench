@@ -59,7 +59,13 @@ names another step.
   to the host's answer history, and leave the Answer panel when the project closes, as its pages leave the View panel
   and its map the Map panel. Exported, imported and carried maps and the Files panel's AI-edit pages are written in
   the project's data; a project's map does not start a conversation outside the project. The terminal's rewind and
-  move records and `whaybench-files` use the conversation's own root. `snapshot`, `snapshots` and `restore` take, list and go back to
+  move records and `whaybench-files` use the conversation's own root.
+  More readers take a project conversation's own root: `session wait` reads its answers there, a source link opens
+  its map there, a conversation's time span and its earlier numbers are found there (another root's records cannot
+  move it), the View panel moves its pages there (not through links), and Notifications lists every open root's
+  permission questions. Keep Map from a project's conversation is refused outside it. Opening a project runs the
+  old-conversation clean-up for its data (`whaybench tidy`, by the project's own keeping settings) inside its
+  container. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with
