@@ -519,6 +519,8 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
             }
         }
         if ticks.is_multiple_of(10) { state.tell_waiting(); }
+        // Pictures taken while a project was open, once their time is up (and at the first tick, after a restart).
+        if ticks.is_multiple_of(100) { crate::render::shots::sweep_expiring(&asked_data); }
         // A project's programs leave requests in its own root; only those that touch nothing outside are taken.
         for (pid, root) in wb_core::roots::Roots::new(asked_data.clone()).projects() {
             for bytes in take_files(&root.ctl()) {

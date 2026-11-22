@@ -45,7 +45,7 @@ render_elements! {
     Menu=WaylandSurfaceRenderElement<GlesRenderer>,
 }
 
-mod shots;
+pub(crate) mod shots;
 mod window;
 pub use window::init_window;
 

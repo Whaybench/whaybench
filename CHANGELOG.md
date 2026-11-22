@@ -268,7 +268,10 @@ names another step.
   named "View" on its way back; a project's file patterns never reach where its data rests.
   From the twelfth review: a view is always written down, and a picture of it is refused by its own name; a project's
   file under `/tmp` is shown where it is, not copied; text typed in Input for a project's conversation goes only
-  there and is cleared when the project locks; a project's request is logged as "project" only (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
+  there and is cleared when the project locks; a project's request is logged as "project" only (en, ko).
+  Pictures of the screen are never refused (they are how the screen is tested): one taken while a Briefsafe project
+  is open, or while a view shows a project's page, is removed ten minutes later, also after a restart, unless the
+  file was written over since. Copying a project page's text to the desktop clipboard stays the person's choice. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with
