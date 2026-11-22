@@ -302,8 +302,11 @@ pub fn show_session(data: &Data, id: &str) -> Result<(), String> {
 }
 
 /// The session in a new tab: attached if it runs in the background, else started again from where it was saved.
-fn open_session(data: &Data, id: &str) -> Result<(), String> {
-    let project = wb_core::roots::Roots::new(data.clone()).project_of(id);
+fn open_session(data: &Data, id: &str) -> Result<(), String> { open_session_of(data, id, None) }
+
+/// `project`: the one the session is known to be of (a tab of last time); else found by its record.
+fn open_session_of(data: &Data, id: &str, project: Option<String>) -> Result<(), String> {
+    let project = project.or_else(|| wb_core::roots::Roots::new(data.clone()).project_of(id));
     match sessions::agent(id) {
         Some(a) if a.get("kind").and_then(|k| k.as_str()) == Some("interactive") => {
             Err(wb_core::i18n::t("running-in-another-terminal-type-bg").into())
@@ -325,6 +328,9 @@ struct Reattach {
     at: u64,
     /// Every open tab in order: its session, or nothing for a tab without a conversation.
     tabs: Vec<Option<String>>,
+    /// The Briefsafe project of each tab, in the same order (none for the host's).
+    #[serde(default)]
+    projects: Vec<Option<String>>,
 }
 
 fn now_secs() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -335,8 +341,9 @@ pub fn remember_tabs(data: &Data) {
     // Tab ids grow with time, so this is the order they were opened in.
     let mut open = sessions::open_tabs(data);
     open.sort_by(|a, b| a.tab.cmp(&b.tab));
+    let projects = open.iter().map(|t| sessions::tab_project(data, &t.tab)).collect();
     let tabs = open.into_iter().map(|t| t.session.filter(|s| sessions::has_conversation(data, s))).collect();
-    let text = serde_json::to_string(&Reattach { at: now_secs(), tabs }).unwrap_or_default();
+    let text = serde_json::to_string(&Reattach { at: now_secs(), tabs, projects }).unwrap_or_default();
     let _ = write_atomic(&data.cache().join("reattach.json"), text.as_bytes());
 }
 
@@ -346,7 +353,8 @@ pub fn open_first_tabs(data: &Data) {
     let saved = fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Reattach>(&t).ok());
     let _ = fs::remove_file(&file);
     let at = saved.as_ref().map_or(0, |s| s.at);
-    let tabs = saved.map(|r| r.tabs).unwrap_or_default();
+    let (tabs, mut projects) = saved.map(|r| (r.tabs, r.projects)).unwrap_or_default();
+    projects.resize(tabs.len(), None);
     if tabs.is_empty() {
         let _ = post(data, &Request::OpenTerm { open: TermOpen::default() });
         return;
@@ -357,24 +365,30 @@ pub fn open_first_tabs(data: &Data) {
         // last run that showed one lets go of it a moment after the window closed: go as soon as every one runs in the
         // background, and at most 10 seconds after the window closed.
         // An add-on agent's session has no background: it is opened again from where it was saved.
-        let ready = |s: &String| sessions::record_of(&data, s).is_some_and(|r| r.get("agent").is_some()) || sessions::agent(&sessions::locate(&data, s)).is_some_and(|a| a.get("kind").and_then(|k| k.as_str()) != Some("interactive"));
+        let in_project = |s: &String| tabs.iter().zip(&projects).any(|(t, p)| t.as_ref() == Some(s) && p.is_some());
+        let ready = |s: &String| in_project(s) || sessions::record_of(&data, s).is_some_and(|r| r.get("agent").is_some()) || sessions::agent(&sessions::locate(&data, s)).is_some_and(|a| a.get("kind").and_then(|k| k.as_str()) != Some("interactive"));
         while now_secs() < at + 10 {
             sessions::refresh_agents();
             if tabs.iter().flatten().all(ready) { break; }
             std::thread::sleep(Duration::from_millis(300));
         }
-        for (i, s) in tabs.into_iter().enumerate() {
+        for (i, (s, project)) in tabs.into_iter().zip(projects).enumerate() {
             // One at a time, or the terminals race and the tabs come back in another order.
             if i > 0 { std::thread::sleep(Duration::from_millis(800)); }
             // A tab without a conversation comes back as what it was: an empty tab.
+            // A project's tab comes back as that project's: it opens only while the project is open, never on the host.
+            if let Some(p) = &project && !wb_core::roots::stubs(&data).iter().any(|st| &st.id == p && st.open()) {
+                record::decide("session", "tab not reopened", "its project is closed", &[("project", p.clone())]);
+                continue;
+            }
             let Some(s) = s else {
-                let _ = post(&data, &Request::OpenTerm { open: TermOpen::default() });
+                let _ = post(&data, &Request::OpenTerm { open: TermOpen { project, ..Default::default() } });
                 continue;
             };
             let now = sessions::locate(&data, &s);
             record::decide("session", "tab reopened", "a tab open last time", &[("old", s), ("new", now.clone())]);
             // Always a new tab: the last run's tabs may still be handing their sessions over and look open.
-            if let Err(e) = open_session(&data, &now) { record::warn("session", "tab not reopened", &e, &[("session", now)]); }
+            if let Err(e) = open_session_of(&data, &now, project) { record::warn("session", "tab not reopened", &e, &[("session", now)]); }
         }
     });
 }

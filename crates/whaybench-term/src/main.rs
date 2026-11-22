@@ -117,7 +117,10 @@ impl Relay {
             None => wb_core::container::Place::Host,
             Some(p) => {
                 let own = paths::own_exe().map_err(|e| e.to_string())?;
-                wb_core::container::place_for(Some(p), wb_core::container::isolation(), p.open(), wb_core::container::running(p),
+                // As the project was opened: in its container, then never on the host.
+                // (A project opened before this was noted: its running container says so.)
+                let isolated = wb_core::container::opened_isolated(p) || (wb_core::container::podman_found() && wb_core::container::running(p));
+                wb_core::container::place_for(Some(p), isolated, p.open(), isolated && wb_core::container::running(p),
                     || wb_core::container::life(p, || if p.open() { wb_core::container::start(p, &wb_core::container::programs(&own)) } else { Err(wb_core::i18n::t("briefsafe-project-closed").to_string()) }))
             }
         };
@@ -279,7 +282,8 @@ impl Relay {
     fn panel_gone(&mut self) {
         if self.closing { return; }
         self.closing = true;
-        if wb_core::agents::other() {
+        // A project's conversation ends with its tab too: the host cannot see or reach what runs on in its container.
+        if wb_core::agents::other() || sessions::tab_project(&self.data, &self.tab).is_some() {
             self.leave_at = Some(Instant::now());
             return;
         }

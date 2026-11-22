@@ -42,6 +42,14 @@ pub fn podman_found() -> bool { Command::new("podman").arg("--version").stdout(S
 /// Whether projects can be isolated here: podman and an image for this distribution. Without, they open as before.
 pub fn isolation() -> bool { podman_found() && host_image().is_some() }
 
+/// Noted by the host beside the open place when a project was opened in its container: from then until it closes its
+/// conversations run there or not at all, whatever podman answers later (spec 3.22).
+fn isolated_mark(s: &Stub) -> PathBuf { s.open_at.with_extension("isolated") }
+pub fn note_isolated(s: &Stub, on: bool) -> std::io::Result<()> {
+    if on { std::fs::write(isolated_mark(s), "") } else { std::fs::remove_file(isolated_mark(s)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }) }
+}
+pub fn opened_isolated(s: &Stub) -> bool { std::fs::symlink_metadata(isolated_mark(s)).is_ok() }
+
 pub fn running(s: &Stub) -> bool {
     Command::new("podman").args(["container", "inspect", "-f", "{{.State.Running}}", &name(s)]).stderr(Stdio::null()).output()
         .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
@@ -192,10 +200,16 @@ pub fn stop(s: &Stub) -> Result<(), String> {
 /// After a crash or a restart: a project left open without its container, or a container left without its open
 /// project, is closed. Where projects are not isolated (no podman), an open link is left as it is.
 pub fn reconcile(host: &Data) {
-    if !isolation() { return; }
+    let podman = podman_found();
     for s in crate::roots::stubs(host) {
-        let (open, runs) = (s.open(), running(&s));
-        if open && !runs { let _ = crate::roots::close_plain(&s); crate::log::decide("session", "project closed", "left open without its container", &[("project", s.id.clone())]); }
+        let (open, runs) = (s.open(), podman && running(&s));
+        // Opened in its container and the container is gone (or podman is): closed, not left for the host to run.
+        if open && !runs && opened_isolated(&s) {
+            let _ = crate::roots::close_plain(&s);
+            let _ = note_isolated(&s, false);
+            crate::log::decide("session", "project closed", "left open without its container", &[("project", s.id.clone())]);
+        }
+        if !open { let _ = note_isolated(&s, false); }
         if runs && !open { let _ = stop(&s); crate::log::decide("session", "project container stopped", "left running without its open project", &[("project", s.id.clone())]); }
     }
 }
@@ -248,17 +262,13 @@ pub fn agent_home(s: &Stub, isolated: bool, agent: &crate::agents::Agent) -> Res
     // Named by the host from the add-on, never taken from what the program in there prints.
     let Some(var) = agent.home_var() else { return Ok(None) };
     let id = agent.id.as_str();
-    let mut c = if isolated {
-        let mut c = Command::new("podman");
-        c.args(["exec", &name(s), "whaybench", "agent-home", id]);
-        c
-    } else {
+    if !isolated {
+        // No container: the agents run as the person anyway; the host's add-on makes the folder in the project's data.
         let own = crate::paths::own_exe().map_err(|e| e.to_string())?;
-        let mut c = Command::new(own.with_file_name("whaybench"));
-        c.args(["agent-home", id]).env(crate::paths::ENV_DATA_DIR, &s.open_at);
-        c
-    };
-    let out = c.stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+        agent.prepare(&s.open_at, &own.with_file_name("whaybench")).map_err(|e| e.to_string())?;
+        return Ok(Some((var.to_string(), s.open_at.join(id).to_string_lossy().to_string())));
+    }
+    let out = Command::new("podman").args(["exec", &name(s), "whaybench", "agent-home", id]).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
     if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
     // Where `prepare` makes it in the project's data (its data folder is the open place there).
     Ok(Some((var.to_string(), s.open_at.join(id).to_string_lossy().to_string())))

@@ -106,7 +106,12 @@ names another step.
   files, map locks (waited for five seconds at most), the session list's search, the view panel's files and history,
   and moving a conversation's pages. Files a project's agents can make elsewhere (its folder's `.claude/settings.json`,
   files a panel shows) are read only as regular files, without waiting on a pipe and up to a limit. A project's
-  memory database opens again on the host (the previous change refused the host's own link to it). `snapshot`, `snapshots` and `restore` take, list and go back to
+  memory database opens again on the host (the previous change refused the host's own link to it).
+  How a project was opened (in its container or not) is noted beside its open place and holds until it closes: its
+  conversations then run in the container or are refused, whatever podman answers later; a start finding the
+  container gone closes such a project. Tabs of a project come back after a restart as that project's (only while it
+  is open), and a project's conversation ends with its tab instead of going to a background the host cannot see.
+  Without podman, a project's Codex tab opens again (its settings folder is made by the host from the add-on). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

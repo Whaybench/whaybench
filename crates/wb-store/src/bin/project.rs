@@ -146,6 +146,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 if isolated { let _ = wb_core::container::stop(&st2); }
                 return Err(e.to_string());
             }
+            if isolated { wb_core::container::note_isolated(&st2, true).map_err(|e| e.to_string())?; }
             wb_core::container::tidy(&st2, isolated);
             Ok(())
             })?;
@@ -156,7 +157,8 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             // The open place goes only once the container is gone: a project is never taken for closed while it runs.
             wb_core::container::life(&st2, || {
                 if wb_core::container::podman_found() { wb_core::container::stop(&st2)?; }
-                wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())
+                wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())?;
+                wb_core::container::note_isolated(&st2, false).map_err(|e| e.to_string())
             })?;
             out(json!({"closed": st2.id}));
         }
