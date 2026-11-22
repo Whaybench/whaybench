@@ -188,7 +188,7 @@ fn lasting(v: &V, path: &str, own: bool) -> Option<String> {
 /// (a pinned view may show one), a recovery key page. The file is the one the address names, %-escapes decoded.
 fn protected(v: &V) -> bool {
     let url = v.hist.current().map(|c| c.0.clone()).unwrap_or_default();
-    let file = if url.starts_with("file:") { gio::File::for_uri(&url).path().unwrap_or_default() } else { std::path::PathBuf::from(&url) };
+    let file = view::local_path(&url);
     v.of_project || wb_core::beneath::split(&file).is_some() || wb_core::roots::project_root_of(&v.d, &file).is_some()
         || wb_core::vault::is_recovery_page(&file.to_string_lossy())
 }
@@ -438,8 +438,8 @@ fn tick(s: &Shared) {
     let project_of = |s: Option<&str>| s.is_some_and(|s| wb_core::roots::Roots::new(d.clone()).project_of(s).is_some());
     // A page in a project's open place, the project closed since (its file differences, a page held on its own).
     // And a file of a project's folder whose project is closed now.
-    let closed = |p: &str| wb_core::beneath::split(Path::new(p)).is_some_and(|(r, _)| std::fs::symlink_metadata(&r).is_err())
-        || wb_core::roots::project_root_of(&d, Path::new(p.strip_prefix("file://").unwrap_or(p))).is_some_and(|st| !st.open());
+    let closed = |p: &str| { let f = view::local_path(p); wb_core::beneath::split(&f).is_some_and(|(r, _)| std::fs::symlink_metadata(&r).is_err())
+        || wb_core::roots::project_root_of(&d, &f).is_some_and(|st| !st.open()) };
     if v.hist.items.iter().any(|(p, _)| closed(p)) || matches!(&v.link, Link::Target(p, _) if closed(p)) {
         if matches!(v.link, Link::Target(..)) { v.link = Link::Follow; view::set_view(&d, &name, &v.link); }
         // The followed session's own list again (what of it is gone falls out), not an empty one with no folder.

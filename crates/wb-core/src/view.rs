@@ -82,10 +82,27 @@ fn write_views(d: &Data, list: &[(String, Link)]) {
     let _ = crate::paths::write_atomic(&f, Value::Array(v).to_string());
 }
 
+/// The file a view's address names: a `file://` address with its %-escapes decoded (as the engine loads it), else the
+/// address as it is.
+pub fn local_path(p: &str) -> PathBuf {
+    let Some(rest) = p.strip_prefix("file://") else { return PathBuf::from(p) };
+    let rest = rest.split(['#', '?']).next().unwrap_or("");
+    let b = rest.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: u8| (c as char).to_digit(16);
+        if b[i] == b'%' && i + 2 < b.len() && let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) { out.push((h * 16 + l) as u8); i += 3; continue; }
+        out.push(b[i]);
+        i += 1;
+    }
+    PathBuf::from(<std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(out))
+}
+
 pub fn set_view(d: &Data, name: &str, link: &Link) {
     // A view held on a project's page or conversation is not written down on the host (its path, title, session).
     let of_project = match link {
-        Link::Target(p, _) => { let p = Path::new(p.strip_prefix("file://").unwrap_or(p)); crate::beneath::split(p).is_some() || crate::roots::project_root_of(d, p).is_some() }
+        Link::Target(p, _) => { let p = &local_path(p); crate::beneath::split(p).is_some() || crate::roots::project_root_of(d, p).is_some() }
         Link::Session(s) => crate::roots::Roots::new(d.clone()).project_of(s).is_some(),
         Link::Follow => false,
     };
@@ -445,6 +462,12 @@ pub fn vim(d: &Data, path: &str) -> std::io::Result<()> { terminal(d, &["vim".to
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_file_address_is_decoded_as_the_engine_loads_it() {
+        assert_eq!(local_path("file:///a%20b/c.html#x"), std::path::PathBuf::from("/a b/c.html"));
+        assert_eq!(local_path("/plain/p%20q"), std::path::PathBuf::from("/plain/p%20q"));
+        assert_eq!(local_path("file:///bad%2"), std::path::PathBuf::from("/bad%2"));
+    }
     use super::*;
     #[test]
     fn a_read_reply_is_a_plain_name_in_the_cache() {

@@ -257,7 +257,11 @@ names another step.
   its target only when it is a plain id.
   From the tenth review: a view tied to a project's conversation takes that conversation's list from the project again
   when the project is logged in to, so nothing it shows is kept in the host's data; a pinned page no longer reloads
-  over and over. `snapshot`, `snapshots` and `restore` take, list and go back to
+  over and over.
+  From the tenth review's second reviewer: no picture is taken of the view panel while it shows a protected page,
+  whichever way the picture is asked for; a pinned page's address is decoded the same way for keeping, closing and
+  reading; a refused request of a project logs a fixed reason; a project's file pattern lists one folder of the
+  project at most, and host patterns match as before. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

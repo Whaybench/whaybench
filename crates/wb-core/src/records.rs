@@ -57,8 +57,7 @@ pub fn related_index(rows: &[Value], at: i64) -> Option<usize> { rows.iter().pos
 /// only files whose real path is there; a few hundred at most, so no pattern makes a panel walk a disk.
 fn attached(d: &Data, pattern: &str) -> Vec<std::path::PathBuf> {
     const MOST: usize = 500;
-    // The walk itself is bounded too: hits the real-path check drops still count.
-    let hits = |p: &str| glob::glob(p).into_iter().flatten().flatten().take(MOST * 10).filter(|x| x.is_file());
+    let hits = |p: &str| glob::glob(p).into_iter().flatten().flatten().filter(|x| x.is_file());
     if !crate::roots::is_project_root(d) { return hits(pattern).take(MOST).collect(); }
     let id = d.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let host = Data::new(d.root.ancestors().nth(3).map(std::path::Path::to_path_buf).unwrap_or_default());
@@ -67,6 +66,10 @@ fn attached(d: &Data, pattern: &str) -> Vec<std::path::PathBuf> {
     // shortcut: no `**` for a project (glob follows folder links all the way, `/` included); a walk of its own that
     // stays beneath the folder if projects need deep patterns.
     if !p.starts_with(&folder) || p.components().any(|c| c == std::path::Component::ParentDir) || pattern.contains("**") { return Vec::new(); }
+    // Wildcards in the last part only, in a folder that really is the project's: one folder is listed, no more.
+    let wild = |s: &str| s.contains(['*', '?', '[']);
+    let Some(parent) = p.parent() else { return Vec::new() };
+    if wild(&parent.to_string_lossy()) || !fs::canonicalize(parent).is_ok_and(|r| r.starts_with(&folder)) { return Vec::new(); }
     hits(pattern).filter(|h| fs::canonicalize(h).is_ok_and(|r| r.starts_with(&folder))).take(MOST).collect()
 }
 

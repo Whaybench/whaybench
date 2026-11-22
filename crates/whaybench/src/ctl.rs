@@ -190,7 +190,8 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
         let from = from.as_str();
         match deliver(data, to, text, Some(from), true) {
             Ok(()) => record::decide("request", "asked by an agent", "a sandboxed agent's request, checked here", &[("session", to.to_string()), ("from", from.to_string())]),
-            Err(Refused::Rule(e) | Refused::Write(e)) => record::warn("request", "agent's request not delivered", &e, &[("session", to.to_string()), ("from", from.to_string())]),
+            // A project's request: a fixed reason (the error may quote its text).
+            Err(Refused::Rule(e) | Refused::Write(e)) => record::warn("request", "agent's request not delivered", if project.is_some() { "refused for a project's request" } else { &e }, &[("session", to.to_string()), ("from", from.to_string())]),
         }
     }
 }
