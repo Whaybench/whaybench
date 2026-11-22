@@ -108,7 +108,8 @@ pub fn set_view(d: &Data, name: &str, link: &Link) {
         Link::Session(s) => crate::roots::Roots::new(d.clone()).project_of(s).is_some(),
         Link::Follow => false,
     };
-    if of_project { return; }
+    // The view itself is still written down (its name is taken), as following the conversation in front.
+    let link = if of_project { &Link::Follow } else { link };
     let mut list = views(d);
     match list.iter_mut().find(|(n, _)| n == name) { Some(e) => e.1 = link.clone(), None => list.push((name.to_string(), link.clone())) }
     write_views(d, &list);
@@ -209,7 +210,10 @@ pub fn protected_mark(d: &Data, name: &str) -> PathBuf { d.cache().join(format!(
 
 /// Whether the panel tab of this key is a view showing such a page now (each view by its own mark).
 pub fn tab_protected(d: &Data, key: &str) -> bool {
-    views(d).iter().any(|(name, _)| key.starts_with(&format!("{}#", app_of(name))) && protected_mark(d, name).exists())
+    // By the tab's own app id, not by the list of views (a view may be missing from it).
+    let app = key.split('#').next().unwrap_or(key);
+    let name = if app == VIEW_APP { Some(FIRST_VIEW.to_string()) } else { app.strip_prefix(&format!("{VIEW_APP}.")).map(|n| n.replace('_', "-")) };
+    name.is_some_and(|n| protected_mark(d, &n).exists())
 }
 
 pub fn ask(d: &Data, to: &str, request: &Value) -> std::io::Result<()> {

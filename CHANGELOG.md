@@ -265,7 +265,10 @@ names another step.
   From the eleventh review: each view's own state decides whether a picture of it is refused, and a closed view's
   mark goes with it; `file://localhost/` addresses are read as the engine reads them, and a view's list on the host
   keeps no project file under any spelling; a project's page cannot be pinned; a view moved out to the desktop is
-  named "View" on its way back; a project's file patterns never reach where its data rests. `snapshot`, `snapshots` and `restore` take, list and go back to
+  named "View" on its way back; a project's file patterns never reach where its data rests.
+  From the twelfth review: a view is always written down, and a picture of it is refused by its own name; a project's
+  file under `/tmp` is shown where it is, not copied; text typed in Input for a project's conversation goes only
+  there and is cleared when the project locks; a project's request is logged as "project" only (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

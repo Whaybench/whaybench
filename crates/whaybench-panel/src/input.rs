@@ -39,14 +39,20 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     area.set_child(Some(&scroll));
     area.add_overlay(&hint);
     win.set_child(Some(&area));
+    // The project of the conversation a draft was begun for: it goes only there, and goes when that project locks.
+    let owner: Rc<RefCell<Option<String>>> = Rc::default();
     {
-        let hint = hint.clone();
-        view.buffer().connect_changed(move |b| hint.set_visible(b.char_count() == 0));
+        let (hint, owner, d) = (hint.clone(), owner.clone(), d.clone());
+        view.buffer().connect_changed(move |b| {
+            hint.set_visible(b.char_count() == 0);
+            if b.char_count() == 0 { *owner.borrow_mut() = None; }
+            else if owner.borrow().is_none() { *owner.borrow_mut() = Some(sessions::focus(&d).and_then(|s| wb_core::roots::Roots::new(d.clone()).project_of(&s)).unwrap_or_default()); }
+        });
     }
 
     let sent_at: Rc<Cell<i64>> = Rc::default();
     {
-        let (d, hint, sent_at) = (d.clone(), hint.clone(), sent_at.clone());
+        let (d, hint, sent_at, owner, view) = (d.clone(), hint.clone(), sent_at.clone(), owner.clone(), view.clone());
         // The keys that switch the input language, as fcitx5 has them now (they are set in Settings → Input…): asked
         // every ten seconds, not every second (each ask is a process).
         let (switch, asked): (Rc<RefCell<String>>, Rc<Cell<i64>>) = Default::default();
@@ -57,6 +63,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 let keys = wb_core::input::switch_keys();
                 *switch.borrow_mut() = if keys.is_empty() { String::new() } else { wb_core::i18n::f("input-switch", &[("keys", keys.join(" / "))]) };
             }
+            // A draft for a project that locked: nothing of it stays on screen (spec 3.22).
+            let gone = owner.borrow().as_deref().filter(|p| !p.is_empty()).is_some_and(|p| !wb_core::roots::stubs(&d).iter().any(|s| s.id == p && s.open()));
+            if gone { view.buffer().set_text(""); }
             if now - sent_at.get() < 1_500_000 { hint.set_text(wb_core::i18n::t("sent")); return; }
             let who = sessions::focus(&d).map(|s| wb_core::agents::session_label(&d.root, &s)).unwrap_or_else(|| wb_core::i18n::t("none").into());
             hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", who), ("switch", switch.borrow().clone())]));
@@ -66,7 +75,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     {
-        let (shift, view, d) = (shift.clone(), view.clone(), d.clone());
+        let (shift, view, d, owner) = (shift.clone(), view.clone(), d.clone(), owner.clone());
         keys.connect_key_pressed(move |_, key, _, mods| {
             if matches!(key, gdk::Key::Shift_L | gdk::Key::Shift_R) { shift.set(true); }
             if !matches!(key, gdk::Key::Return | gdk::Key::KP_Enter) { return glib::Propagation::Proceed; }
@@ -77,6 +86,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             let buffer = view.buffer();
             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().to_string();
             let session = sessions::focus(&d);
+            // Typed for a project's conversation, it goes to no other place's (host text may go anywhere: spec 3.22).
+            let here = session.as_deref().and_then(|s| wb_core::roots::Roots::new(d.clone()).project_of(s)).unwrap_or_default();
+            if owner.borrow().as_ref().is_some_and(|o| !o.is_empty() && *o != here) { status::say(&d, wb_core::i18n::t("briefsafe-draft-stays"), 8); return glib::Propagation::Stop; }
             match route(&text, session.as_deref()) {
                 Route::Nothing => {}
                 Route::Typed => {

@@ -384,7 +384,7 @@ impl App {
         let Some((key, name)) = self.surface.holding_tab(tab).and_then(|p| p.tabs.iter().find(|t| t.id == tab)).map(|t| (t.key.clone(), t.name.clone())) else { return };
         let app = key.split('#').next().unwrap_or(&key).to_string();
         // A view's title names its page (a project's, maybe): the way back is named by the kind of panel only.
-        let name = if app.starts_with(wb_core::view::VIEW_APP) { wb_core::i18n::f("view", &[("n", String::new())]).trim().to_string() } else { name };
+        let name = if app == wb_core::view::VIEW_APP || app.starts_with(&format!("{}.", wb_core::view::VIEW_APP)) { wb_core::i18n::f("view", &[("n", String::new())]).trim().to_string() } else { name };
         // Ended, not closed: closed, a view or a map branch would be gone for good, and the first view does not close.
         crate::start::end_panel(pid);
         // The compositor runs with the desktop's display (start.rs).

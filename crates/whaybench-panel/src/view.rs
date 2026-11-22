@@ -177,11 +177,15 @@ fn lasting(v: &V, path: &str, own: bool) -> Option<String> {
         return Some(real.to_string_lossy().to_string());
     }
     if view::is_web(path) || !p.is_file() || !(p.starts_with("/tmp") || p.starts_with(std::env::temp_dir())) { return Some(path.to_string()); }
+    // A project's file (its folder may be under /tmp) is shown where it is, never copied into a list.
+    if wb_core::beneath::split(p).is_some() || wb_core::roots::project_root_of(&v.d, p).is_some() { return Some(path.to_string()); }
     let low = path.to_lowercase();
     if low.ends_with(".html") || low.ends_with(".htm") { return Some(keep_picture(v, p).unwrap_or_else(|| path.to_string())); }
     let name = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0);
     let copy = v.hist.dir.join(format!("{name}-{}", p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
-    Some(if std::fs::create_dir_all(&v.hist.dir).is_ok() && std::fs::copy(p, &copy).is_ok() { copy.to_string_lossy().to_string() } else { path.to_string() })
+    // Written as the other copies are (the list's folder may be a project's): never through a link.
+    let kept = std::fs::read(p).ok().is_some_and(|b| wb_core::paths::create_dir_all(&v.hist.dir).is_ok() && wb_core::paths::write_atomic(&copy, b).is_ok());
+    Some(if kept { copy.to_string_lossy().to_string() } else { path.to_string() })
 }
 
 /// A page not given to a tool of the host (read, a picture of the view): a project's page, a file of a project's folder

@@ -337,6 +337,7 @@ briefsafe-unreadable = This project's record could not be read.
 briefsafe-not-isolated = Opened without a container (no podman or image for this system): its agents run as you, outside isolation.
 briefsafe-logout-queued = Logging out once the snapshot is done
 briefsafe-view-not-read = The view shows a Briefsafe project's page: it is not read out here.
+briefsafe-draft-stays = This text was typed for a Briefsafe project's conversation: not sent to another place's.
 panel-left-closed = Panel crashed repeatedly · logged
 not-run-no-conversation-tab-open = { $head } not run · No conversation tab · Open it from the session list
 session-ended-hidden-in-the-session = Session ended · Hidden in the session list

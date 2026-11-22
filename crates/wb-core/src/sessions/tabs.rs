@@ -14,7 +14,8 @@ pub fn request_kind(text: &str) -> String {
 /// stopped one would run hours later, after the work was done elsewhere. True when queued.
 pub fn queue_prompt(d: &Data, id: &str, text: &str) -> bool {
     let now = current_id(d, id);
-    let kind = request_kind(text);
+    // A project's request is its text: the host's log names only that it was one.
+    let kind = if crate::roots::Roots::new(d.clone()).project_of(&now).is_some() { "project".to_string() } else { request_kind(text) };
     if !alive(d, &now) {
         record::decide("request", "request not sent", "the session is not running (no heartbeat)", &[("session", id.to_string()), ("kind", kind)]);
         return false;
