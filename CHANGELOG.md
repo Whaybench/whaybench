@@ -81,7 +81,8 @@ names another step.
   the host's add-on files (mounted read-only) and the project's own home, so Codex signs in once per project. The
   folders mounted inside the project's home are made by the person before the container starts, so podman does not
   leave them owned by another user. The WSL setup installs podman and gnome-keyring, gives the account its user id
-  range and mounts the btrfs work disk with `user_subvol_rm_allowed`. `snapshot`, `snapshots` and `restore` take, list and go back to
+  range and mounts the btrfs work disk with `user_subvol_rm_allowed`.
+  The list of Briefsafe projects, read many times a second, is read again only when its folder changes. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

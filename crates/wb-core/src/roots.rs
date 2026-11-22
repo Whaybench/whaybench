@@ -85,6 +85,24 @@ pub fn remove_stub(host: &Data, id: &str) { let _ = fs::remove_file(stub_path(ho
 
 /// The host's stubs, by id. A folder `projects/<id>/` beside them is a project of the older kind.
 pub fn stubs(host: &Data) -> Vec<Stub> {
+    // Read many times a second (the window's request loop, the panels): the files are read again only when the
+    // folder's names or time changed (a stub is written by rename; two changes can fall in one tick of the clock).
+    use std::sync::Mutex;
+    type Kept = (PathBuf, std::time::SystemTime, Vec<std::ffi::OsString>, Vec<Stub>);
+    static KEPT: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
+    let dir = host.root.join("projects");
+    let Ok(changed) = fs::metadata(&dir).and_then(|m| m.modified()) else { return Vec::new() };
+    let mut names: Vec<std::ffi::OsString> = fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.file_name()).collect();
+    names.sort();
+    let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((.., all)) = kept.iter().find(|(d, t, n, _)| *d == dir && *t == changed && *n == names) { return all.clone(); }
+    let all = read_stubs(host);
+    kept.retain(|(d, ..)| *d != dir);
+    kept.push((dir, changed, names, all.clone()));
+    all
+}
+
+fn read_stubs(host: &Data) -> Vec<Stub> {
     let mut all: Vec<Stub> = fs::read_dir(host.root.join("projects")).into_iter().flatten().flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "json") && e.path().is_file())
         .filter_map(|e| serde_json::from_str::<Value>(&fs::read_to_string(e.path()).ok()?).ok())
@@ -163,6 +181,20 @@ mod tests {
         let d = std::env::temp_dir().join(format!("wb-roots-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn the_kept_list_of_projects_follows_new_and_removed_stubs() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Data::new(dir.path().join("host"));
+        fs::create_dir_all(host.root.join("projects")).unwrap();
+        assert!(stubs(&host).is_empty());
+        write_stub(&host, &Stub::new(&host, "a", "A", &dir.path().join("a"))).unwrap();
+        assert_eq!(stubs(&host).len(), 1);
+        write_stub(&host, &Stub::new(&host, "b", "B", &dir.path().join("b"))).unwrap();
+        assert_eq!(stubs(&host).iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        remove_stub(&host, "a");
+        assert_eq!(stubs(&host).iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["b"]);
     }
 
     #[test]

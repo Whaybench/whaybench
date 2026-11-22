@@ -214,7 +214,8 @@ mod tests {
         assert!(host.create_in_folder("in", "In", "", "", vec![], false, &format!("{folder}/in"), None).is_err(), "not inside another");
         // Snapshots of a test folder on btrfs are read-only: clean up the way the program prunes.
         let dir = Path::new(&folder);
-        while let Some(n) = crate::folder::snapshots(dir).first().cloned() {
+        // Once each: a snapshot that cannot be deleted must not keep the test going round.
+        for n in crate::folder::snapshots(dir) {
             let at = dir.with_file_name(".up.snapshots").join(&n);
             let _ = std::process::Command::new("btrfs").args(["property", "set", "-ts"]).arg(&at).args(["ro", "false"]).status();
             let _ = std::process::Command::new("btrfs").args(["subvolume", "delete"]).arg(&at).output();
