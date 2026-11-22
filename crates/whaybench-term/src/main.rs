@@ -107,8 +107,10 @@ impl Relay {
                 .ok_or_else(|| wb_core::i18n::t("briefsafe-project-closed").to_string())?),
             None => self.session.as_deref().and_then(|s| wb_core::roots::Roots::new(self.data.clone()).project_of(s))
                 .and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|st| st.id == id))
-                .or_else(|| wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd))),
+                // A folder of a closed project is no place for a host conversation, nor is it that project's.
+                .or_else(|| wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd)).filter(wb_core::roots::Stub::open)),
         };
+        let cwd = if project.is_none() && wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd)).is_some() { home.clone() } else { cwd };
         let cwd = match &project {
             Some(p) if wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd)).is_none_or(|at| at.id != p.id) => p.folder.to_string_lossy().to_string(),
             _ => cwd,
@@ -186,7 +188,10 @@ impl Relay {
             if let Some(home) = std::env::var_os("HOME") { let _ = wb_core::container::programs_bin(s, std::path::Path::new(&home)); }
             let podman = wb_core::versions::find_program("podman", &std::env::var("PATH").unwrap_or_default(), None).ok_or("podman is not installed")?;
             let names: Vec<String> = env.iter().map(|(k, _)| k.clone()).collect();
-            let inner = wb_core::container::exec_args(s, std::path::Path::new(&cwd), &names, &program.to_string_lossy(), &args);
+            // By its name: in there it is found among the program links, wherever the host has it.
+            let command = agent.as_ref().map_or("claude", |a| a.command.as_str());
+            let name = std::path::Path::new(command).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| command.to_string());
+            let inner = wb_core::container::exec_args(s, std::path::Path::new(&cwd), &names, &name, &args);
             c_program = CString::new(podman.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
             argv = std::iter::once(Ok(c_program.clone())).chain(inner.iter().map(|a| CString::new(a.as_bytes()).map_err(|e| e.to_string()))).collect::<Result<_, String>>()?;
             record::decide("session", "in the project's container", "the conversation's folder is an open Briefsafe project's", &[("project", s.id.clone())]);

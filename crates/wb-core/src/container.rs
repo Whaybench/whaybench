@@ -130,7 +130,10 @@ pub fn programs_bin(s: &Stub, home: &Path) -> Result<(), String> {
     let rest = s.stored().root;
     crate::beneath::mkdir(&rest, Path::new("cache/bin")).map_err(|e| e.to_string())?;
     for name in ["whaybench", "whaybench-view", "whaybench-project", "whaybench-files", "claude", "codex"] {
-        if let Ok(real) = std::fs::canonicalize(home.join(".local/bin").join(name)) {
+        // Where the host finds it: ~/.local/bin first, else on PATH (an npm prefix); a program that is a file in
+        // ~/.local/bin itself is not mounted (that folder is this one in there).
+        let found = std::fs::canonicalize(home.join(".local/bin").join(name)).ok().or_else(|| which(name).and_then(|p| std::fs::canonicalize(p).ok()));
+        if let Some(real) = found.filter(|r| r.parent() != Some(&home.join(".local/bin"))) {
             crate::beneath::link(&rest, &Path::new("cache/bin").join(name), &real).map_err(|e| e.to_string())?;
         }
     }
@@ -168,7 +171,7 @@ pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
         programs_bin(s, &home)?;
         // The plugins' marketplaces, as the person's own list names them (the project's copy is its agents' to change).
         let mut read = programs.to_vec();
-        read.extend(marketplaces(&home.join(".claude/plugins/known_marketplaces.json")));
+        read.extend(marketplaces(&home.join(".claude/plugins/known_marketplaces.json"), &home));
         // The first open fetches the image: its progress is shown, not hidden in a run that seems to hang.
         let have = Command::new("podman").args(["image", "exists", &image]).status().is_ok_and(|st| st.success());
         if !have {
@@ -187,9 +190,23 @@ pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
     })
 }
 
-fn marketplaces(list: &Path) -> Vec<PathBuf> {
+fn marketplaces(list: &Path, home: &Path) -> Vec<PathBuf> {
     let v: serde_json::Value = std::fs::read_to_string(list).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    v.as_object().into_iter().flatten().filter_map(|(_, m)| m["installLocation"].as_str().map(PathBuf::from)).collect()
+    // One Claude Code keeps is mounted whole; a folder of the person's own (a "directory" marketplace, often their
+    // source) only by its manifest: the plugins themselves are read from Claude Code's installed copies.
+    let own = home.join(".claude/plugins");
+    v.as_object().into_iter().flatten().filter_map(|(_, m)| m["installLocation"].as_str().map(PathBuf::from))
+        .flat_map(|loc| if loc.starts_with(&own) { vec![loc] } else { manifest_and_plugins(&loc) }).collect()
+}
+
+/// A directory marketplace's manifest and the plugin folders it names (read in place by Claude Code), nothing else of
+/// that folder; a plugin named outside it is left out.
+fn manifest_and_plugins(loc: &Path) -> Vec<PathBuf> {
+    let manifest = loc.join(".claude-plugin");
+    let v: serde_json::Value = std::fs::read_to_string(manifest.join("marketplace.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let real = |p: PathBuf| std::fs::canonicalize(p).ok().filter(|r| std::fs::canonicalize(loc).is_ok_and(|l| r.starts_with(&l) && *r != l));
+    let plugins = v["plugins"].as_array().into_iter().flatten().filter_map(|p| p["source"].as_str()).filter_map(|src| real(loc.join(src)));
+    std::iter::once(manifest).chain(plugins).collect()
 }
 
 /// Stops and removes the project's container. An error is told: the project is not taken for closed while it runs.
@@ -224,7 +241,10 @@ pub fn reconcile(host: &Data) {
 
 /// The folders of the programs the agents run, followed through links: Whaybench's own and each agent on PATH.
 pub fn programs(own: &Path) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::iter::once(own.to_path_buf()).chain(["claude", "codex"].iter().filter_map(|p| which(p))).filter_map(|p| real_dir(&p)).collect();
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    // Not ~/.local/bin itself: it is the program links' own folder in there.
+    let mut dirs: Vec<PathBuf> = std::iter::once(own.to_path_buf()).chain(["claude", "codex"].iter().filter_map(|p| which(p))).filter_map(|p| real_dir(&p))
+        .filter(|d| *d != home.join(".local/bin")).collect();
     dirs.sort();
     dirs.dedup();
     dirs
