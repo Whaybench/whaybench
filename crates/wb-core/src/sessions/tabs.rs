@@ -41,6 +41,16 @@ pub fn write_tab(d: &Data, tab: &str, session: Option<&str>, attached: bool) {
     let _ = write_atomic(&tab_file(d, tab), v.to_string());
 }
 
+/// The project a tab runs its agent for (its container's), noted by the host's terminal. A tab without one is the
+/// host's. What a project's records say about tabs counts only for that project's own tabs.
+fn tab_project_file(d: &Data, tab: &str) -> PathBuf { tabs_dir(d).join(format!("{tab}.project")) }
+
+pub fn set_tab_project(d: &Data, tab: &str, project: Option<&str>) {
+    match project { Some(p) => { let _ = write_atomic(&tab_project_file(d, tab), p); } None => { let _ = fs::remove_file(tab_project_file(d, tab)); } }
+}
+
+pub fn tab_project(d: &Data, tab: &str) -> Option<String> { fs::read_to_string(tab_project_file(d, tab)).ok().filter(|p| !p.is_empty()) }
+
 pub struct OpenTab { pub tab: String, pub session: Option<String>, pub attached: bool }
 
 /// Tabs whose relay still runs.

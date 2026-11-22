@@ -79,7 +79,15 @@ pub fn moved_from(d: &Data, id: &str) -> Vec<String> {
 /// The newest session recorded for this tab that has not moved on. A tab can hold several in turn.
 pub fn session_of_tab(d: &Data, tab: &str) -> Option<String> {
     let mut best: Option<(i64, String)> = None;
-    for f in crate::roots::all_of(d).iter().flat_map(|r| crate::paths::list_dir(&sessions_dir(r))) {
+    // A tab's sessions are in the root it runs for: the host's, or its project's (as the host's terminal noted it).
+    // A project's record naming a host tab does not make that tab its own.
+    let roots: Vec<Data> = if crate::roots::is_project_root(d) { vec![d.clone()] } else {
+        match tab_project(d, tab) {
+            Some(pid) => crate::roots::Roots::new(d.clone()).projects().into_iter().filter(|(id, _)| *id == pid).map(|p| p.1).collect(),
+            None => vec![d.clone()],
+        }
+    };
+    for f in roots.iter().flat_map(|r| crate::paths::list_dir(&sessions_dir(r))) {
         let Some(r) = read_json(&f) else { continue };
         if r.get("tab").and_then(Value::as_str) != Some(tab) || r.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty()) { continue; }
         let at = r.get("lastActive").and_then(Value::as_i64).unwrap_or(0);
@@ -513,7 +521,9 @@ mod tests {
         assert_eq!(all(&pr).len(), 1, "a project lists only its own");
         assert_eq!(record_of(&host, "p1").unwrap()["firstPrompt"], "secret-plan-4q");
         assert_eq!(state_of(&host, "p1").as_deref(), Some("working"));
-        assert_eq!(session_of_tab(&host, "t9").as_deref(), Some("p1"));
+        assert_eq!(session_of_tab(&host, "t9"), None, "a host tab is not taken by a project's record");
+        set_tab_project(&host, "t9", Some("up"));
+        assert_eq!(session_of_tab(&host, "t9").as_deref(), Some("p1"), "the project's own tab");
         mark_ended(&host, "p1");
         mark_off(&host, "p1");
         assert_eq!(state_of(&pr, "p1").as_deref(), Some("done"));

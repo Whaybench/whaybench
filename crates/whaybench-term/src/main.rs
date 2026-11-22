@@ -116,6 +116,8 @@ impl Relay {
             }
         };
         if let wb_core::container::Place::Refused(why) = &place { return Err(why.clone()); }
+        // Which root this tab's sessions are looked for in: a project's records count only for its own tabs.
+        sessions::set_tab_project(&self.data, &self.tab, project.as_ref().map(|p| p.id.as_str()));
         // The map is kept every turn: its tool (the plugin's MCP server) runs without asking. Attaching to a session
         // in the background takes no options; that session was started with them.
         if !addon && args.first().is_none_or(|a| a != "attach") {

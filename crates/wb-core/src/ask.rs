@@ -54,7 +54,9 @@ pub fn pending(data: &Path) -> Vec<Value> {
 
 /// Asks waiting in every root a caller sees (the host's and the open projects'), oldest first.
 pub fn pending_all(d: &crate::paths::Data) -> Vec<Value> {
-    let mut out: Vec<Value> = crate::roots::all_of(d).iter().flat_map(|r| pending(&r.root)).collect();
+    // An ask counts only in the root its session is in: a project cannot ask in the name of a host conversation.
+    let mine = |r: &crate::paths::Data, a: &Value| a["session"].as_str().and_then(|s| crate::roots::known_session(d, s)).is_some_and(|k| k.root == r.root);
+    let mut out: Vec<Value> = crate::roots::all_of(d).iter().flat_map(|r| pending(&r.root).into_iter().filter(|a| mine(r, a)).collect::<Vec<_>>()).collect();
     out.sort_by_key(|r| r["at"].as_i64().unwrap_or(0));
     out
 }

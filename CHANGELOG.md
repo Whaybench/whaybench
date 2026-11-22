@@ -43,7 +43,11 @@ names another step.
   folders, session records, answers, views, states and the answer panel's presence. A project's view requests open
   only paths inside the project (by real path); its database is not opened through a link and runs nothing a file
   could carry (defensive mode, untrusted schema); a session record counts only under its own file name; one
-  conversation's answers are read from its own root only. `snapshot`, `snapshots` and `restore` take, list and go back to
+  conversation's answers are read from its own root only.
+  A tab looks for its session only in the root it runs for (the terminal notes a project tab's project), so a
+  project's record cannot take a host tab. A project's agent may type into another conversation only if both the
+  asked one and where it lands after moves are the project's own, only plain text, and it is shown as from the
+  project; a project's permission question counts only for a session of that project. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

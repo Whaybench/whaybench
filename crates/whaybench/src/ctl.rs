@@ -174,11 +174,20 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
     for bytes in take_files(&ask_dir(root)) {
         let Some(v) = serde_json::from_slice::<serde_json::Value>(&bytes).ok() else { continue };
         let (to, text) = (v["to"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
-        let from = v["from"].as_str().unwrap_or("another conversation");
-        if let Some(pid) = project && wb_core::roots::Roots::new(data.clone()).project_of(to).as_deref() != Some(pid) {
-            record::warn("request", "agent's request not delivered", "a project's agent may type only in its own project's conversations", &[("session", to.to_string()), ("project", pid.to_string())]);
-            continue;
+        let mut from = v["from"].as_str().unwrap_or("another conversation").to_string();
+        if let Some(pid) = project {
+            // Where it would land in the end (after moves), and where it is asked from, must both be this project's own;
+            // the sender is the project, not what the request says; no control bytes reach a terminal.
+            let mine = |s: &str| wb_core::roots::known_session(data, s).is_some_and(|k| k.root == root.root);
+            let landing = sessions::current_id(data, to);
+            let clean = !text.chars().any(|c| c.is_control() && c != '\n' && c != '\t');
+            if !mine(to) || !mine(&landing) || !clean {
+                record::warn("request", "agent's request not delivered", "a project's agent may type only plain text in its own project's conversations", &[("session", to.to_string()), ("project", pid.to_string())]);
+                continue;
+            }
+            from = wb_core::roots::stubs(data).into_iter().find(|s| s.id == pid).map_or_else(|| pid.to_string(), |s| format!("project {}", s.name));
         }
+        let from = from.as_str();
         match deliver(data, to, text, Some(from), true) {
             Ok(()) => record::decide("request", "asked by an agent", "a sandboxed agent's request, checked here", &[("session", to.to_string()), ("from", from.to_string())]),
             Err(Refused::Rule(e) | Refused::Write(e)) => record::warn("request", "agent's request not delivered", &e, &[("session", to.to_string()), ("from", from.to_string())]),
@@ -508,6 +517,37 @@ mod tests {
         assert_eq!(typed.len(), 1, "the shell line and the spoofed /exit are refused: {typed:?}");
         assert!(typed[0].ends_with("what do you think?") && typed[0] != "what do you think?", "marked as from another conversation: {}", typed[0]);
     }
+    #[test]
+    fn a_projects_agent_types_only_plain_text_into_its_own_projects_conversations() {
+        use wb_core::roots::{Stub, open_plain, write_marker, write_stub};
+        let dir = tempfile::tempdir().unwrap();
+        let data = Data::new(dir.path().join("host"));
+        let stub = Stub::new(&data, "up", "Up", &dir.path().join("work/up"));
+        write_stub(&data, &stub).unwrap();
+        let st = stub.stored();
+        write_marker(&st, "up").unwrap();
+        open_plain(&stub).unwrap();
+        let rec = |d: &Data, id: &str, extra: serde_json::Value| { let mut v = serde_json::json!({"id": id}); v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone()); write_atomic(&sessions::sessions_dir(d).join(format!("{id}.json")), v.to_string().as_bytes()).unwrap(); };
+        rec(&data, "s-host", serde_json::json!({}));
+        rec(&stub.root(), "p1", serde_json::json!({}));
+        // A record the agent wrote to steer text to the host's conversation.
+        rec(&stub.root(), "p2", serde_json::json!({"movedTo": "s-host"}));
+        sessions::write_tab(&data, "t-host", Some("s-host"), false);
+        sessions::write_tab(&data, "t-p", Some("p1"), false);
+        sessions::set_tab_project(&data, "t-p", Some("up"));
+        let ask = |n: &str, to: &str, text: &str| write_atomic(&ask_dir(&stub.root()).join(n), serde_json::json!({"to": to, "text": text, "from": "t-host"}).to_string().as_bytes()).unwrap();
+        ask("1.json", "s-host", "to the host");
+        ask("2.json", "p2", "through a forged move");
+        ask("3.json", "p1", "\u{1b}[2J clear");
+        ask("4.json", "p1", "hi");
+        deliver_asked(&data);
+        assert!(fs::read_dir(sessions::tab_inbox(&data, "t-host")).map(|d| d.count()).unwrap_or(0) == 0, "nothing reaches the host's tab");
+        let typed: Vec<String> = fs::read_dir(sessions::tab_inbox(&data, "t-p")).unwrap().flatten()
+            .map(|f| serde_json::from_slice::<serde_json::Value>(&fs::read(f.path()).unwrap()).unwrap()["text"].as_str().unwrap().to_string()).collect();
+        assert_eq!(typed.len(), 1, "{typed:?}");
+        assert!(typed[0].contains("project Up") && typed[0].ends_with("hi"), "the sender is the project: {}", typed[0]);
+    }
+
     #[test]
     fn text_for_a_conversation_that_moved_goes_to_the_tab_it_is_in_now() {
         let dir = tempfile::tempdir().unwrap();
