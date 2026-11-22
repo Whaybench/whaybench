@@ -68,10 +68,10 @@ impl Waiting {
         // A second of overlap, so a file written during the last look is read again; a wait already seen is no news.
         let from = self.looked - Duration::from_secs(1);
         self.looked = SystemTime::now();
-        for e in wb_core::roots::all_of(d).iter().flat_map(|r| std::fs::read_dir(wb_core::sessions::state_dir(r)).into_iter().flatten().flatten()) {
-            if e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t < from) { continue; }
-            let Some(v) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { continue };
-            let session = e.path().file_stem().unwrap_or_default().to_string_lossy().to_string();
+        for e in wb_core::roots::all_of(d).iter().flat_map(|r| wb_core::paths::list_dir(&wb_core::sessions::state_dir(r))) {
+            if std::fs::symlink_metadata(&e).and_then(|m| m.modified()).is_ok_and(|t| t < from) { continue; }
+            let Some(v) = wb_core::paths::read_text(&e).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { continue };
+            let session = e.file_stem().unwrap_or_default().to_string_lossy().to_string();
             if !self.newly(&session, v["state"].as_str().unwrap_or(""), v["at"].as_u64().unwrap_or(0)) || focused { continue; }
             record::detail("session", "waiting told on the desktop", &[("session", session.clone())]);
             let (d, note) = (d.clone(), v["note"].as_str().unwrap_or("").to_string());

@@ -29,15 +29,15 @@ pub fn subagents_dir(root: &Path, id: &str) -> PathBuf { root.join("cache").join
 /// The session's subagents still running, the earliest started first. One silent for half an hour is taken for
 /// stopped: an interrupted turn may never send its stop.
 pub fn subagents_running(d: &Data, id: &str) -> Vec<Value> {
-    let mut v: Vec<Value> = fs::read_dir(subagents_dir(&at(d, id).root, id)).into_iter().flatten().flatten()
-        .filter_map(|e| read_json(&e.path())).filter(|a| a.get("done").is_none() && crate::map::now_ms().saturating_sub(a["at"].as_u64().unwrap_or(0)) < 1_800_000).collect();
+    let mut v: Vec<Value> = crate::paths::list_dir(&subagents_dir(&at(d, id).root, id)).into_iter()
+        .filter_map(|p| read_json(&p)).filter(|a| a.get("done").is_none() && crate::map::now_ms().saturating_sub(a["at"].as_u64().unwrap_or(0)) < 1_800_000).collect();
     v.sort_by_key(|a| a["started"].as_u64().unwrap_or(0));
     v
 }
 pub fn focus_file(d: &Data) -> PathBuf { d.root.join("focus.json") }
 pub fn tabs_dir(d: &Data) -> PathBuf { d.cache().join("term") }
 
-fn read_json(p: &Path) -> Option<Value> { serde_json::from_str(&fs::read_to_string(p).ok()?).ok() }
+fn read_json(p: &Path) -> Option<Value> { serde_json::from_str(&crate::paths::read_text(p).ok()?).ok() }
 
 /// The data root holding a session's files (spec 3.22): the host's, or the project's it belongs to. Everything below
 /// that reads or writes one session's files goes through this, so a host program holding the host's root reaches a
@@ -79,8 +79,8 @@ pub fn moved_from(d: &Data, id: &str) -> Vec<String> {
 /// The newest session recorded for this tab that has not moved on. A tab can hold several in turn.
 pub fn session_of_tab(d: &Data, tab: &str) -> Option<String> {
     let mut best: Option<(i64, String)> = None;
-    for f in crate::roots::all_of(d).iter().flat_map(|r| fs::read_dir(sessions_dir(r)).into_iter().flatten().flatten()) {
-        let Some(r) = read_json(&f.path()) else { continue };
+    for f in crate::roots::all_of(d).iter().flat_map(|r| crate::paths::list_dir(&sessions_dir(r))) {
+        let Some(r) = read_json(&f) else { continue };
         if r.get("tab").and_then(Value::as_str) != Some(tab) || r.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty()) { continue; }
         let at = r.get("lastActive").and_then(Value::as_i64).unwrap_or(0);
         let Some(id) = r.get("id").and_then(Value::as_str) else { continue };
@@ -413,7 +413,10 @@ pub fn all(d: &Data) -> Vec<Value> { listed(crate::roots::all_of(d)) }
 pub(crate) fn all_here(d: &Data) -> Vec<Value> { listed(vec![d.clone()]) }
 
 fn listed(roots: Vec<Data>) -> Vec<Value> {
-    let mut out: Vec<Value> = roots.iter().flat_map(|r| fs::read_dir(sessions_dir(r)).into_iter().flatten().flatten()).filter_map(|f| read_json(&f.path())).filter(|r| r.get("id").and_then(Value::as_str).is_some()).collect();
+    // A record is taken only under its own name: one whose id differs from its file is not a session.
+    let mut out: Vec<Value> = roots.iter().flat_map(|r| crate::paths::list_dir(&sessions_dir(r)))
+        .filter_map(|f| { let r = read_json(&f)?; let id = r.get("id").and_then(Value::as_str)?; (f.file_stem().is_some_and(|s| s == id) && crate::map::safe_id(id).is_ok()).then_some(r) })
+        .collect();
     out.sort_by_key(|r| std::cmp::Reverse(r.get("lastActive").and_then(Value::as_i64).unwrap_or(0)));
     out
 }
@@ -500,6 +503,11 @@ mod tests {
         write_atomic(&state_dir(&pr).join("p1.json"), r#"{"state":"working"}"#).unwrap();
         write_atomic(&sessions_dir(&host).join("h1.json"), r#"{"id":"h1","tab":"t1","lastActive":9}"#).unwrap();
 
+        // What the project's agents can leave there does not block, lead out, or pass for a session.
+        let fifo = std::ffi::CString::new(sessions_dir(&st).join("pipe.json").to_string_lossy().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        std::os::unix::fs::symlink(sessions_dir(&host).join("h1.json"), sessions_dir(&st).join("h2.json")).unwrap();
+        fs::write(sessions_dir(&st).join("x.json"), r#"{"id":"h1"}"#).unwrap();
         let ids: Vec<String> = all(&host).iter().map(|r| r["id"].as_str().unwrap().to_string()).collect();
         assert_eq!(ids, vec!["h1", "p1"], "the host lists both, newest first");
         assert_eq!(all(&pr).len(), 1, "a project lists only its own");

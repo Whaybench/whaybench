@@ -38,9 +38,9 @@ fn new_id(sid: &str) -> String {
 /// timeout, so a reused process number shows nothing), or one answered by a prompt. Only well-formed ids.
 pub fn pending(data: &Path) -> Vec<Value> {
     let foreign = crate::roots::is_project_root(&crate::paths::Data::new(data.to_path_buf()));
-    let mut out: Vec<Value> = fs::read_dir(dir(data)).into_iter().flatten().flatten()
-        .filter(|f| f.file_name().to_str().is_some_and(|n| n.ends_with(".json") && !n.ends_with(".answer.json")))
-        .filter_map(|f| read_json(&f.path(), Value::Null).ok())
+    let mut out: Vec<Value> = crate::paths::list_dir(&dir(data)).into_iter()
+        .filter(|f| f.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".json") && !n.ends_with(".answer.json")))
+        .filter_map(|f| read_json(&f, Value::Null).ok())
         .filter(|r| r["id"].as_str().is_some_and(|i| valid_id(i).is_ok()) && r["session"].as_str().is_some_and(|s| safe_id(s).is_ok()))
         // A project's hook may run in its own process namespace: its number says nothing here, the time limit holds.
         .filter(|r| r["via"] == "prompt" || ((foreign || r["pid"].as_u64().is_some_and(|p| Path::new(&format!("/proc/{p}")).exists()))

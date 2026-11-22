@@ -37,7 +37,13 @@ names another step.
   project open when the container cannot be removed. Starts are serialised per project, the first open shows the
   image download, container names include the data folder, folders are compared as real paths, a moved or replaced
   project folder is not opened, and a project left open or running by a crash is put back in step at start. Writes
-  about a closed project's session go nowhere instead of to the host's data folder. `snapshot`, `snapshots` and `restore` take, list and go back to
+  about a closed project's session go nowhere instead of to the host's data folder.
+  Host programs touch an open project's data only beneath it (openat2, no links followed), read only regular files up
+  to a limit without blocking on pipes, and write by renaming a new file of an unguessable name into place: request
+  folders, session records, answers, views, states and the answer panel's presence. A project's view requests open
+  only paths inside the project (by real path); its database is not opened through a link and runs nothing a file
+  could carry (defensive mode, untrusted schema); a session record counts only under its own file name; one
+  conversation's answers are read from its own root only. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

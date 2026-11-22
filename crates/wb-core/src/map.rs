@@ -32,7 +32,8 @@ pub(crate) fn now_ms() -> u64 {
 }
 
 pub(crate) fn read_json(path: &Path, default: Value) -> Result<Value> {
-    match fs::read(path) {
+    let read = match crate::beneath::split(path) { Some((root, rel)) => crate::beneath::read(&root, &rel, crate::beneath::READ_LIMIT), None => fs::read(path) };
+    match read {
         Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(default),
         Err(e) => Err(e.into()),

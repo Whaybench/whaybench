@@ -79,8 +79,17 @@ pub fn open(data: &Path) -> Result<Connection> {
 
 fn open_once(data: &Path) -> Result<Connection> {
     let dir = data.join("memory");
+    // A project's database is its agents' to change: never one reached through a link they left (spec 3.22).
+    if crate::beneath::split(&dir).is_some() {
+        for p in [dir.clone(), dir.join("memory.db"), dir.join("memory.db-wal"), dir.join("memory.db-shm")] {
+            if std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) { return Err(format!("{} is a link", p.display()).into()); }
+        }
+    }
     std::fs::create_dir_all(&dir)?;
     let mut conn = Connection::open(dir.join("memory.db"))?;
+    // Nothing a file could carry (views, triggers calling functions) runs here, whoever wrote the file.
+    conn.set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
+    conn.set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     let version = |c: &Connection| c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0));

@@ -72,10 +72,10 @@ fn claude_runs(d: &Data, id: &str) -> bool {
 /// still runs, or a subagent still running. Only files changed in that time are read.
 fn busy(d: &Data, now: SystemTime, runs: &dyn Fn(&str) -> bool) -> bool {
     let now_ms = now.duration_since(UNIX_EPOCH).map(|t| t.as_millis() as u64).unwrap_or(0);
-    let fresh = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).is_ok_and(|t| now.duration_since(t).unwrap_or_default() < STALE);
-    let turn = wb_core::roots::all_of(d).iter().flat_map(|r| std::fs::read_dir(sessions::state_dir(r)).into_iter().flatten().flatten()).any(|e| {
-        let id = e.path().file_stem().unwrap_or_default().to_string_lossy().to_string();
-        fresh(&e.path()) && std::fs::read(e.path()).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    let fresh = |p: &Path| std::fs::symlink_metadata(p).and_then(|m| m.modified()).is_ok_and(|t| now.duration_since(t).unwrap_or_default() < STALE);
+    let turn = wb_core::roots::all_of(d).iter().flat_map(|r| wb_core::paths::list_dir(&sessions::state_dir(r))).any(|e| {
+        let id = e.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        fresh(&e) && wb_core::paths::read_text(&e).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
             .is_some_and(|v| matches!(v["state"].as_str(), Some("working" | "waiting"))
                 && now_ms.saturating_sub(v["at"].as_u64().unwrap_or(0)) < STALE.as_millis() as u64)
             && runs(&id)

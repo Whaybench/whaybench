@@ -120,26 +120,36 @@ fn write_taken(v: &V) {
 /// Keeps a copy of a picture in the history, so the next one does not overwrite it; relative links still lead to where
 /// it was written.
 fn keep_picture(v: &V, path: &Path) -> Option<String> {
-    let page = std::fs::read_to_string(path).ok()?;
+    // In a project's open place read without following a link its agents left (`beneath`).
+    let page = wb_core::paths::read_text(path).ok()?;
     let base = format!("<base href=\"{}/\">", file_uri(&path.parent()?.to_string_lossy()));
     let page = if page.contains("<head>") { page.replacen("<head>", &format!("<head>{base}"), 1) } else { format!("{base}{page}") };
-    std::fs::create_dir_all(&v.hist.dir).ok()?;
     let name = std::time::SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_nanos();
     let copy = v.hist.dir.join(format!("{name}.html"));
-    std::fs::write(&copy, page).ok()?;
+    wb_core::paths::write_atomic(&copy, page).ok()?;
     Some(copy.to_string_lossy().to_string())
 }
 
 /// A file in a temporary folder will be gone one day, and with it what this session showed: the history keeps a copy.
 /// Elsewhere the file itself is shown, as it is now.
-fn lasting(v: &V, path: &str) -> String {
+fn lasting(v: &V, path: &str) -> Option<String> {
     let p = Path::new(path);
-    if view::is_web(path) || !p.is_file() || !(p.starts_with("/tmp") || p.starts_with(std::env::temp_dir())) { return path.to_string(); }
+    // A project session's request opens only what is in the project (its folder or its data), by real path: never a
+    // host file named through `..` or a link (spec 3.22).
+    if let Some(s) = v.followed.as_deref().and_then(|s| { let r = wb_core::roots::Roots::new(v.d.clone()); let id = r.project_of(s)?; wb_core::roots::stubs(&v.d).into_iter().find(|st| st.id == id) }) {
+        if view::is_web(path) { return Some(path.to_string()); }
+        let real = std::fs::canonicalize(p).ok()?;
+        let inside = [s.folder.clone(), s.stored().root].iter().filter_map(|r| std::fs::canonicalize(r).ok()).any(|r| real.starts_with(r));
+        if !inside { wb_core::log::warn("view", "request refused", "a project's view asked for a path outside the project", &[("project", s.id.clone())]); return None; }
+        if real.starts_with(std::fs::canonicalize(s.stored().root).ok()?) { return keep_picture(v, &s.open_at.join(real.strip_prefix(std::fs::canonicalize(s.stored().root).ok()?).ok()?)).or(Some(path.to_string())); }
+        return Some(real.to_string_lossy().to_string());
+    }
+    if view::is_web(path) || !p.is_file() || !(p.starts_with("/tmp") || p.starts_with(std::env::temp_dir())) { return Some(path.to_string()); }
     let low = path.to_lowercase();
-    if low.ends_with(".html") || low.ends_with(".htm") { return keep_picture(v, p).unwrap_or_else(|| path.to_string()); }
+    if low.ends_with(".html") || low.ends_with(".htm") { return Some(keep_picture(v, p).unwrap_or_else(|| path.to_string())); }
     let name = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0);
     let copy = v.hist.dir.join(format!("{name}-{}", p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
-    if std::fs::create_dir_all(&v.hist.dir).is_ok() && std::fs::copy(p, &copy).is_ok() { copy.to_string_lossy().to_string() } else { path.to_string() }
+    Some(if std::fs::create_dir_all(&v.hist.dir).is_ok() && std::fs::copy(p, &copy).is_ok() { copy.to_string_lossy().to_string() } else { path.to_string() })
 }
 
 fn display(v: &V) {
@@ -203,7 +213,7 @@ fn incoming(v: &mut V) -> bool {
     }
     for r in view::take_requests(&v.d, &view::for_session(&session)) {
         if let Some(p) = r.get("path").and_then(Value::as_str) {
-            let kept = lasting(v, p);
+            let Some(kept) = lasting(v, p) else { continue };
             v.hist.push(&kept, &title_for(p));
             v.page = page_of(&r);
             came = true;
@@ -334,7 +344,7 @@ fn tick(s: &Shared) {
                     v.hist = History::only(p, &title_for(p));
                     retitle(&v);
                 } else {
-                    let kept = lasting(&v, p);
+                    let Some(kept) = lasting(&v, p) else { continue };
                     v.hist.push(&kept, &title_for(p));
                 }
                 v.page = page_of(&r);

@@ -29,12 +29,12 @@ struct Panel {
 /// Answers in the logs after `since`, oldest first, as (session, row). A log not written to since `scanned` is not read.
 fn logged_after(d: &Data, since: i64, scanned: i64) -> Vec<(String, Value)> {
     let mut out = Vec::new();
-    for f in wb_core::roots::all_of(d).iter().flat_map(|r| std::fs::read_dir(r.root.join("answer-log")).into_iter().flatten().flatten()) {
-        let Some(sid) = f.file_name().to_str().and_then(|n| n.strip_suffix(".jsonl")).map(String::from) else { continue };
-        let modified = f.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(i64::MAX, |t| t.as_millis() as i64);
+    for f in wb_core::roots::all_of(d).iter().flat_map(|r| wb_core::paths::list_dir(&r.root.join("answer-log"))) {
+        let Some(sid) = f.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".jsonl")).map(String::from) else { continue };
+        let modified = std::fs::symlink_metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(i64::MAX, |t| t.as_millis() as i64);
         // A second of slack: the file's time and the clock read at the last look can differ a little.
         if modified < scanned - 1000 { continue; }
-        let Ok(text) = std::fs::read_to_string(f.path()) else { continue };
+        let Ok(text) = wb_core::paths::read_text(&f) else { continue };
         out.extend(text.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l).ok()).take_while(|r| r["at"].as_i64().unwrap_or(0) > since).map(|r| (sid.clone(), r)));
     }
     out.sort_by_key(|(_, r)| r["at"].as_i64().unwrap_or(0));
@@ -239,7 +239,8 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
 
 /// The nearest answer in the conversation: a session moved on has none of its own at first.
 fn newest_answer(d: &Data, session: &str) -> Option<Value> {
-    records::lineage(d, session).into_iter().find_map(|id| std::fs::read_to_string(wb_core::roots::for_session(d, &id).root.join("answers").join(format!("{id}.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()))
+    let root = wb_core::roots::for_session(d, session);
+    records::lineage(d, session).into_iter().find_map(|id| wb_core::paths::read_text(&root.root.join("answers").join(format!("{id}.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()))
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {

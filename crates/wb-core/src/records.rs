@@ -11,7 +11,7 @@ pub fn lineage(d: &Data, id: &str) -> Vec<String> {
     // A conversation's earlier numbers are in its own root.
     let d = &crate::roots::for_session(d, id);
     let records = sessions::all(d);
-    let inherited: Value = fs::read_to_string(d.root.join("forks/inherited.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let inherited: Value = crate::paths::read_text(&d.root.join("forks/inherited.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     let (mut ids, mut frontier) = (vec![id.to_string()], vec![id.to_string()]);
     while let Some(here) = frontier.pop() {
         let mut before: Vec<String> = records.iter().filter(|s| s.get("movedTo").and_then(Value::as_str) == Some(&here)).filter_map(|s| s["id"].as_str().map(String::from)).collect();
@@ -27,8 +27,12 @@ pub fn lineage(d: &Data, id: &str) -> Vec<String> {
 /// line cut short does not hide the others.
 pub fn answers_of(d: &Data, ids: &[String]) -> Vec<Value> {
     let mut rows: BTreeMap<(i64, String), Value> = BTreeMap::new();
+    // One conversation's numbers are all in its root: the first number's. An earlier number named from another root is
+    // not read from there.
+    let root = ids.first().map_or_else(|| d.clone(), |first| crate::roots::for_session(d, first));
     for sid in ids {
-        let Ok(text) = fs::read_to_string(crate::roots::for_session(d, sid).root.join("answer-log").join(format!("{sid}.jsonl"))) else { continue };
+        if crate::map::safe_id(sid).is_err() { continue; }
+        let Ok(text) = crate::paths::read_text(&root.root.join("answer-log").join(format!("{sid}.jsonl"))) else { continue };
         for line in text.lines() {
             let Ok(row) = serde_json::from_str::<Value>(line) else { continue };
             let Some(at) = row.get("at").and_then(Value::as_i64) else { continue };
@@ -54,8 +58,8 @@ pub fn touches(d: &Data, id: &str) -> Vec<Value> {
     let d = &crate::roots::for_session(d, id);
     let mut out = Vec::new();
     for sid in lineage(d, id) {
-        if let Some(list) = fs::read_to_string(d.root.join("files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()) { out.extend(list); }
-        if let Some(table) = fs::read_to_string(d.root.join("node-files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        if let Some(list) = crate::paths::read_text(&d.root.join("files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()) { out.extend(list); }
+        if let Some(table) = crate::paths::read_text(&d.root.join("node-files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
             for (node, patterns) in table.as_object().into_iter().flatten() {
                 for p in patterns.as_array().into_iter().flatten().filter_map(Value::as_str) {
                     for hit in glob::glob(p).into_iter().flatten().flatten().filter(|x| x.is_file()) {
@@ -72,7 +76,7 @@ pub fn touches(d: &Data, id: &str) -> Vec<Value> {
 /// The AI's recorded edits of a file in the conversation, oldest first.
 pub fn file_edits(d: &Data, id: &str, path: &str) -> Vec<Value> {
     let d = &crate::roots::for_session(d, id);
-    let mut found: Vec<Value> = lineage(d, id).iter().filter_map(|sid| fs::read_to_string(d.root.join("files").join(format!("{sid}.edits.json"))).ok()).filter_map(|t| serde_json::from_str::<Value>(&t).ok()).filter_map(|v| v.as_array().cloned()).flatten().filter(|e| e.get("path").and_then(Value::as_str) == Some(path)).collect();
+    let mut found: Vec<Value> = lineage(d, id).iter().filter_map(|sid| crate::paths::read_text(&d.root.join("files").join(format!("{sid}.edits.json"))).ok()).filter_map(|t| serde_json::from_str::<Value>(&t).ok()).filter_map(|v| v.as_array().cloned()).flatten().filter(|e| e.get("path").and_then(Value::as_str) == Some(path)).collect();
     found.sort_by_key(|e| e["at"].as_i64().unwrap_or(0));
     found
 }
@@ -80,7 +84,7 @@ pub fn file_edits(d: &Data, id: &str, path: &str) -> Vec<Value> {
 /// Bash run times of the conversation: (start, end) ms.
 pub fn bash_runs(d: &Data, id: &str) -> Vec<(i64, i64)> {
     let d = &crate::roots::for_session(d, id);
-    lineage(d, id).iter().filter_map(|sid| fs::read_to_string(d.root.join("files").join(format!("{sid}.bash.json"))).ok()).filter_map(|t| serde_json::from_str::<Value>(&t).ok()).filter_map(|v| v.as_array().cloned()).flatten().filter_map(|r| { let a = r.as_array()?; Some((a.first()?.as_i64()?, a.get(1)?.as_i64()?)) }).collect()
+    lineage(d, id).iter().filter_map(|sid| crate::paths::read_text(&d.root.join("files").join(format!("{sid}.bash.json"))).ok()).filter_map(|t| serde_json::from_str::<Value>(&t).ok()).filter_map(|v| v.as_array().cloned()).flatten().filter_map(|r| { let a = r.as_array()?; Some((a.first()?.as_i64()?, a.get(1)?.as_i64()?)) }).collect()
 }
 
 /// Map node id to how many different files were read or changed while on it, or attached to it.
@@ -88,14 +92,14 @@ pub fn file_counts(d: &Data, id: &str) -> HashMap<String, usize> {
     let d = &crate::roots::for_session(d, id);
     let mut found: HashMap<String, HashSet<String>> = HashMap::new();
     for sid in lineage(d, id) {
-        if let Some(list) = fs::read_to_string(d.root.join("files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()) {
+        if let Some(list) = crate::paths::read_text(&d.root.join("files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()) {
             for t in list {
                 if let (Some(n), Some(p)) = (t.get("node").and_then(Value::as_str), t.get("path").and_then(Value::as_str)) {
                     found.entry(n.to_string()).or_default().insert(p.to_string());
                 }
             }
         }
-        if let Some(table) = fs::read_to_string(d.root.join("node-files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        if let Some(table) = crate::paths::read_text(&d.root.join("node-files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
             for (node, patterns) in table.as_object().into_iter().flatten() {
                 for p in patterns.as_array().into_iter().flatten().filter_map(Value::as_str) {
                     for hit in glob::glob(p).into_iter().flatten().flatten().filter(|x| x.is_file()) {

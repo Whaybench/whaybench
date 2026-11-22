@@ -115,15 +115,32 @@ pub fn work_dir(data: &Data, home: &Path) -> PathBuf {
 /// Writes a whole file or none of it: readers poll these files, and several programs write the same ones.
 /// The temporary name has the process number, so two writers do not share it.
 pub fn write_atomic(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
-    // A closed project's open place (`cache/open/<id>`) is not made again by a late write: it stays gone.
-    if let Some(place) = path.ancestors().find(|a| a.parent().is_some_and(|p| p.ends_with("cache/open")))
-        && std::fs::symlink_metadata(place).is_err() {
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{} is closed", place.display())));
+    // In a project's open place: beneath it only, never through a link the project's agents left; and a closed
+    // project's place is not made again by a late write.
+    if let Some((root, rel)) = crate::beneath::split(path) {
+        if std::fs::symlink_metadata(&root).is_err() { return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{} is closed", root.display()))); }
+        return crate::beneath::write(&root, &rel, content.as_ref());
     }
     if let Some(dir) = path.parent() { std::fs::create_dir_all(dir)?; }
     let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
     std::fs::write(&tmp, content)?;
     std::fs::rename(tmp, path)
+}
+
+/// A text file, read the safe way when it is in a project's open place (`beneath`).
+pub fn read_text(path: &Path) -> std::io::Result<String> {
+    match crate::beneath::split(path) {
+        Some((root, rel)) => String::from_utf8(crate::beneath::read(&root, &rel, crate::beneath::READ_LIMIT)?).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+        None => std::fs::read_to_string(path),
+    }
+}
+
+/// The paths in a folder, listed the safe way when it is in a project's open place (`beneath`); none if unreadable.
+pub fn list_dir(dir: &Path) -> Vec<PathBuf> {
+    match crate::beneath::split(dir) {
+        Some((root, rel)) => crate::beneath::list(&root, &rel).unwrap_or_default().into_iter().map(|n| dir.join(n)).collect(),
+        None => std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect(),
+    }
 }
 
 /// The last `max` bytes of a file, from its first whole line: a long log's end without reading all of it.

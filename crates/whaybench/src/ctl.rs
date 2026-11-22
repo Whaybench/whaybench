@@ -150,15 +150,29 @@ fn deliver_asked(data: &Data) {
     for (pid, root) in wb_core::roots::Roots::new(data.clone()).projects() { deliver_asked_in(data, &root, Some(&pid)); }
 }
 
+/// The request files waiting in a folder, oldest first, each taken (removed) as it is read. Only plain files, small,
+/// a few each tick: the folder is an agent's to write, and a pipe named like a request would block this loop (the
+/// whole window). In a project's open place nothing is reached through a link (`beneath`).
+fn take_files(dir: &std::path::Path) -> Vec<Vec<u8>> {
+    const MAX: u64 = 64 * 1024;
+    let mut names: Vec<std::path::PathBuf> = wb_core::paths::list_dir(dir).into_iter().filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
+    names.sort();
+    names.into_iter().take(20).filter_map(|p| {
+        match wb_core::beneath::split(&p) {
+            Some((root, rel)) => { let b = wb_core::beneath::read(&root, &rel, MAX).ok(); let _ = wb_core::beneath::remove(&root, &rel); b }
+            None => {
+                let plain = fs::symlink_metadata(&p).is_ok_and(|m| m.is_file() && m.len() <= MAX);
+                let b = plain.then(|| fs::read(&p).ok()).flatten();
+                let _ = fs::remove_file(&p);
+                b
+            }
+        }
+    }).collect()
+}
+
 fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
-    // Only plain files, small, a few each tick: the folder is the agent's to write, and a pipe named like a request
-    // would block this loop (the whole window) on reading it.
-    for f in fs::read_dir(ask_dir(root)).into_iter().flatten().flatten().take(20) {
-        if f.path().extension().is_none_or(|e| e != "json") { continue; }
-        let plain = f.file_type().is_ok_and(|t| t.is_file()) && f.metadata().is_ok_and(|m| m.len() <= 64 * 1024);
-        let v = plain.then(|| fs::read(f.path()).ok()).flatten().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
-        let _ = fs::remove_file(f.path());
-        let Some(v) = v else { continue };
+    for bytes in take_files(&ask_dir(root)) {
+        let Some(v) = serde_json::from_slice::<serde_json::Value>(&bytes).ok() else { continue };
         let (to, text) = (v["to"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
         let from = v["from"].as_str().unwrap_or("another conversation");
         if let Some(pid) = project && wb_core::roots::Roots::new(data.clone()).project_of(to).as_deref() != Some(pid) {
@@ -438,12 +452,8 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
         if ticks.is_multiple_of(10) { state.tell_waiting(); }
         // A project's programs leave requests in its own root; only those that touch nothing outside are taken.
         for (pid, root) in wb_core::roots::Roots::new(asked_data.clone()).projects() {
-            let mut files: Vec<_> = fs::read_dir(root.ctl()).into_iter().flatten().flatten().filter(|f| f.path().extension().is_some_and(|e| e == "json") && f.file_type().is_ok_and(|t| t.is_file())).take(20).collect();
-            files.sort_by_key(|f| f.file_name());
-            for f in files {
-                let parsed = fs::read(f.path()).ok().and_then(|b| serde_json::from_slice::<Request>(&b).ok());
-                let _ = fs::remove_file(f.path());
-                match parsed {
+            for bytes in take_files(&root.ctl()) {
+                match serde_json::from_slice::<Request>(&bytes).ok() {
                     Some(Request::FocusApp { app }) => state.focus_app(&app),
                     Some(Request::FrontApp { app }) => state.front_app(&app),
                     Some(_) => record::warn("run", "request refused", "from a project's root only bringing a panel forward is taken", &[("project", pid.clone())]),

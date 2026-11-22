@@ -186,12 +186,11 @@ pub fn ask(d: &Data, to: &str, request: &Value) -> std::io::Result<()> {
 pub fn take_requests(d: &Data, to: &str) -> Vec<Value> {
     // A project session's AI leaves its requests in its project's root.
     let d = &to.strip_prefix("s-").map_or_else(|| d.clone(), |s| crate::roots::for_session(d, s));
-    let Ok(rd) = std::fs::read_dir(requests_dir(d, to)) else { return Vec::new() };
-    let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+    let mut files: Vec<PathBuf> = crate::paths::list_dir(&requests_dir(d, to)).into_iter().filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
     files.sort();
     files.into_iter().filter_map(|f| {
-        let text = std::fs::read_to_string(&f).ok();
-        std::fs::remove_file(&f).ok()?;
+        let text = crate::paths::read_text(&f).ok();
+        match crate::beneath::split(&f) { Some((root, rel)) => crate::beneath::remove(&root, &rel).ok()?, None => std::fs::remove_file(&f).ok()? }
         serde_json::from_str(&text?).ok()
     }).collect()
 }
