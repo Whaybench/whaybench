@@ -179,7 +179,10 @@ names another step.
   old vault's key. The run folder is the person's `/run/user/<uid>/whaybench`, the same for every program whatever its
   environment (no fallback to /tmp), and container names carry a 64-bit hash of the data folder. A restore puts the
   vault's current key file into the restored folder before the swap, or changes nothing. A project is created in turn
-  with an open of the same id. `snapshot`, `snapshots` and `restore` take, list and go back to
+  with an open of the same id.
+  The recovery key is never in `new --encrypt`'s output (an AI running the command would keep it in its transcript): it
+  is shown once on a page in the view panel, from a private file in the person's runtime folder that goes once the
+  panel has it; without a panel on the terminal; without either the file stays there and its path is said (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

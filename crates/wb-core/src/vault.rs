@@ -64,6 +64,31 @@ pub fn create(s: &Stub) -> Result<String, String> {
     Ok(recovery)
 }
 
+/// Shows the recovery key to the person once, never to whoever ran the command (an AI's transcript keeps what it
+/// reads): on a page in the view panel, from a file in the person's runtime folder (memory, private) that goes once
+/// the panel has it; without a panel on the terminal itself; without either the file stays there, said by path.
+/// Answers what the command may print.
+pub fn show_recovery(s: &Stub, host: &crate::paths::Data, recovery: &str) -> String {
+    use std::os::unix::fs::OpenOptionsExt;
+    let t = |k: &str| crate::i18n::f(k, &[("name", s.name.clone())]);
+    let page = format!("# {}\n\n{}\n\n```\n{recovery}\n```\n\n{}\n", t("briefsafe-recovery-title"), t("briefsafe-recovery-intro"), t("briefsafe-recovery-keep"));
+    let Some(base) = run_dir(s).parent().map(Path::to_path_buf) else { return t("briefsafe-recovery-not-shown") };
+    let file = base.join(format!("recovery-{}-{}.md", s.id, s.made));
+    let written = private_dir(&base).ok().and_then(|_| std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&file).ok())
+        .is_some_and(|mut f| f.write_all(page.as_bytes()).is_ok());
+    if written && crate::view::show_and_wait(host, &file.to_string_lossy(), std::time::Duration::from_secs(10)) {
+        // The panel reads it as it shows it.
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        let _ = std::fs::remove_file(&file);
+        return t("briefsafe-recovery-in-view");
+    }
+    if let Ok(mut tty) = std::fs::OpenOptions::new().write(true).open("/dev/tty") && tty.write_all(page.as_bytes()).is_ok() {
+        let _ = std::fs::remove_file(&file);
+        return t("briefsafe-recovery-on-terminal");
+    }
+    if written { crate::i18n::f("briefsafe-recovery-in-file", &[("path", file.display().to_string())]) } else { t("briefsafe-recovery-not-shown") }
+}
+
 /// Whether the vault is open now (mounted where it opens).
 pub fn mounted(s: &Stub) -> bool {
     let at = mountpoint(s).to_string_lossy().to_string();

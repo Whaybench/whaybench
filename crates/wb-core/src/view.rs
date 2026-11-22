@@ -194,6 +194,22 @@ pub fn ask(d: &Data, to: &str, request: &Value) -> std::io::Result<()> {
     std::fs::rename(tmp, dir.join(format!("{name}-{}.json", std::process::id())))
 }
 
+/// Shows a file in the first view and waits up to `wait` for a view panel to take it. Whether one did.
+pub fn show_and_wait(d: &Data, target: &str, wait: std::time::Duration) -> bool {
+    let to = for_view(FIRST_VIEW);
+    if ask(d, &to, &json!({"do": "show", "path": target})).is_err() { return false; }
+    let mine = format!("-{}.json", std::process::id());
+    let until = std::time::Instant::now() + wait;
+    while std::time::Instant::now() < until {
+        let waiting = std::fs::read_dir(requests_dir(d, &to)).into_iter().flatten().flatten().any(|e| e.file_name().to_string_lossy().ends_with(&mine));
+        if !waiting { return true; }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    // Nobody took it: it does not wait to be shown some other time.
+    for e in std::fs::read_dir(requests_dir(d, &to)).into_iter().flatten().flatten() { if e.file_name().to_string_lossy().ends_with(&mine) { let _ = std::fs::remove_file(e.path()); } }
+    false
+}
+
 /// The waiting requests, oldest first. Whoever removes a file has it, so two views never take the same one.
 pub fn take_requests(d: &Data, to: &str) -> Vec<Value> {
     // A project session's AI leaves its requests in its project's root.

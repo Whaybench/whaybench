@@ -137,10 +137,9 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             // In turn with an open of the same id too: it must not find the project half made.
             let would_be = wb_core::roots::Stub::new(&st.data, pid, name, Path::new(&folder));
             let (p, first, recovery) = wb_core::container::life(&would_be, || wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new), encrypt)))?;
-            // The recovery key, once: it opens the vault when the keyring has lost its key. Kept by the person, nowhere here.
-            let note = recovery.as_ref().map(|_| "Keep this recovery key somewhere safe, apart from this computer: it is shown only now.");
-            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning),
-                "recovery_key": recovery, "note": note}));
+            // The recovery key, once, to the person only (spec 3.22): never in this output, which an AI may be reading.
+            let note = recovery.as_ref().and_then(|k| wb_core::roots::stubs(&st.data).into_iter().find(|s| s.id == pid).map(|s| wb_core::vault::show_recovery(&s, &st.data, k)));
+            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning), "recovery_key": note}));
         }
         "open" => {
             let recovery = flag(&mut rest, "--recovery");
