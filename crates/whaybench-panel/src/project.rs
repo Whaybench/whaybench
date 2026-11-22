@@ -17,8 +17,18 @@ const RECENT: &str = "recent";
 fn e(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('\'', "&#39;") }
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 fn list<'a>(v: &'a Value, k: &str) -> &'a [Value] { v.get(k).and_then(Value::as_array).map_or(&[], Vec::as_slice) }
+thread_local! {
+    /// The project the page being drawn is of: every link on it names it, and a press on a page left from another
+    /// project does nothing.
+    static PAGE_OF: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
 /// A link handled by the panel. Its parts travel escaped, so a section name cannot break it.
-fn link(kind: &str, rest: &str, label: &str) -> String { format!("<a href='wb:{kind}:{}'>{label}</a>", glib::Uri::escape_string(rest, None, false)) }
+fn link(kind: &str, rest: &str, label: &str) -> String {
+    let page = PAGE_OF.with(|p| p.borrow().clone());
+    format!("<a href='wb:{kind}:{}'>{label}</a>", glib::Uri::escape_string(&format!("{page}\u{1}{rest}"), None, false))
+}
+/// The project shown now, as links name it.
+fn shown_key(p: &P) -> String { p.bs.clone().or(p.pid.clone()).unwrap_or_default() }
 
 fn when(ms: i64) -> String {
     if ms == 0 { return String::new(); }
@@ -270,6 +280,10 @@ struct P {
     bs: Option<String>,
     /// A `whaybench-project` step running (log in, log out, snapshot), for one project.
     job: Option<Job>,
+    /// A log out asked for while another step ran (a snapshot): done once it ends.
+    close_after: Option<String>,
+    /// A dialog open over a project's page (a request): closed when that project locks.
+    dialog: Option<gtk::glib::WeakRef<gtk::Window>>,
     /// What the last step of a project said when it did not work: its project, the kind of step and the reason.
     bs_msg: HashMap<String, (String, String)>,
 }
@@ -364,6 +378,7 @@ fn poll_job(p: &mut P) -> bool {
     let said = std::fs::read_to_string(&job.err).unwrap_or_default().trim().trim_start_matches("error: ").to_string();
     let out: Value = std::fs::read_to_string(&job.out).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     let _ = (std::fs::remove_file(&job.out), std::fs::remove_file(&job.err));
+    let queued = p.close_after.take();
     if late { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), wb_core::i18n::t("briefsafe-too-long").to_string())); }
     else if !ok { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), said)); }
     else if job.kind == "snapshot" {
@@ -371,6 +386,7 @@ fn poll_job(p: &mut P) -> bool {
         status::say(&p.d, &if warn.is_empty() { wb_core::i18n::t("briefsafe-snapshot-taken").to_string() } else { wb_core::i18n::f("briefsafe-snapshot-warning", &[("why", warn.to_string())]) }, 8);
     }
     p.stamp.clear();
+    if let Some(id) = queued { start_job(p, &id, "close", wb_core::i18n::t("briefsafe-closing"), &["close", &id], None); }
     true
 }
 
@@ -382,6 +398,7 @@ fn opening(p: &P, id: &str) -> bool { p.job.as_ref().is_some_and(|j| j.id == id 
 
 /// The page of a Briefsafe project that is not open: locked, a step running, or why the last one did not work.
 fn closed_page(p: &P, st: &wb_core::roots::Stub) -> String {
+    PAGE_OF.with(|k| *k.borrow_mut() = st.id.clone());
     let t = |k: &str| wb_core::i18n::t(k).to_string();
     let name = e(&st.name);
     let body = if let Some(j) = p.job.as_ref().filter(|j| j.id == st.id) {
@@ -413,6 +430,7 @@ fn project_sessions(d: &Data, id: &str) -> Vec<Value> {
 }
 
 fn open_bar(p: &P, st: &wb_core::roots::Stub) -> String {
+    PAGE_OF.with(|k| *k.borrow_mut() = st.id.clone());
     let t = |k: &str| e(wb_core::i18n::t(k));
     let mine: Vec<Value> = project_sessions(&p.d, &st.id).into_iter().filter(|r| s(r, "movedTo").is_empty() && r["ended"] != true).collect();
     let rows: Vec<String> = mine.iter().take(12).map(|r| format!("<li>{}</li>", link("bs", &format!("{}:resume:{}", st.id, s(r, "id")), &e(&sessions::session_name(&p.d, s(r, "id")))))).collect();
@@ -442,7 +460,7 @@ fn request(p: &P, ask: &str) {
 }
 
 /// A short question in a window of its own, over the panel. `done` gets the text if there is any.
-fn ask_text(win: &gtk::ApplicationWindow, title: &str, label: &str, done: impl Fn(String) + 'static) {
+fn ask_text(win: &gtk::ApplicationWindow, title: &str, label: &str, done: impl Fn(String) + 'static) -> gtk::Window {
     let dlg = gtk::Window::builder().title(title).transient_for(win).modal(true).decorated(false).build();
     let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
     body.set_margin_top(10); body.set_margin_bottom(10); body.set_margin_start(10); body.set_margin_end(10);
@@ -477,6 +495,7 @@ fn ask_text(win: &gtk::ApplicationWindow, title: &str, label: &str, done: impl F
     }
     dlg.present();
     view.grab_focus();
+    dlg
 }
 
 /// The folder name of a new project: from its name, or from the time when the name has no latin letters; never one in use.
@@ -496,6 +515,7 @@ fn archived(d: &Value) -> bool { d["archived"] == true }
 
 fn page_for(p: &mut P) -> String {
     PROJECT_PAGE.with(|c| c.set(p.bs.is_some()));
+    PAGE_OF.with(|k| *k.borrow_mut() = shown_key(p));
     let Some(pid) = p.pid.clone() else { return String::new() };
     if let Some((target, event)) = &p.over { return change_page(&p.st, &pid, target, event); }
     if p.tab == RECENT { return recent_page(&p.st, &pid, p.range); }
@@ -633,7 +653,9 @@ fn redraw(s_: &Shared) {
         let Some(pid) = p.pid.clone() else { return };
         let Some(project) = p.st.get_project(&pid) else {
             // Its record is missing or unreadable (a Briefsafe project's is its agents' to change): said, nothing else shown.
-            let page = format!("<!doctype html><meta charset='utf-8'><style>{}</style><body><p class='warn'>{}</p></body>", style(&p.d), e(wb_core::i18n::t("briefsafe-unreadable")));
+            // Log out and the rest stay for an open Briefsafe project, whatever its record says.
+            let bar = p.bs.clone().and_then(|id| stub_of(&p.d, &id)).filter(|st| st.open()).map(|st| open_bar(&p, &st)).unwrap_or_default();
+            let page = format!("<!doctype html><meta charset='utf-8'><style>{}</style><body>{bar}<p class='warn'>{}</p></body>", style(&p.d), e(wb_core::i18n::t("briefsafe-unreadable")));
             if p.shown != page { p.web.load_html(&page, Some("about:blank")); p.shown = page; }
             drop(p);
             set_tabs(s_, Vec::new());
@@ -786,6 +808,8 @@ fn tick(s_: &Shared) {
     };
     if let Some(page) = locked {
         set_tabs(s_, Vec::new());
+        // A request dialog left over its page goes too: it names the project's sections.
+        if let Some(w) = s_.borrow_mut().dialog.take().and_then(|w| w.upgrade()) { w.close(); }
         let mut p = s_.borrow_mut();
         if p.shown != page { p.web.load_html(&page, Some("about:blank")); p.shown = page; }
         return;
@@ -841,6 +865,10 @@ fn clicked(s_: &Shared, uri: &str) {
     let Some(rest) = uri.strip_prefix("wb:") else { return };
     let (kind, value) = rest.split_once(':').unwrap_or((rest, ""));
     let value = glib::Uri::unescape_string(value, None::<&str>).map(|v| v.to_string()).unwrap_or_else(|| value.to_string());
+    // Pressed on a page drawn for another project than the one shown now: nothing.
+    let Some((page, value)) = value.split_once('\u{1}') else { return };
+    let value = value.to_string();
+    if page != shown_key(&s_.borrow()) { return; }
     let (pid, win) = { let p = s_.borrow(); (p.pid.clone().unwrap_or_default(), p.win.clone()) };
     let over = |s_: &Shared, o: Option<(String, String)>| { s_.borrow_mut().over = o; redraw(s_); };
     if kind == "bs" { return briefsafe_clicked(s_, &value); }
@@ -882,11 +910,12 @@ fn clicked(s_: &Shared, uri: &str) {
             // The project the dialog was opened for: sent only if it is still the one shown.
             let bs_then = s_.borrow().bs.clone();
             let (s2, pid2, w2) = (s_.clone(), pid.clone(), where_.clone());
-            ask_text(&win, wb_core::i18n::t("request-change-2"), &wb_core::i18n::f("request", &[("where_", (where_).to_string())]), move |t| {
+            let dlg = ask_text(&win, wb_core::i18n::t("request-change-2"), &wb_core::i18n::f("request", &[("where_", (where_).to_string())]), move |t| {
                 let source = if original.is_empty() { String::new() } else { wb_core::i18n::ai_f("original-of-the-template", &[("original", (original).to_string())]) };
                 if s2.borrow().bs != bs_then { return; }
                 request(&s2.borrow(), &wb_core::i18n::ai_f("change-as-the-user-requests-check", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("pid2", (pid2).to_string()), ("did", (did).to_string()), ("source", (source).to_string())]));
             });
+            s_.borrow_mut().dialog = Some(gtk::prelude::ObjectExt::downgrade(&dlg));
         }
         "dback" | "dredo" => {
             let mut bits = value.splitn(3, ':');
@@ -900,7 +929,8 @@ fn clicked(s_: &Shared, uri: &str) {
                 let (s2, id2) = (s_.clone(), id.to_string());
                 let w2 = where_.clone();
                 let bs_then = s_.borrow().bs.clone();
-                ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { let _ = &id2; if s2.borrow().bs != bs_then { return; } request(&s2.borrow(), &wb_core::i18n::ai_f("rework-section-user-request-the-earlier", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
+                let dlg = ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { let _ = &id2; if s2.borrow().bs != bs_then { return; } request(&s2.borrow(), &wb_core::i18n::ai_f("rework-section-user-request-the-earlier", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
+                s_.borrow_mut().dialog = Some(gtk::prelude::ObjectExt::downgrade(&dlg));
             }
         }
         "iback" | "iredo" => {
@@ -916,7 +946,8 @@ fn clicked(s_: &Shared, uri: &str) {
             } else {
                 let (s2, w2) = (s_.clone(), where_.clone());
                 let bs_then = s_.borrow().bs.clone();
-                ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { if s2.borrow().bs != bs_then { return; } request(&s2.borrow(), &wb_core::i18n::f("rework-user-request-the-earlier-state", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
+                let dlg = ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { if s2.borrow().bs != bs_then { return; } request(&s2.borrow(), &wb_core::i18n::f("rework-user-request-the-earlier-state", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
+                s_.borrow_mut().dialog = Some(gtk::prelude::ObjectExt::downgrade(&dlg));
             }
         }
         _ => {}
@@ -949,7 +980,12 @@ fn briefsafe_clicked(s_: &Shared, what: &str) {
             let tabs = sessions::open_tabs(&d).iter().filter(|tab| sessions::tab_project(&d, &tab.tab).as_deref() == Some(id.as_str())).count();
             let s2 = s_.clone();
             let id2 = id.clone();
-            let go = move || start_job(&mut s2.borrow_mut(), &id2, "close", wb_core::i18n::t("briefsafe-closing"), &["close", &id2], None);
+            let go = move || {
+                let mut p = s2.borrow_mut();
+                // Another step running (a snapshot): done once it ends, said now.
+                if p.job.is_some() { p.close_after = Some(id2.clone()); status::say(&p.d, wb_core::i18n::t("briefsafe-logout-queued"), 6); return; }
+                start_job(&mut p, &id2, "close", wb_core::i18n::t("briefsafe-closing"), &["close", &id2], None);
+            };
             if tabs == 0 { go(); } else { crate::common::confirm(&win, &wb_core::i18n::f("briefsafe-logout-confirm", &[("n", tabs.to_string())]), &[], &t("briefsafe-logout"), go); }
         }
         "new" => crate::common::ctl(&d, vec!["--data-dir".into(), d.root.to_string_lossy().to_string(), "session".into(), "new".into(), "--project".into(), id]),
@@ -998,7 +1034,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let s_: Shared = Rc::new(RefCell::new(P {
         d: d.clone(), st, pid: None, rows: vec![(String::new(), String::new(), usize::MAX)], tab: MAP.to_string(), over: None,
         range: Some(7), stamp: String::new(), shown: String::new(), scroll: HashMap::new(), key_now: String::new(), failed: String::new(), web: web.clone(), pick: pick.clone(), path, tabs, tab_buttons: Vec::new(), anchors: HashMap::new(), tab_keys: Vec::new(), converting: Rc::default(), win: win.clone(),
-        host, bs: None, job: None, bs_msg: HashMap::new(),
+        host, bs: None, job: None, bs_msg: HashMap::new(), dialog: None, close_after: None,
     }));
     // Links are handled here; only the page's own anchors and the drawn page itself pass.
     {

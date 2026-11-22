@@ -265,6 +265,11 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
         Some("wait") => {
             let id = words.get(1).ok_or("session wait needs an id")?;
             let limit = words.get(2).map(|s| s.parse::<u64>().map_err(|_| "session wait: SECONDS is a number")).transpose()?.unwrap_or(900);
+            // A project's answer goes only to a tab of that project (spec 3.22: project -> host is blocked).
+            if let Some(p) = wb_core::roots::Roots::new(data.clone()).project_of(id) {
+                let caller = std::env::var("WHAYBENCH_TAB").ok().and_then(|t| sessions::tab_project(data, &t));
+                if caller.as_deref() != Some(p.as_str()) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
+            }
             // From the last time something was typed into it, if that was in the last hour: the answer may have come
             // already between `type` and this wait.
             let now = now_ms();

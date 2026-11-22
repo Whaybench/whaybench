@@ -224,7 +224,14 @@ names another step.
   were drawn for, keeps each project's message, closes a vault left open by a log in stopped half way, offers the
   recovery key after any failed vault log in, says when a project runs without a container, and draws a document's
   headings in one pass. A closing mark still in use is left alone at start; program links in a project's data are
-  replaced atomically too. `snapshot`, `snapshots` and `restore` take, list and go back to
+  replaced atomically too.
+  From the fourth review: the Map panel's Reflect in project is off for a project's map or conversation (no project
+  text in the host's projects); following a conversation's moves or a transcript's continuation stays within its root,
+  and nothing is written for one that would cross; the terminal does not read a project folder's `.claude` settings
+  on the host; `session wait` gives a project's answer only to that project's tabs. Every link of the Projects panel
+  names the project its page was drawn for and does nothing on a page left from another; request dialogs close when
+  their project locks, and a project's map panel drops its title then; an open project whose record cannot be read
+  still has Log out; Log out pressed during a snapshot runs once it ends (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

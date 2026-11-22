@@ -322,7 +322,10 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
         for p in store.list_projects() {
             let (pid, name) = (s(&p, "id").to_string(), s(&p, "name").to_string());
             let (st, d2, s2, l2, f2, label2) = (store.clone(), d.clone(), session.clone().unwrap_or_default(), lines.clone(), flow.clone(), label.clone());
-            sub.add(&name, session.is_some(), move || {
+            // Neither a project's map nor a project's conversation writes into the host's projects (spec 3.22).
+            let roots = wb_core::roots::Roots::new(d.clone());
+            let host_only = roots.project_of(s(data, "sessionId")).is_none() && session.as_deref().is_some_and(|x| roots.project_of(x).is_none());
+            sub.add(&name, host_only, move || {
                 let Ok(q) = st.queue_add(&pid, "reflect", &label2, &s2) else { return };
                 if sessions::queue_prompt(&d2, &s2, &reflect_request(Some(&pid), Some(&q), &f2, &l2)) {
                     status::say(&d2, &wb_core::i18n::f("project-reflection-request-sent-session", &[("a1", (cut(&label2, 20)).to_string()), ("a2", (cut(&s2, 8)).to_string())]), 8);
@@ -866,7 +869,11 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
                 // Where it was read from goes along, so an export of it goes back there.
                 Ok(mut m) => { m["_file"] = path.into(); (path.to_string(), Some(m)) }
                 // A project's map whose project closed: nothing of it stays on screen.
-                Err(_) if wb_core::beneath::split(std::path::Path::new(path)).is_some() => (path.to_string(), Some(serde_json::json!({"nodes": []}))),
+                Err(_) if wb_core::beneath::split(std::path::Path::new(path)).is_some() => {
+                    // Its title is the project's too.
+                    win2.set_title(Some(wb_core::i18n::t("briefsafe-locked")));
+                    (path.to_string(), Some(serde_json::json!({"nodes": []})))
+                }
                 Err(_) => return,
             },
             // A tab without a session in front: an empty map, not the one seen before.

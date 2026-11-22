@@ -136,12 +136,14 @@ impl Relay {
             // Answers in the interface language, as Claude Code's own `language` setting does: once in the system
             // prompt, not a note every turn. A language the person set themselves is left alone.
             let mut settings = serde_json::Map::new();
-            if let Some(l) = wb_core::i18n::agent_language(&self.data).filter(|_| !sessions::claude_setting_set("language", std::path::Path::new(&cwd))) {
+            // A project's folder is its agents' to write: its settings are not read here (its own Claude folder has the person's).
+            let set_here = |key: &str| project.is_some() || sessions::claude_setting_set(key, std::path::Path::new(&cwd));
+            if let Some(l) = wb_core::i18n::agent_language(&self.data).filter(|_| !set_here("language")) {
                 settings.insert("language".into(), l.into());
             }
             // Context and plan usage for the notifications panel come from the status line. A status line the person
             // set is theirs to keep (it can pass the same input on to `whaybench statusline`); without one, ours.
-            if !sessions::claude_setting_set("statusLine", std::path::Path::new(&cwd))
+            if !set_here("statusLine")
                 && let Some(exe) = paths::own_exe().ok().and_then(|e| wb_core::agents::shell_quote(&e.with_file_name("whaybench")).ok()) {
                 settings.insert("statusLine".into(), serde_json::json!({"type": "command", "command": format!("{exe} statusline")}));
             }

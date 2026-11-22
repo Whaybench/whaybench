@@ -51,6 +51,14 @@ pub fn record_of(d: &Data, id: &str) -> Option<Value> { if !plain_id(id) { retur
 
 /// Where a session lives now: /background carries it on under a new id and the old record says where it
 /// moved, possibly more than once.
+/// Whether a conversation may be taken to have gone on under `next`: a plain number of the same root. A host
+/// conversation may move to a number with no record yet; a project's only to one of its own.
+fn same_root_step(d: &Data, from: &str, next: &str) -> bool {
+    if !plain_id(next) { return false; }
+    let (here, there) = (crate::roots::known_session(d, from).map(|r| r.root), crate::roots::known_session(d, next).map(|r| r.root));
+    there == here || (there.is_none() && here.as_ref().is_none_or(|h| !crate::roots::is_project_root(&Data::new(h.clone()))))
+}
+
 pub fn current_id(d: &Data, id: &str) -> String {
     let mut now = id.to_string();
     let mut seen = vec![];
@@ -58,11 +66,7 @@ pub fn current_id(d: &Data, id: &str) -> String {
         seen.push(now.clone());
         match record_of(d, &now).and_then(|r| r.get("movedTo").and_then(Value::as_str).map(String::from)) {
             // A move stays in the conversation's own root: a project's record does not lead to a host conversation.
-            // (A host conversation may move to a number with no record yet; a project's only to one of its own.)
-            Some(next) if plain_id(&next) && {
-                let (here, there) = (crate::roots::known_session(d, &now).map(|r| r.root), crate::roots::known_session(d, &next).map(|r| r.root));
-                there == here || (there.is_none() && here.as_ref().is_none_or(|h| !crate::roots::is_project_root(&Data::new(h.clone()))))
-            } => now = next,
+            Some(next) if same_root_step(d, &now, &next) => now = next,
             _ => break,
         }
     }
@@ -255,12 +259,13 @@ pub fn locate(d: &Data, id: &str) -> String {
     let now = current_id(d, id);
     if agent(&now).is_some() { return now; }
     let mut way = vec![id.to_string()];
-    while let Some(next) = record_of(d, way.last().unwrap()).and_then(|r| r.get("movedTo")?.as_str().map(String::from)).filter(|n| !n.is_empty() && !way.contains(n)) {
+    while let Some(next) = record_of(d, way.last().unwrap()).and_then(|r| r.get("movedTo")?.as_str().map(String::from)).filter(|n| !n.is_empty() && !way.contains(n) && same_root_step(d, way.last().unwrap(), n)) {
         way.push(next);
     }
     for from in way.iter().rev() {
         // A carried-on conversation's own transcript names itself too: that is not a move.
-        if let Some(next) = continued_in(d, from).filter(|n| n != from && agent(n).is_some() && !taken(d, n, from)) { adopt(d, from, &next); return next; }
+        // Only within its root: a project's transcript naming a host conversation is not followed, nor written down.
+        if let Some(next) = continued_in(d, from).filter(|n| n != from && same_root_step(d, from, n) && agent(n).is_some() && !taken(d, n, from)) { adopt(d, from, &next); return next; }
     }
     now
 }
