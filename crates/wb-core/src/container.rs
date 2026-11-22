@@ -64,6 +64,8 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
         ("WHAYBENCH_DATA_DIR", data.clone()),
         ("CLAUDE_CONFIG_DIR", format!("{data}/{CLAUDE_DIR}")),
         ("CLAUDE_CODE_TMPDIR", format!("{data}/cache/tmp")),
+        // The programs are the host's, read-only: they are updated there, not from in here.
+        ("DISABLE_AUTOUPDATER", "1".into()),
     ] { a.push("-e".into()); a.push(format!("{k}={v}")); }
     a.extend(["-w".into(), path(&s.folder), image.into(), "sleep".into(), "infinity".into()]);
     a
@@ -125,10 +127,11 @@ fn which(program: &str) -> Option<PathBuf> {
     std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(program)).find(|f| f.is_file()))
 }
 
-/// A program run in the project's container, as a tab runs it: with a terminal, in `cwd`, with `env`.
-pub fn exec_args(id: &str, cwd: &Path, env: &[(String, String)], program: &str, args: &[String]) -> Vec<String> {
+/// A program run in the project's container, as a tab runs it: with a terminal, in `cwd`. The variables named in
+/// `pass` go in with the values podman itself has, so none of them (a token) shows on a command line.
+pub fn exec_args(id: &str, cwd: &Path, pass: &[String], program: &str, args: &[String]) -> Vec<String> {
     let mut a: Vec<String> = vec!["exec".into(), "-it".into(), "-w".into(), cwd.to_string_lossy().to_string()];
-    for (k, v) in env { a.push("-e".into()); a.push(format!("{k}={v}")); }
+    for k in pass { a.push("-e".into()); a.push(k.clone()); }
     a.push(name(id));
     a.push(program.into());
     a.extend(args.iter().cloned());
@@ -164,7 +167,7 @@ mod tests {
         assert!(!a.contains("-v /h/.local/share/whaybench:"), "never the host's data");
         assert!(!a.contains(".claude:") && !a.contains(".codex:"), "never the host's agent settings");
         assert!(a.ends_with("img:1 sleep infinity"));
-        assert_eq!(exec_args("up", Path::new("/w/up"), &[("TERM".into(), "xterm".into())], "claude", &["--resume".into(), "x".into()]).join(" "),
-            "exec -it -w /w/up -e TERM=xterm whaybench-up claude --resume x");
+        assert_eq!(exec_args("up", Path::new("/w/up"), &["TERM".into(), "CLAUDE_CODE_OAUTH_TOKEN".into()], "claude", &["--resume".into(), "x".into()]).join(" "),
+            "exec -it -w /w/up -e TERM -e CLAUDE_CODE_OAUTH_TOKEN whaybench-up claude --resume x");
     }
 }

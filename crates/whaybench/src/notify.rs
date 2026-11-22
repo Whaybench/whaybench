@@ -68,7 +68,7 @@ impl Waiting {
         // A second of overlap, so a file written during the last look is read again; a wait already seen is no news.
         let from = self.looked - Duration::from_secs(1);
         self.looked = SystemTime::now();
-        for e in std::fs::read_dir(wb_core::sessions::state_dir(d)).into_iter().flatten().flatten() {
+        for e in wb_core::roots::all_of(d).iter().flat_map(|r| std::fs::read_dir(wb_core::sessions::state_dir(r)).into_iter().flatten().flatten()) {
             if e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t < from) { continue; }
             let Some(v) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { continue };
             let session = e.path().file_stem().unwrap_or_default().to_string_lossy().to_string();

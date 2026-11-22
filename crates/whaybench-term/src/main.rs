@@ -84,7 +84,7 @@ impl Relay {
             let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
             wb_core::versions::find_program(&a.command, &std::env::var("PATH").unwrap_or_default(), home.as_deref()).ok_or_else(|| format!("{} is not installed", a.command))?
         } else { sessions::claude_program() };
-        let c_program = CString::new(program.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+        let mut c_program = CString::new(program.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
         let mut argv: Vec<CString> = vec![c_program.clone()];
         let mut args = agent.as_ref().map_or_else(|| args.to_vec(), |a| a.args(args));
         // An agent that makes its session only at its first prompt (Codex) runs no start hook to take the map in until
@@ -117,9 +117,7 @@ impl Relay {
             if !settings.is_empty() { args.extend(["--settings".into(), serde_json::Value::Object(settings).to_string()]); }
         }
         for a in &args { argv.push(CString::new(a.as_bytes()).map_err(|e| e.to_string())?); }
-        let mut ptrs: Vec<*const libc::c_char> = argv.iter().map(|a| a.as_ptr()).collect();
-        ptrs.push(std::ptr::null());
-        let c_cwd = CString::new(cwd).map_err(|e| e.to_string())?;
+        let c_cwd = CString::new(cwd.clone()).map_err(|e| e.to_string())?;
         // All of the child's environment is prepared here, before the fork.
         let mut env: Vec<(String, String)> = vec![
             ("TERM".into(), "xterm-256color".into()), ("COLORTERM".into(), "truecolor".into()),
@@ -132,6 +130,21 @@ impl Relay {
             // the command line already, the map itself is told at the start instead.
             if carry_prompt.is_none() { env.push(("WHAYBENCH_MAP_PROMPT".into(), wb_core::i18n::ai("map-carry-prompt").into())); }
         }
+        // A Briefsafe project's conversation runs in the project's container (spec 3.22), with its data folder and
+        // the Claude Code token from the keyring; every value goes through podman's own environment.
+        if let Some(s) = wb_core::container::project_at(&self.data, std::path::Path::new(&cwd)).filter(|s| s.open() && wb_core::container::running(&s.id)) {
+            env.retain(|(k, _)| k != paths::ENV_DATA_DIR);
+            env.push((paths::ENV_DATA_DIR.into(), s.open_at.to_string_lossy().to_string()));
+            if !addon && let Ok(Some(t)) = wb_core::secret::get(wb_core::secret::CLAUDE_TOKEN) { env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t)); }
+            let podman = wb_core::versions::find_program("podman", &std::env::var("PATH").unwrap_or_default(), None).ok_or("podman is not installed")?;
+            let names: Vec<String> = env.iter().map(|(k, _)| k.clone()).collect();
+            let inner = wb_core::container::exec_args(&s.id, std::path::Path::new(&cwd), &names, &program.to_string_lossy(), &args);
+            c_program = CString::new(podman.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+            argv = std::iter::once(Ok(c_program.clone())).chain(inner.iter().map(|a| CString::new(a.as_bytes()).map_err(|e| e.to_string()))).collect::<Result<_, String>>()?;
+            record::decide("session", "in the project's container", "the conversation's folder is an open Briefsafe project's", &[("project", s.id.clone())]);
+        }
+        let mut ptrs: Vec<*const libc::c_char> = argv.iter().map(|a| a.as_ptr()).collect();
+        ptrs.push(std::ptr::null());
         let c_env: Vec<(CString, CString)> = env.iter().filter_map(|(k, v)| Some((CString::new(k.as_str()).ok()?, CString::new(v.as_str()).ok()?))).collect();
 
         let umask = wb_core::paths::user_umask();
@@ -282,8 +295,10 @@ impl Relay {
         if wb_core::agents::other() {
             if self.running
                 && let Some(s) = &self.session {
-                    let _ = fs::create_dir_all(sessions::alive_dir(&self.data));
-                    let _ = paths::write_atomic(&sessions::alive_dir(&self.data).join(s), self.child.to_string());
+                    // In the session's own root: a project's conversation is the project's.
+                    let at = wb_core::roots::for_session(&self.data, s);
+                    let _ = fs::create_dir_all(sessions::alive_dir(&at));
+                    let _ = paths::write_atomic(&sessions::alive_dir(&at).join(s), self.child.to_string());
                 }
         } else {
             self.resumed_somewhere();
@@ -358,7 +373,7 @@ impl Relay {
         let commands_only = {
             let mut waiting = false;
             if let Some(s) = &self.session {
-                let ready = fs::read_to_string(sessions::state_dir(&self.data).join(format!("{s}.json"))).ok()
+                let ready = fs::read_to_string(sessions::state_dir(&wb_core::roots::for_session(&self.data, s)).join(format!("{s}.json"))).ok()
                     .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
                     .is_some_and(|v| v["state"] == "done");
                 waiting = !ready;

@@ -25,7 +25,11 @@ names another step.
   version are there, starts the project's container: the project folder, the open data place and the host's programs
   (read-only, with the plugin code), nothing of the host's data or agent settings, the resting data hidden. Its
   agents get their own Claude Code folder, made once from the person's settings and plugin lists, so their
-  conversations and background sessions stay in the project. `close` stops it and the data is no longer seen. `snapshot`, `snapshots` and `restore` take, list and go back to
+  conversations and background sessions stay in the project. `close` stops it and the data is no longer seen.
+  A conversation tab whose folder is an open project's runs its agent in the project's container (`podman exec`),
+  with the project's data folder and, for Claude Code, the long-lived token kept in the keyring
+  (`whaybench token set`, from `claude setup-token`); values go through podman's environment, not its command line.
+  Claude Code's own updater is off in the container (the programs are the host's, read-only). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

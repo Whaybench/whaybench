@@ -623,7 +623,7 @@ impl App {
         let Some(back) = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
         let (Some(session), Some(tab), Some(at)) = (back["session"].as_str(), back["tab"].as_str(), back["at"].as_i64()) else { let _ = std::fs::remove_file(&file); return };
         if crate::ctl::now_ms() - at > 3_600_000 { let _ = std::fs::remove_file(&file); return; }
-        let state = std::fs::read_to_string(wb_core::sessions::state_dir(&self.data).join(format!("{session}.json"))).ok()
+        let state = std::fs::read_to_string(wb_core::sessions::state_dir(&wb_core::roots::for_session(&self.data, session)).join(format!("{session}.json"))).ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).unwrap_or_default();
         if state["state"] != "done" || state["at"].as_i64().unwrap_or(0) <= at { return; }
         let _ = std::fs::remove_file(&file);

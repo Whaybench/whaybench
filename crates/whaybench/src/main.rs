@@ -27,6 +27,7 @@ whaybench record [--data-dir DIR] SESSION|- touch|state|alive|off|answer|moved|c
 whaybench hook [--data-dir DIR] claude|ID < EVENT.json    run by the agent's hooks
 whaybench mcp [--data-dir DIR]    the conversation map tool over MCP (stdio), for an agent in a Whaybench tab
 whaybench statusline [--data-dir DIR] < STATUS.json    a Claude Code status line: context and plan usage, kept for the notifications panel
+whaybench token set | check | clear    the long-lived Claude Code token (`claude setup-token`, read from standard input) that Briefsafe projects' agents sign in with, kept in the keyring
 whaybench ctl [--data-dir DIR] session new [MAP-FROM] | show ID | type ID TEXT | wait ID [SECONDS] | end ID
 whaybench ctl [--data-dir DIR] quit
 whaybench ctl [--data-dir DIR] shot --out FILE.png [--panel N]    N: panel number, default the whole surface
@@ -44,7 +45,7 @@ struct Args {
 fn parse_args(mut args: Vec<String>) -> Result<Args, String> {
     let mut out = Args { data_dir: None, apps: Vec::new(), no_session: false, ctl: None };
     // ctl, map, record and hook take the words after them as their own; map, record and hook stay as the first of them.
-    if args.first().is_some_and(|a| matches!(a.as_str(), "ctl" | "map" | "record" | "hook" | "memory" | "statusline" | "mcp")) {
+    if args.first().is_some_and(|a| matches!(a.as_str(), "ctl" | "map" | "record" | "hook" | "memory" | "statusline" | "mcp" | "token")) {
         if args[0] == "ctl" { args.remove(0); }
         out.ctl = Some(Vec::new());
     }
@@ -61,6 +62,25 @@ fn parse_args(mut args: Vec<String>) -> Result<Args, String> {
         }
     }
     Ok(out)
+}
+
+/// `whaybench token`: the Claude Code token for project containers. It is never printed.
+fn token(words: &[String]) -> Result<(), String> {
+    use wb_core::secret::{self, CLAUDE_TOKEN};
+    match words.first().map(String::as_str) {
+        Some("set") => {
+            let mut t = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut t).map_err(|e| e.to_string())?;
+            let t = t.trim();
+            if t.is_empty() || t.contains(char::is_whitespace) { return Err("give the token from `claude setup-token` on standard input".into()); }
+            secret::set(CLAUDE_TOKEN, "Whaybench: Claude Code token for project containers", t)?;
+            println!("stored");
+        }
+        Some("check") => println!("{}", if secret::get(CLAUDE_TOKEN)?.is_some() { "stored" } else { "none" }),
+        Some("clear") => { secret::delete(CLAUDE_TOKEN)?; println!("cleared"); }
+        _ => return Err("whaybench token set | check | clear".into()),
+    }
+    Ok(())
 }
 
 fn main() {
@@ -87,6 +107,7 @@ fn main() {
             Some("memory") => agent::memory(&data, &rest[1..]),
             Some("statusline") => agent::statusline(&data),
             Some("mcp") => mcp::serve(&data),
+            Some("token") => token(&rest[1..]),
             _ => ctl::send(&data, &rest),
         };
         if let Err(e) = done { fail(&e); }

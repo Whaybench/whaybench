@@ -73,7 +73,7 @@ fn claude_runs(d: &Data, id: &str) -> bool {
 fn busy(d: &Data, now: SystemTime, runs: &dyn Fn(&str) -> bool) -> bool {
     let now_ms = now.duration_since(UNIX_EPOCH).map(|t| t.as_millis() as u64).unwrap_or(0);
     let fresh = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).is_ok_and(|t| now.duration_since(t).unwrap_or_default() < STALE);
-    let turn = std::fs::read_dir(sessions::state_dir(d)).into_iter().flatten().flatten().any(|e| {
+    let turn = wb_core::roots::all_of(d).iter().flat_map(|r| std::fs::read_dir(sessions::state_dir(r)).into_iter().flatten().flatten()).any(|e| {
         let id = e.path().file_stem().unwrap_or_default().to_string_lossy().to_string();
         fresh(&e.path()) && std::fs::read(e.path()).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .is_some_and(|v| matches!(v["state"].as_str(), Some("working" | "waiting"))

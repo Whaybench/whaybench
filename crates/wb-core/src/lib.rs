@@ -14,6 +14,7 @@ pub mod paths;
 pub mod prompt;
 pub mod records;
 pub mod roots;
+pub mod secret;
 pub mod session_record;
 pub mod clock;
 pub mod container;
