@@ -71,10 +71,22 @@ fn text_page(d: &Data, path: &str) -> Option<String> {
     let shown_as_is = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".html", ".htm", ".mp4", ".webm", ".pdf"];
     if view::is_web(path) || shown_as_is.iter().any(|e| low.ends_with(e)) { return None; }
     // Regular files only, without waiting on a pipe, the first 2 MB (a project's files are its agents' to make).
-    let bytes = match wb_core::paths::read_untrusted(Path::new(path), 2_000_000) { Ok(b) => b, Err(e) => return Some(wrapped(d, path, &wb_core::i18n::f("read-failed-3", &[("a1", (escape(&e.to_string())).to_string())]))) };
+    // A file of a project's folder is read beneath the folder, no link on the way: it may have become one since it
+    // was checked.
+    let in_folder = wb_core::roots::project_root_of(d, Path::new(path)).and_then(|st| {
+        let folder = std::fs::canonicalize(&st.folder).ok()?;
+        Some((Path::new(path).strip_prefix(&folder).ok()?.to_path_buf(), folder))
+    });
+    let read = match &in_folder {
+        Some((rel, folder)) => wb_core::beneath::read(folder, rel, 2_000_000),
+        None => wb_core::paths::read_untrusted(Path::new(path), 2_000_000),
+    };
+    let bytes = match read { Ok(b) => b, Err(e) => return Some(wrapped(d, path, &wb_core::i18n::f("read-failed-3", &[("a1", (escape(&e.to_string())).to_string())]))) };
     let text = String::from_utf8_lossy(&bytes[..bytes.len().min(2_000_000)]).to_string();
     if low.ends_with(".md") || low.ends_with(".markdown") {
-        return Some(wrapped(d, path, &web::markdown(&text, web::RawHtml::Kept)));
+        // A project's own HTML in its Markdown is shown as text: it could name files outside the project.
+        let raw = if wb_core::beneath::split(Path::new(path)).is_some() || wb_core::roots::project_root_of(d, Path::new(path)).is_some() { web::RawHtml::AsText } else { web::RawHtml::Kept };
+        return Some(wrapped(d, path, &web::markdown(&text, raw)));
     }
     Some(wrapped(d, path, &format!("<pre>{}</pre>", escape(&text))))
 }
@@ -266,7 +278,9 @@ fn switch(v: &mut V) {
 
 fn bind(s: &Shared, link: Link) {
     let mut v = s.borrow_mut();
-    record::decide("view", "link changed", "the person chose it in the menu", &[("view", v.name.clone()), ("link", link.to_json().to_string())]);
+    // The kind of link only: a page's path and title (a project's) stay out of the log.
+    let kind = match &link { Link::Follow => "follow".to_string(), Link::Session(s) => format!("session {s}"), Link::Target(..) => "page".to_string() };
+    record::decide("view", "link changed", "the person chose it in the menu", &[("view", v.name.clone()), ("link", kind)]);
     view::set_view(&v.d, &v.name.clone(), &link);
     v.link = link;
     switch(&mut v);
@@ -396,17 +410,22 @@ fn tick(s: &Shared) {
     let now = session_now(&v);
     let project_of = |s: Option<&str>| s.is_some_and(|s| wb_core::roots::Roots::new(d.clone()).project_of(s).is_some());
     // A page in a project's open place, the project closed since (its file differences, a page held on its own).
-    let closed = |p: &str| wb_core::beneath::split(Path::new(p)).is_some_and(|(r, _)| std::fs::symlink_metadata(&r).is_err());
+    // And a file of a project's folder whose project is closed now.
+    let closed = |p: &str| wb_core::beneath::split(Path::new(p)).is_some_and(|(r, _)| std::fs::symlink_metadata(&r).is_err())
+        || wb_core::roots::project_root_of(&d, Path::new(p.strip_prefix("file://").unwrap_or(p))).is_some_and(|st| !st.open());
     if v.hist.items.iter().any(|(p, _)| closed(p)) || matches!(&v.link, Link::Target(p, _) if closed(p)) {
         if matches!(v.link, Link::Target(..)) { v.link = Link::Follow; view::set_view(&d, &name, &v.link); }
-        v.hist = History::default();
+        // The followed session's own list again (what of it is gone falls out), not an empty one with no folder.
+        switch(&mut v);
+        v.hist.items.retain(|(p, _)| !closed(p));
+        v.hist.pos = v.hist.items.len().saturating_sub(1);
         display(&v);
+        retitle(&v);
     }
     if v.of_project && !project_of(v.followed.as_deref()) {
         // The project closed: nothing of it stays on screen (spec 3.22).
-        v.of_project = false;
-        v.hist = History::default();
-        display(&v);
+        switch(&mut v);
+        retitle(&v);
     }
     if !matches!(v.link, Link::Target(..)) && now != v.followed {
         record::detail("view", "session changed", &[("view", name.clone()), ("session", short(now.as_deref()))]);
@@ -461,6 +480,27 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
 
     let link = view::views(&d).into_iter().find(|(n, _)| *n == name).map(|(_, l)| l).unwrap_or_default();
     let s: Shared = Rc::new(RefCell::new(V { d: d.clone(), name: name.clone(), link, followed: None, of_project: false, hist: History::default(), page: None, style: String::new(), seen: HashMap::new(), web, place, tie: tie.clone(), back: back.clone(), forward: forward.clone(), drop_it: drop_it.clone(), win: win.clone() }));
+    {
+        // A project's page goes to no file outside the project: a link, a refresh, a frame (spec 3.22). The panel's
+        // own loads are checked before they are made (it holds its state then).
+        let weak = Rc::downgrade(&s);
+        let web = s.borrow().web.clone();
+        web.connect_decide_policy(move |_, decision, kind| {
+            if !matches!(kind, webkit6::PolicyDecisionType::NavigationAction | webkit6::PolicyDecisionType::NewWindowAction) { return false; }
+            let Some(nav) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>() else { return false };
+            let Some(uri) = nav.navigation_action().and_then(|a| a.request()).and_then(|r| r.uri()) else { return false };
+            if !uri.starts_with("file:") { return false; }
+            let Some(s) = weak.upgrade() else { return false };
+            let Ok(v) = s.try_borrow() else { return false };
+            let path = gio::File::for_uri(&uri).path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+            if project_followed(&v).is_some_and(|p| !in_project(&p, &path)) {
+                record::warn("view", "page refused", "a project's page went to a file outside the project", &[]);
+                decision.ignore();
+                return true;
+            }
+            false
+        });
+    }
     { let mut v = s.borrow_mut(); switch(&mut v); retitle(&v); }
 
     { let s = s.clone(); tie.connect_clicked(move |_| link_menu(&s)); }

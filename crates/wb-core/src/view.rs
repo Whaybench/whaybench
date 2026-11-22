@@ -147,8 +147,13 @@ impl History {
     pub fn current(&self) -> Option<&(String, String)> { self.items.get(self.pos) }
     fn save(&self) {
         if self.dir.as_os_str().is_empty() { return; }
+        // A host list keeps nothing of a project (a file of its folder or its data shown here while it was open).
+        let host = crate::beneath::split(&self.dir).is_none();
+        let data = self.dir.ancestors().find(|a| a.file_name().is_some_and(|n| n == "view")).and_then(Path::parent).map(|r| Data::new(r.to_path_buf()));
+        let of_project = |p: &str| crate::beneath::split(Path::new(p)).is_some() || data.as_ref().is_some_and(|d| crate::roots::project_root_of(d, Path::new(p)).is_some());
+        let items: Vec<&(String, String)> = self.items.iter().filter(|(p, _)| !host || !of_project(p)).collect();
         let _ = crate::paths::create_dir_all(&self.dir);
-        let _ = crate::paths::write_atomic(&self.dir.join("index.json"), json!(self.items).to_string());
+        let _ = crate::paths::write_atomic(&self.dir.join("index.json"), json!(items).to_string());
     }
     /// Shows this now. The thing on screen again is not a new entry.
     pub fn push(&mut self, path: &str, title: &str) {

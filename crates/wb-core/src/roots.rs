@@ -276,6 +276,21 @@ mod tests {
     }
 
     #[test]
+    fn a_host_view_list_keeps_nothing_of_a_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Data::new(dir.path().join("host"));
+        let stub = Stub::new(&host, "up", "Up", &dir.path().join("up"));
+        write_stub(&host, &stub).unwrap();
+        write_marker(&stub.stored(), "up").unwrap();
+        fs::write(stub.folder.join("plan.md"), "x").unwrap();
+        let mut h = crate::view::History::load(host.root.join("view/history/s-h1"));
+        h.push(&stub.folder.join("plan.md").to_string_lossy(), "Plan of Up");
+        h.push("https://example.org/", "Example");
+        let saved = fs::read_to_string(host.root.join("view/history/s-h1/index.json")).unwrap();
+        assert!(!saved.contains("Plan of Up") && saved.contains("Example"), "{saved}");
+    }
+
+    #[test]
     fn a_project_cannot_take_a_host_conversations_number() {
         let dir = tempfile::tempdir().unwrap();
         let host = Data::new(dir.path().join("host"));
