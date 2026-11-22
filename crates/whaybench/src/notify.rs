@@ -76,7 +76,12 @@ impl Waiting {
             record::detail("session", "waiting told on the desktop", &[("session", session.clone())]);
             let (d, note) = (d.clone(), v["note"].as_str().unwrap_or("").to_string());
             std::thread::spawn(move || {
-                let body = [wb_core::sessions::session_name(&d, &session), note].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · ");
+                // A project's conversation is told by its project's name only: the desktop keeps what it is shown.
+                let project = wb_core::roots::Roots::new(d.clone()).project_of(&session).and_then(|id| wb_core::roots::stubs(&d).into_iter().find(|s| s.id == id));
+                let body = match project {
+                    Some(p) => p.name,
+                    None => [wb_core::sessions::session_name(&d, &session), note].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · "),
+                };
                 show(wb_core::i18n::t("notify-waiting"), &body);
             });
         }

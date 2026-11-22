@@ -407,6 +407,11 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
 /// A node's source: the imported map's panel, at the original node.
 fn open_node_source(d: &Data, src: &Value) {
     let path = std::path::Path::new(s(src, "file"));
+    // A project's node names its source as its agents wrote it: only a map file of that project's own opens.
+    let project = sessions::target(d).and_then(|t| wb_core::roots::Roots::new(d.clone()).project_of(&t));
+    if let Some(id) = project && wb_core::beneath::split(path).is_none_or(|(r, _)| r.file_name().is_none_or(|n| n.to_string_lossy() != id)) {
+        return status::say(d, wb_core::i18n::t("briefsafe-outside-project"), 6);
+    }
     if !path.is_file() { status::say(d, &wb_core::i18n::f("source-not-opened-no-file", &[("path", path.display().to_string())]), 8); return; }
     mapimport::show(d, path, s(src, "title"), Some(s(src, "node")));
 }
@@ -868,7 +873,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
                 // time stays as drawn.
                 Some(t) => match sessions::map_of(&d, &t) {
                     Some(m) => (t, Some(m)),
-                    None if wb_core::roots::known_session(&d, &t).is_none() => (t, Some(serde_json::json!({"nodes": []}))),
+                    // Another session's map was drawn (it may be a project's): this one has none yet.
+                    None if wb_core::roots::known_session(&d, &t).is_none() || !panel.borrow().signature.starts_with(&t) => (t, Some(serde_json::json!({"nodes": []}))),
                     None => return,
                 },
                 None => (String::new(), Some(serde_json::json!({"nodes": []}))),

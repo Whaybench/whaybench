@@ -302,6 +302,7 @@ briefsafe-no-token = No Claude Code token for projects · run `claude setup-toke
 briefsafe-keyring-failed = Project token not read from the keyring (locked?) · the agent may ask to sign in
 briefsafe-map-stays = A project's map stays in the project · start its new conversation from the project
 briefsafe-project-closed = The project is closed · open it, then this conversation
+briefsafe-outside-project = Outside the project · not opened
 panel-left-closed = Panel crashed repeatedly · logged
 not-run-no-conversation-tab-open = { $head } not run · No conversation tab · Open it from the session list
 session-ended-hidden-in-the-session = Session ended · Hidden in the session list

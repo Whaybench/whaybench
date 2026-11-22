@@ -302,6 +302,7 @@ briefsafe-no-token = 프로젝트용 Claude Code 토큰 없음 · `claude setup-
 briefsafe-keyring-failed = 키링에서 프로젝트 토큰을 읽지 못함(잠김?) · 에이전트가 로그인을 요청할 수 있음
 briefsafe-map-stays = 프로젝트 지도는 프로젝트 안에서만 · 새 대화는 프로젝트에서 시작
 briefsafe-project-closed = 프로젝트가 닫혀 있음 · 프로젝트를 연 뒤 이 대화를 여세요
+briefsafe-outside-project = 프로젝트 밖 · 열지 않음
 panel-left-closed = 패널 비정상 종료 반복 · 로그 생성
 not-run-no-conversation-tab-open = { $head } 미실행 · 대화 탭 없음 · 세션 목록에서 열기
 session-ended-hidden-in-the-session = 세션 종료됨 · 세션 목록에서 숨김

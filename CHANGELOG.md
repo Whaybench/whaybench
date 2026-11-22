@@ -148,7 +148,11 @@ names another step.
   The container mounts a marketplace of the person's own folder (a "directory" one, often their source) only by its
   manifest and the plugin folders it names, no longer the whole folder. The agents run in there by name, linked from
   where the host finds them (on PATH too, such as an npm prefix), and `~/.local/bin` itself is never mounted over the
-  program links. A host tab whose work folder is inside a closed project starts in the home folder. `snapshot`, `snapshots` and `restore` take, list and go back to
+  program links. A host tab whose work folder is inside a closed project starts in the home folder.
+  The Files panel opens (view, vim, an app) only a project's own files for its conversation and empties when no
+  conversation is in front; the Map panel empties for a conversation with no map yet instead of keeping another's;
+  a project node's source opens only from that project; a desktop notice of a project's conversation names the project
+  only (en, ko: briefsafe-outside-project). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

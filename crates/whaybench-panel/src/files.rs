@@ -81,7 +81,16 @@ pub fn diff_page(path: &str, edits: &[Value], bg: &str, fg: &str) -> String {
 
 struct Panel { node: Option<String>, signature: String }
 
+/// Whether a listed path may be opened (view, vim, an app): a project's list is its agents' to write, so only files
+/// whose real path is in that project.
+fn may_open(d: &Data, path: &str) -> bool {
+    let Some(st) = sessions::target(d).and_then(|t| wb_core::roots::Roots::new(d.clone()).project_of(&t)).and_then(|id| wb_core::roots::stubs(d).into_iter().find(|s| s.id == id)) else { return true };
+    let Ok(real) = std::fs::canonicalize(path) else { return false };
+    [st.folder.clone(), st.stored().root].iter().filter_map(|r| std::fs::canonicalize(r).ok()).any(|r| real.starts_with(r))
+}
+
 fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dyn Fn()>) {
+    if !may_open(d, path) { return status::say(d, wb_core::i18n::t("briefsafe-outside-project"), 6); }
     let group = gio::SimpleActionGroup::new();
     let top = gio::Menu::new();
     let n = Rc::new(std::cell::Cell::new(0));
@@ -147,7 +156,12 @@ fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dy
 }
 
 fn draw(d: &Data, list: &gtk::ListBox, panel: &RefCell<Panel>, unit: i32, force: bool) {
-    let Some(session) = sessions::target(d) else { return };
+    // No session in front: an empty list, not the one drawn before (a project's, closed since).
+    let Some(session) = sessions::target(d) else {
+        while let Some(r) = list.row_at_index(0) { list.remove(&r); }
+        panel.borrow_mut().signature.clear();
+        return;
+    };
     let mut touches = records::touches(d, &session);
     let map = sessions::map_of(d, &session).unwrap_or(Value::Null);
     let raw: Vec<Value> = map.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -226,7 +240,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         let d = d.clone();
         list.connect_row_activated(move |_, r| {
             let path = r.widget_name();
-            if path.starts_with('/') { let _ = view::open(&d, &path, None); }
+            if path.starts_with('/') && may_open(&d, &path) { let _ = view::open(&d, &path, None); }
         });
     }
     let click = gtk::GestureClick::new();
