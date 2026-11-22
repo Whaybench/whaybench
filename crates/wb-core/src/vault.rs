@@ -86,15 +86,29 @@ fn mount_with(s: &Stub, flags: &[&str], secret: &str) -> Result<(), String> {
 }
 
 /// Opens the vault with its recovery key, then gives it a new key, kept in the keyring (the old one is gone).
+/// gocryptfs takes any master key here without a check: the new key is kept only once the vault opened with it shows
+/// this project's own marker inside; otherwise the vault's key file is put back as it was and nothing is kept.
 pub fn mount_with_recovery(s: &Stub, recovery: &str) -> Result<(), String> {
-    let recovery = recovery.trim();
-    let c = cipher_dir(s).to_string_lossy().to_string();
+    // One line of hex (gocryptfs prints it with dashes too): a second line would be taken for the new password.
+    let recovery: String = recovery.trim().chars().filter(|c| *c != '-').collect();
+    if recovery.len() != 64 || !recovery.chars().all(|c| c.is_ascii_hexdigit()) { return Err("a recovery key is 64 hexadecimal digits on one line".into()); }
+    if mounted(s) { return Err("the vault is open already".into()); }
+    let cipher = cipher_dir(s);
+    let (conf, bak) = (cipher.join("gocryptfs.conf"), cipher.join("gocryptfs.conf.bak"));
+    // One left by an earlier try that stopped half way: kept aside, never thrown away (it may be the one that opens).
+    if bak.exists() { std::fs::rename(&bak, cipher.join(format!("gocryptfs.conf.bak-{}", crate::clock::now_ms()))).map_err(|e| e.to_string())?; }
     let key = new_key()?;
-    run(&["gocryptfs", "-passwd", "-masterkey=stdin", &c], &format!("{recovery}\n{key}\n"))?;
-    // gocryptfs keeps the old file beside it, still opened by the old key.
-    let _ = std::fs::remove_file(cipher_dir(s).join("gocryptfs.conf.bak"));
-    crate::secret::set(&key_name(s), &format!("Whaybench project {}", s.name), &key)?;
-    mount(s)
+    run(&["gocryptfs", "-passwd", "-masterkey=stdin", &cipher.to_string_lossy()], &format!("{recovery}\n{key}\n"))?;
+    let undo = |why: String| -> String {
+        let _ = unmount(s);
+        match std::fs::rename(&bak, &conf) { Ok(()) => why, Err(e) => format!("{why}; and the vault's key file could not be put back from {}: {e}", bak.display()) }
+    };
+    if let Err(e) = mount_with(s, &[], &key) { return Err(undo(e)); }
+    if !s.intact_open() { return Err(undo("that recovery key does not open this project's vault".into())); }
+    if let Err(e) = crate::secret::set(&key_name(s), &format!("Whaybench project {}", s.name), &key) { return Err(undo(format!("the new key could not be kept in the keyring: {e}"))); }
+    // Kept: the old key file (opened by the old key) goes.
+    let _ = std::fs::remove_file(&bak);
+    Ok(())
 }
 
 /// Closes the vault. Something still working in it keeps it open, and says so.

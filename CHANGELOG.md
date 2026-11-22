@@ -162,7 +162,11 @@ names another step.
   `open` opens the vault in the person's runtime folder and the container sees it there (no key, no FUSE in the
   container); `close` closes it last. A lost key: `whaybench-project open ID --recovery` with the recovery key on
   standard input opens it and keeps a new key. Snapshots hold the encrypted data; a restore keeps the vault's current
-  key file, so the keyring's key still opens it. The WSL setup installs gocryptfs. `snapshot`, `snapshots` and `restore` take, list and go back to
+  key file, so the keyring's key still opens it. The WSL setup installs gocryptfs.
+  A recovery key is checked before anything is kept: it must be 64 hexadecimal digits on one line, and the new key is
+  stored only when the vault opened with it shows the project's own marker inside; otherwise the vault's key file is
+  put back (gocryptfs itself takes any master key when changing the password). A key file left by an interrupted
+  recovery is set aside instead of blocking the next one. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

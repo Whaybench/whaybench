@@ -41,6 +41,11 @@ impl Stub {
         fs::symlink_metadata(&self.open_at).is_ok_and(|m| m.file_type().is_symlink())
             && fs::read_link(&self.open_at).is_ok_and(|t| t == self.stored().root)
     }
+    /// The open vault's own marker (inside the encrypted data) names this project: it opened with the right key.
+    pub fn intact_open(&self) -> bool {
+        crate::beneath::read(&self.stored().root, Path::new(MARKER), 4096).ok().and_then(|t| serde_json::from_slice::<Value>(&t).ok())
+            .is_some_and(|v| v["id"] == self.id.as_str())
+    }
     /// Where its data rests is this project's (its marker names it).
     pub fn intact(&self) -> bool {
         // Beneath where the data rests, as any file its agents can change: no link, no pipe, a few bytes.
