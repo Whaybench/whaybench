@@ -63,6 +63,9 @@ fn find_named(dir: &Path, suffix: &str, depth: u32) -> Option<PathBuf> {
 /// heard last: they belong to the account, and Claude Code's and Codex's are different accounts. A session not heard
 /// from yet has no context of its own.
 pub fn latest(data: &Path, sid: Option<&str>) -> Option<Value> {
+    // A project session's context is noted in its project's root.
+    let own = sid.map(|s| crate::roots::for_session(&crate::paths::Data::new(data.to_path_buf()), s).root);
+    let data = own.as_deref().unwrap_or(data);
     let mut all: Vec<(String, Value)> = fs::read_dir(dir(data)).ok()?.flatten().filter_map(|f| {
         let v: Value = serde_json::from_str(&fs::read_to_string(f.path()).ok()?).ok()?;
         Some((f.path().file_stem()?.to_string_lossy().to_string(), v))

@@ -15,10 +15,13 @@ pub fn say(d: &Data, text: &str, seconds: u64) {
     let _ = write(&status_file(d), json!({"text": text, "until": now_ms() + seconds as u128 * 1000}).to_string());
 }
 
-/// The message to show now, if any.
+/// The message to show now, if any: the newest of the host's and the open projects' (each says in its own root).
 pub fn current(d: &Data) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(status_file(d)).ok()?).ok()?;
-    (v.get("until")?.as_u64()? as u128 > now_ms()).then(|| v.get("text")?.as_str().map(String::from)).flatten()
+    crate::roots::all_of(d).iter().filter_map(|r| {
+        let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(status_file(r)).ok()?).ok()?;
+        let until = v.get("until")?.as_u64()? as u128;
+        (until > now_ms()).then(|| Some((until, v.get("text")?.as_str()?.to_string()))).flatten()
+    }).max_by_key(|m| m.0).map(|m| m.1)
 }
 
 /// Leaves a request for the running compositor (see `whaybench ctl`).

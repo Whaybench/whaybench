@@ -16,7 +16,10 @@ names another step.
   template) is kept in the folder, in `.whaybench/` laid out like a data folder and left out of git; the data
   folder keeps only a stub with its name and folder, and `whaybench-project list` shows it as `kind: briefsafe`.
   Conversations of such a project find their transcripts in its own Claude folder, and the map filler does not hand
-  them to a worker outside the project. `snapshot`, `snapshots` and `restore` take, list and go back to
+  them to a worker outside the project. The panels list and show a project's sessions (map, answers, states, views,
+  permission questions, status messages) from its folder and write what they change there; the answer panel does not
+  keep a project's answers in its history file. From a project's folder the compositor takes only requests to bring a
+  panel forward, and lets its agents type only into the same project's conversations. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

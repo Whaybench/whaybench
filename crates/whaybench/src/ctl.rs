@@ -145,9 +145,15 @@ fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool) -
 /// The requests agents left in ask/: checked and delivered as a `session type` from their tab would be. The tab a
 /// request names is the agent's own word; the text is marked as from another conversation whatever it names.
 fn deliver_asked(data: &Data) {
+    deliver_asked_in(data, data, None);
+    // A project's agents ask in their own root, and only for the project's own conversations (spec 3.22).
+    for (pid, root) in wb_core::roots::Roots::new(data.clone()).projects() { deliver_asked_in(data, &root, Some(&pid)); }
+}
+
+fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
     // Only plain files, small, a few each tick: the folder is the agent's to write, and a pipe named like a request
     // would block this loop (the whole window) on reading it.
-    for f in fs::read_dir(ask_dir(data)).into_iter().flatten().flatten().take(20) {
+    for f in fs::read_dir(ask_dir(root)).into_iter().flatten().flatten().take(20) {
         if f.path().extension().is_none_or(|e| e != "json") { continue; }
         let plain = f.file_type().is_ok_and(|t| t.is_file()) && f.metadata().is_ok_and(|m| m.len() <= 64 * 1024);
         let v = plain.then(|| fs::read(f.path()).ok()).flatten().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
@@ -155,6 +161,10 @@ fn deliver_asked(data: &Data) {
         let Some(v) = v else { continue };
         let (to, text) = (v["to"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
         let from = v["from"].as_str().unwrap_or("another conversation");
+        if let Some(pid) = project && wb_core::roots::Roots::new(data.clone()).project_of(to).as_deref() != Some(pid) {
+            record::warn("request", "agent's request not delivered", "a project's agent may type only in its own project's conversations", &[("session", to.to_string()), ("project", pid.to_string())]);
+            continue;
+        }
         match deliver(data, to, text, Some(from), true) {
             Ok(()) => record::decide("request", "asked by an agent", "a sandboxed agent's request, checked here", &[("session", to.to_string()), ("from", from.to_string())]),
             Err(Refused::Rule(e) | Refused::Write(e)) => record::warn("request", "agent's request not delivered", &e, &[("session", to.to_string()), ("from", from.to_string())]),
@@ -426,6 +436,21 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
             }
         }
         if ticks.is_multiple_of(10) { state.tell_waiting(); }
+        // A project's programs leave requests in its own root; only those that touch nothing outside are taken.
+        for (pid, root) in wb_core::roots::Roots::new(asked_data.clone()).projects() {
+            let mut files: Vec<_> = fs::read_dir(root.ctl()).into_iter().flatten().flatten().filter(|f| f.path().extension().is_some_and(|e| e == "json") && f.file_type().is_ok_and(|t| t.is_file())).take(20).collect();
+            files.sort_by_key(|f| f.file_name());
+            for f in files {
+                let parsed = fs::read(f.path()).ok().and_then(|b| serde_json::from_slice::<Request>(&b).ok());
+                let _ = fs::remove_file(f.path());
+                match parsed {
+                    Some(Request::FocusApp { app }) => state.focus_app(&app),
+                    Some(Request::FrontApp { app }) => state.front_app(&app),
+                    Some(_) => record::warn("run", "request refused", "from a project's root only bringing a panel forward is taken", &[("project", pid.clone())]),
+                    None => {}
+                }
+            }
+        }
         ticks += 1;
         if ticks.is_multiple_of(10) { state.return_focus(); state.sync_focus(); }
         TimeoutAction::ToDuration(Duration::from_millis(100))

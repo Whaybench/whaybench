@@ -114,7 +114,8 @@ pub fn panel_title(name: &str) -> String {
 /// The history of one view for one session. The first view keeps `s-<id>`, others their own, so two views
 /// on one session do not write the same list.
 pub fn history_dir(d: &Data, view: &str, session: Option<&str>) -> PathBuf {
-    let root = d.root.join("view/history");
+    // What a project session's views showed (paths, titles) stays in the project.
+    let root = session.map_or_else(|| d.clone(), |s| crate::roots::for_session(d, s)).root.join("view/history");
     match session {
         None => root,
         Some(s) if view == FIRST_VIEW => root.join(format!("s-{s}")),
@@ -183,6 +184,8 @@ pub fn ask(d: &Data, to: &str, request: &Value) -> std::io::Result<()> {
 
 /// The waiting requests, oldest first. Whoever removes a file has it, so two views never take the same one.
 pub fn take_requests(d: &Data, to: &str) -> Vec<Value> {
+    // A project session's AI leaves its requests in its project's root.
+    let d = &to.strip_prefix("s-").map_or_else(|| d.clone(), |s| crate::roots::for_session(d, s));
     let Ok(rd) = std::fs::read_dir(requests_dir(d, to)) else { return Vec::new() };
     let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
     files.sort();

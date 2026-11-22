@@ -88,7 +88,8 @@ pub fn name_of(data: &Path, agent: Option<&str>) -> String {
 
 /// A session as people tell sessions apart: its agent's name and the start of its number, `Codex 01a1d60c`.
 pub fn session_label(data: &Path, sid: &str) -> String {
-    let agent = crate::map::read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null).ok()
+    let at = crate::roots::for_session(&crate::paths::Data::new(data.to_path_buf()), sid).root;
+    let agent = crate::map::read_json(&at.join("sessions").join(format!("{sid}.json")), Value::Null).ok()
         .and_then(|r| r["agent"].as_str().map(String::from));
     format!("{} {}", name_of(data, agent.as_deref()), sid.chars().take(8).collect::<String>())
 }

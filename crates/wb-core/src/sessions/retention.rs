@@ -49,7 +49,7 @@ pub fn prune(d: &Data) -> usize {
         if let Ok(n) = crate::db::open(&d.root).and_then(|c| crate::db::events_drop_before(&c, &before))
             && n > 0 { record::decide("memory", "old events dropped", "over the keeping limit", &[("events", n.to_string())]); }
     }
-    let all = all(d);
+    let all = all_here(d);
     // Each conversation is its last number with the numbers that moved on into it; most recently active first.
     let mut convs: Vec<(i64, Vec<String>)> = all.iter().filter(|r| r.get("movedTo").and_then(Value::as_str).is_none_or(str::is_empty))
         .filter_map(|r| Some((r.get("lastActive").and_then(Value::as_i64).unwrap_or(0), chain(&all, r.get("id")?.as_str()?)))).collect();
@@ -78,7 +78,7 @@ pub fn prune(d: &Data) -> usize {
 /// conversation, are that one's), then to now.
 pub fn span(d: &Data, id: &str, nodes: &[Value]) -> (i64, i64) {
     let rec = record_of(d, id).unwrap_or(Value::Null);
-    let all = all(d);
+    let all = all_here(d);
     // /resume makes a new record; the conversation began with the first of its numbers.
     let started = chain(&all, id).iter().filter_map(|n| all.iter().find(|r| r["id"].as_str() == Some(n.as_str()))?["started"].as_i64()).min();
     let answers: Vec<i64> = if id.is_empty() { Vec::new() } else { crate::records::answers_of(d, &crate::records::lineage(d, id)).iter().filter_map(|r| r["at"].as_i64()).collect() };
@@ -95,7 +95,7 @@ pub fn span(d: &Data, id: &str, nodes: &[Value]) -> (i64, i64) {
 pub fn save_lost_maps(d: &Data) -> usize {
     let file = d.root.join("auto-saved.json");
     let mut done: Vec<String> = read_json(&file).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
-    let all = all(d);
+    let all = all_here(d);
     let mut saved = 0;
     for r in &all {
         let Some(id) = r.get("id").and_then(Value::as_str) else { continue };

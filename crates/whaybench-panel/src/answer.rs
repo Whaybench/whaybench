@@ -29,7 +29,7 @@ struct Panel {
 /// Answers in the logs after `since`, oldest first, as (session, row). A log not written to since `scanned` is not read.
 fn logged_after(d: &Data, since: i64, scanned: i64) -> Vec<(String, Value)> {
     let mut out = Vec::new();
-    for f in std::fs::read_dir(d.root.join("answer-log")).into_iter().flatten().flatten() {
+    for f in wb_core::roots::all_of(d).iter().flat_map(|r| std::fs::read_dir(r.root.join("answer-log")).into_iter().flatten().flatten()) {
         let Some(sid) = f.file_name().to_str().and_then(|n| n.strip_suffix(".jsonl")).map(String::from) else { continue };
         let modified = f.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(i64::MAX, |t| t.as_millis() as i64);
         // A second of slack: the file's time and the clock read at the last look can differ a little.
@@ -55,7 +55,10 @@ fn time_of(ms: i64, format: &str) -> String {
 fn history_file(d: &Data) -> std::path::PathBuf { d.root.join("answer-history.json") }
 
 fn save(d: &Data, h: &[Value]) {
-    let _ = wb_core::paths::write_atomic(&history_file(d), Value::Array(h.to_vec()).to_string());
+    // A project's answers are not written to the host's root (spec 3.22): they stay in this panel while it runs.
+    let roots = wb_core::roots::Roots::new(d.clone());
+    let kept: Vec<Value> = h.iter().filter(|e| e["session"].as_str().is_none_or(|s| roots.project_of(s).is_none())).cloned().collect();
+    let _ = wb_core::paths::write_atomic(&history_file(d), Value::Array(kept).to_string());
 }
 
 struct Widgets { web: webkit6::WebView, where_: gtk::Label, back: gtk::Button, forward: gtk::Button, drop: gtk::Button, newest: gtk::Button, ret: gtk::Button, shown: RefCell<String> }
@@ -171,10 +174,10 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
                 if answers.iter().any(|(_, a)| a.is_empty()) { return; }
                 if by_prompt {
                     if !sessions::queue_prompt(&d, &sid, &wb_core::ask::reply_prompt(&answers)) { status::say(&d, wb_core::i18n::t("ask-not-sent"), 8); return; }
-                    wb_core::ask::clear(&d.root, &id);
+                    wb_core::ask::clear(&wb_core::ask::root_of(&d, &id), &id);
                 } else {
                     let map: serde_json::Map<String, Value> = answers.into_iter().map(|(q, a)| (q, json!(a))).collect();
-                    if !saved(&d, wb_core::ask::answer(&d.root, &id, "allow", &Value::Object(map))) { return; }
+                    if !saved(&d, wb_core::ask::answer(&wb_core::ask::root_of(&d, &id), &id, "allow", &Value::Object(map))) { return; }
                 }
                 done();
             });
@@ -213,7 +216,7 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
         for (key, decision) in [("ask-allow", "allow"), ("ask-deny", "deny")] {
             let b = gtk::Button::with_label(wb_core::i18n::t(key));
             let (d, id, done) = (d.clone(), id.clone(), done.clone());
-            b.connect_clicked(move |_| { if saved(&d, wb_core::ask::answer(&d.root, &id, decision, &json!({}))) { done(); } });
+            b.connect_clicked(move |_| { if saved(&d, wb_core::ask::answer(&wb_core::ask::root_of(&d, &id), &id, decision, &json!({}))) { done(); } });
             buttons.append(&b);
         }
     }
@@ -223,7 +226,7 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
     {
         let d = d.clone();
         last.connect_clicked(move |_| {
-            if by_prompt { wb_core::ask::clear(&d.root, &id); } else if !saved(&d, wb_core::ask::answer(&d.root, &id, "terminal", &json!({}))) { return; }
+            if by_prompt { wb_core::ask::clear(&wb_core::ask::root_of(&d, &id), &id); } else if !saved(&d, wb_core::ask::answer(&wb_core::ask::root_of(&d, &id), &id, "terminal", &json!({}))) { return; }
             done();
         });
     }
@@ -236,7 +239,7 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
 
 /// The nearest answer in the conversation: a session moved on has none of its own at first.
 fn newest_answer(d: &Data, session: &str) -> Option<Value> {
-    records::lineage(d, session).into_iter().find_map(|id| std::fs::read_to_string(d.root.join("answers").join(format!("{id}.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()))
+    records::lineage(d, session).into_iter().find_map(|id| std::fs::read_to_string(wb_core::roots::for_session(d, &id).root.join("answers").join(format!("{id}.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()))
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
@@ -364,8 +367,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     }
     let card_of: RefCell<Option<String>> = RefCell::default();
     every(1000, move || {
-        wb_core::ask::panel_alive(&d.root);
-        let asks = wb_core::ask::pending(&d.root);
+        // Each root's hooks look for the panel in their own root.
+        for r in wb_core::roots::all_of(&d) { wb_core::ask::panel_alive(&r.root); }
+        let asks = wb_core::ask::pending_all(&d);
         let id_of = |a: &Value| a["id"].as_str().unwrap_or("").to_string();
         // The card shown stays while its ask waits, so nothing typed in it is lost; then the followed
         // conversation's next ask, else the oldest one waiting.

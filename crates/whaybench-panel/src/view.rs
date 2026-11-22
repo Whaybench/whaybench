@@ -102,7 +102,7 @@ fn session_now(v: &V) -> Option<String> {
     }
 }
 
-fn own_picture(d: &Data, session: &str) -> std::path::PathBuf { d.root.join("show").join(session).join("latest.html") }
+fn own_picture(d: &Data, session: &str) -> std::path::PathBuf { wb_core::roots::for_session(d, session).root.join("show").join(session).join("latest.html") }
 
 /// What this session's history has already taken of its own picture.
 fn read_taken(v: &V) -> HashMap<String, u128> {

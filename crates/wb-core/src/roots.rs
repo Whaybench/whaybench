@@ -73,6 +73,16 @@ impl Roots {
     }
 }
 
+/// Whether this data folder is a project's own (its agents' and the project's, not the host's).
+pub fn is_project_root(d: &Data) -> bool { d.root.file_name().is_some_and(|n| n == PROJECT_DATA) }
+
+/// The root a session's files are in, for a caller holding `d`: a project's programs hold their own root, the
+/// host's hold the host's and find a project session in its project.
+pub fn for_session(d: &Data, session: &str) -> Data { if is_project_root(d) { d.clone() } else { Roots::new(d.clone()).of_session(session) } }
+
+/// The roots to list sessions from, for a caller holding `d`.
+pub fn all_of(d: &Data) -> Vec<Data> { if is_project_root(d) { vec![d.clone()] } else { Roots::new(d.clone()).all() } }
+
 fn has_session(d: &Data, session: &str) -> bool { d.root.join("sessions").join(format!("{session}.json")).is_file() }
 
 /// The project data root a folder is in, if it is inside a Briefsafe project folder.
@@ -125,6 +135,12 @@ mod tests {
         fs::write(t.join("p1.jsonl"), "{\"type\":\"user\",\"message\":{\"content\":\"hi\"}}\n{\"type\":\"assistant\",\"message\":{\"content\":\"ok\"}}\n").unwrap();
         assert!(crate::sessions::has_conversation(&pr, "p1"));
         assert_ne!(host.claude_dir(), pr.claude_dir());
+
+        // What a project's programs say and ask for reaches the host's readers.
+        crate::status::say(&pr, "from the project", 30);
+        assert_eq!(crate::status::current(&host).as_deref(), Some("from the project"));
+        crate::view::ask(&pr, &crate::view::for_session("p1"), &json!({"open": "x"})).unwrap();
+        assert_eq!(crate::view::take_requests(&host, &crate::view::for_session("p1")), vec![json!({"open": "x"})]);
 
         remove_stub(&host, "up");
         assert_eq!(roots.of_session("p1").root, host.root, "a closed or removed project's sessions are not found");

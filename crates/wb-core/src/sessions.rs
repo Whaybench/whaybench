@@ -29,7 +29,7 @@ pub fn subagents_dir(root: &Path, id: &str) -> PathBuf { root.join("cache").join
 /// The session's subagents still running, the earliest started first. One silent for half an hour is taken for
 /// stopped: an interrupted turn may never send its stop.
 pub fn subagents_running(d: &Data, id: &str) -> Vec<Value> {
-    let mut v: Vec<Value> = fs::read_dir(subagents_dir(&d.root, id)).into_iter().flatten().flatten()
+    let mut v: Vec<Value> = fs::read_dir(subagents_dir(&at(d, id).root, id)).into_iter().flatten().flatten()
         .filter_map(|e| read_json(&e.path())).filter(|a| a.get("done").is_none() && crate::map::now_ms().saturating_sub(a["at"].as_u64().unwrap_or(0)) < 1_800_000).collect();
     v.sort_by_key(|a| a["started"].as_u64().unwrap_or(0));
     v
@@ -39,8 +39,12 @@ pub fn tabs_dir(d: &Data) -> PathBuf { d.cache().join("term") }
 
 fn read_json(p: &Path) -> Option<Value> { serde_json::from_str(&fs::read_to_string(p).ok()?).ok() }
 
+/// The data root holding a session's files (spec 3.22): the host's, or the project's it belongs to. Everything below
+/// that reads or writes one session's files goes through this, so a host program holding the host's root reaches a
+/// project's sessions too.
+fn at(d: &Data, id: &str) -> Data { crate::roots::for_session(d, id) }
 
-pub fn record_of(d: &Data, id: &str) -> Option<Value> { read_json(&sessions_dir(d).join(format!("{id}.json"))) }
+pub fn record_of(d: &Data, id: &str) -> Option<Value> { read_json(&sessions_dir(&at(d, id)).join(format!("{id}.json"))) }
 
 /// Where a session lives now: /background carries it on under a new id and the old record says where it
 /// moved, possibly more than once.
@@ -75,7 +79,7 @@ pub fn moved_from(d: &Data, id: &str) -> Vec<String> {
 /// The newest session recorded for this tab that has not moved on. A tab can hold several in turn.
 pub fn session_of_tab(d: &Data, tab: &str) -> Option<String> {
     let mut best: Option<(i64, String)> = None;
-    for f in fs::read_dir(sessions_dir(d)).ok()?.flatten() {
+    for f in crate::roots::all_of(d).iter().flat_map(|r| fs::read_dir(sessions_dir(r)).into_iter().flatten().flatten()) {
         let Some(r) = read_json(&f.path()) else { continue };
         if r.get("tab").and_then(Value::as_str) != Some(tab) || r.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty()) { continue; }
         let at = r.get("lastActive").and_then(Value::as_i64).unwrap_or(0);
@@ -97,7 +101,7 @@ fn continued_in_text(text: &str) -> Option<String> {
 fn transcript_of(d: &Data, id: &str) -> Option<PathBuf> {
     let cwd = record_of(d, id)?.get("cwd")?.as_str()?.to_string();
     let folder: String = cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    Some(d.claude_dir()?.join("projects").join(folder).join(format!("{id}.jsonl")))
+    Some(at(d, id).claude_dir()?.join("projects").join(folder).join(format!("{id}.jsonl")))
 }
 
 /// After /resume picked a session that runs in the background, Claude Code does not move it into this tab: this
@@ -109,7 +113,7 @@ pub fn resumed_elsewhere(d: &Data, me: &str) -> Option<(String, Option<String>)>
     // The last 90 seconds are at the end of the file; 2 MB leaves room for large tool results in them.
     let text = crate::paths::read_tail(&transcript_of(d, me)?, 2 * 1024 * 1024).ok()?;
     let short = opened_short(&text, crate::clock::now_ms())?;
-    let target = fs::read_dir(sessions_dir(d)).ok()?.flatten().filter_map(|f| f.file_name().to_string_lossy().strip_suffix(".json").map(String::from))
+    let target = fs::read_dir(sessions_dir(&at(d, me))).ok()?.flatten().filter_map(|f| f.file_name().to_string_lossy().strip_suffix(".json").map(String::from))
         .find(|n| n.starts_with(&short))?;
     if target == me { return None; }
     let carried = continued_in_text(&text).filter(|c| c != &target && !has_conversation(d, c));
@@ -199,6 +203,8 @@ fn resumable_by(d: &Data, id: &str, saved: impl Fn(&str) -> bool) -> String {
 /// the old record says where it went.
 pub fn adopt(d: &Data, old: &str, new: &str) {
     if old == new { return; }
+    // A conversation moves within its own root: a project's stays in the project.
+    let d = &at(d, old);
     let Some(mut from) = record_of(d, old) else { return };
     let mut to = record_of(d, new).unwrap_or_else(|| serde_json::json!({"id": new}));
     for key in ["cwd", "firstPrompt", "lastPrompt", "tab", "titleSent", "titleByPerson"] {
@@ -240,6 +246,7 @@ pub fn locate(d: &Data, id: &str) -> String {
 
 /// The conversation goes on under this number again: a move recorded on it did not hold.
 pub fn moved_back(d: &Data, id: &str) {
+    let d = &at(d, id);
     let Some(mut r) = record_of(d, id) else { return };
     if r.as_object_mut().and_then(|o| o.remove("movedTo")).is_some() {
         let _ = write_atomic(&sessions_dir(d).join(format!("{id}.json")), r.to_string());
@@ -317,7 +324,7 @@ pub fn attach_name(id: &str) -> String {
 pub fn has_conversation(d: &Data, id: &str) -> bool {
     if record_of(d, id).and_then(|r| r.get("firstPrompt")?.as_str().map(|p| !p.is_empty())).unwrap_or(false) { return true; }
     // The record can miss a prompt; Claude Code's own record cannot. Ending a session is not to be undone on a guess.
-    let Some(claude) = d.claude_dir() else { return true };
+    let Some(claude) = at(d, id).claude_dir() else { return true };
     let name = format!("{id}.jsonl");
     fs::read_dir(claude.join("projects")).into_iter().flatten().flatten().any(|e| {
         holds_conversation(&e.path().join(&name))
@@ -368,7 +375,7 @@ pub fn background(id: &str) -> bool { agent(id).is_some_and(|a| a.get("kind").an
 /// Whether a process holds this session: Claude Code's list, else the mod's heartbeat (30 seconds).
 pub fn alive(d: &Data, id: &str) -> bool {
     if agent(id).is_some() { return true; }
-    heartbeat(&alive_dir(d).join(id))
+    heartbeat(&alive_dir(&at(d, id)).join(id))
 }
 
 fn heartbeat(p: &Path) -> bool {
@@ -376,10 +383,11 @@ fn heartbeat(p: &Path) -> bool {
     fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|a| a < Duration::from_secs(30))
 }
 
-pub fn mark_off(d: &Data, id: &str) { let _ = write_atomic(&alive_dir(d).join(id), "0"); }
+pub fn mark_off(d: &Data, id: &str) { let _ = write_atomic(&alive_dir(&at(d, id)).join(id), "0"); }
 
 /// A session the person ended: kept on disk, listed under the hidden ones, never left as "working".
 pub fn mark_ended(d: &Data, id: &str) {
+    let d = &at(d, id);
     let p = sessions_dir(d).join(format!("{id}.json"));
     if let Some(mut r) = read_json(&p) {
         r["ended"] = Value::Bool(true);
@@ -394,31 +402,45 @@ pub fn stop(id: &str) {
     let _ = Command::new(claude_program()).args(["stop", &short]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
 }
 
-/// Every recorded session, most recently active first.
-pub fn all(d: &Data) -> Vec<Value> {
-    let mut out: Vec<Value> = fs::read_dir(sessions_dir(d)).into_iter().flatten().flatten().filter_map(|f| read_json(&f.path())).filter(|r| r.get("id").and_then(Value::as_str).is_some()).collect();
+/// Every recorded session, most recently active first: the host's and the open projects' for a host program.
+pub fn all(d: &Data) -> Vec<Value> { listed(crate::roots::all_of(d)) }
+
+/// The sessions of this one root: what cleaning up a root may touch.
+pub(crate) fn all_here(d: &Data) -> Vec<Value> { listed(vec![d.clone()]) }
+
+fn listed(roots: Vec<Data>) -> Vec<Value> {
+    let mut out: Vec<Value> = roots.iter().flat_map(|r| fs::read_dir(sessions_dir(r)).into_iter().flatten().flatten()).filter_map(|f| read_json(&f.path())).filter(|r| r.get("id").and_then(Value::as_str).is_some()).collect();
     out.sort_by_key(|r| std::cmp::Reverse(r.get("lastActive").and_then(Value::as_i64).unwrap_or(0)));
     out
 }
 
 /// A session's map with its nodes' content (`map::view`); None for a session without a map file.
 /// shortcut: opens the store on every call; share one connection if a panel's refresh shows up in a profile.
-pub fn map_of(d: &Data, id: &str) -> Option<Value> { crate::map::view(&d.root, id).ok().filter(|m| m.get("nodes").is_some()) }
+pub fn map_of(d: &Data, id: &str) -> Option<Value> { crate::map::view(&at(d, id).root, id).ok().filter(|m| m.get("nodes").is_some()) }
 
 pub fn unend(d: &Data, id: &str) {
-    let p = sessions_dir(d).join(format!("{id}.json"));
+    let p = sessions_dir(&at(d, id)).join(format!("{id}.json"));
     if let Some(mut r) = read_json(&p) {
         r["ended"] = Value::Bool(false);
         let _ = write_atomic(&p, r.to_string());
     }
 }
 
-pub fn state_of(d: &Data, id: &str) -> Option<String> { read_json(&state_dir(d).join(format!("{id}.json")))?.get("state")?.as_str().map(String::from) }
+pub fn state_of(d: &Data, id: &str) -> Option<String> { read_json(&state_dir(&at(d, id)).join(format!("{id}.json")))?.get("state")?.as_str().map(String::from) }
 
 
 pub fn clear_focus(d: &Data) { let _ = fs::remove_file(focus_file(d)); }
 
-pub fn latest(d: &Data) -> Option<String> { Some(current_id(d, read_json(&latest_map(d))?.get("sessionId")?.as_str()?)) }
+pub fn latest(d: &Data) -> Option<String> { Some(current_id(d, &latest_id(d)?)) }
+
+/// The session whose map changed last, over the roots a caller sees: each root keeps its own `latest.json`.
+fn latest_id(d: &Data) -> Option<String> {
+    crate::roots::all_of(d).iter().filter_map(|r| {
+        let p = latest_map(r);
+        let when = fs::metadata(&p).and_then(|m| m.modified()).ok()?;
+        Some((when, read_json(&p)?.get("sessionId")?.as_str()?.to_string()))
+    }).max_by_key(|x| x.0).map(|x| x.1)
+}
 
 /// A conversation tab without a session yet is in front (an agent whose hooks have not told it): the panels show
 /// nothing rather than the session seen before, which would pass for this tab's.
@@ -449,14 +471,44 @@ pub fn focus(d: &Data) -> Option<String> {
 /// The session the program is on: the chosen one, else the one whose map changed last.
 pub fn target(d: &Data) -> Option<String> {
     if empty_chosen(d) { return None; }
-    focus(d).or_else(|| {
-        let id = read_json(&latest_map(d))?.get("sessionId")?.as_str()?.to_string();
-        Some(current_id(d, &id))
-    })
+    focus(d).or_else(|| latest(d))
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_host_program_reaches_a_project_session_and_writes_only_to_the_project() {
+        use super::*;
+        use crate::roots::{Stub, write_stub};
+        let b = std::env::temp_dir().join(format!("wb-sess-roots-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&b);
+        let host = Data::new(b.join("host"));
+        let stub = Stub { id: "up".into(), name: "Up".into(), folder: b.join("work/up") };
+        write_stub(&host, &stub).unwrap();
+        let pr = stub.root();
+        fs::create_dir_all(pr.root.join("projects/up")).unwrap();
+        fs::write(pr.root.join("projects/up/project.json"), "{}").unwrap();
+        let record = serde_json::json!({"id": "p1", "tab": "t9", "lastActive": 5, "cwd": "/w/up", "firstPrompt": "secret-plan-4q"});
+        write_atomic(&sessions_dir(&pr).join("p1.json"), record.to_string()).unwrap();
+        write_atomic(&state_dir(&pr).join("p1.json"), r#"{"state":"working"}"#).unwrap();
+        write_atomic(&sessions_dir(&host).join("h1.json"), r#"{"id":"h1","tab":"t1","lastActive":9}"#).unwrap();
+
+        let ids: Vec<String> = all(&host).iter().map(|r| r["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, vec!["h1", "p1"], "the host lists both, newest first");
+        assert_eq!(all(&pr).len(), 1, "a project lists only its own");
+        assert_eq!(record_of(&host, "p1").unwrap()["firstPrompt"], "secret-plan-4q");
+        assert_eq!(state_of(&host, "p1").as_deref(), Some("working"));
+        assert_eq!(session_of_tab(&host, "t9").as_deref(), Some("p1"));
+        mark_ended(&host, "p1");
+        mark_off(&host, "p1");
+        assert_eq!(state_of(&pr, "p1").as_deref(), Some("done"));
+        assert_eq!(record_of(&pr, "p1").unwrap()["ended"], true);
+        let _ = session_name(&host, "p1");
+        assert!(crate::paths::files_containing(&host.root, b"secret-plan-4q").is_empty(), "nothing of the project in the host's root");
+        assert!(!sessions_dir(&host).join("p1.json").exists() && !alive_dir(&host).join("p1").exists());
+        fs::remove_dir_all(&b).unwrap();
+    }
+
     #[test]
     fn a_setting_counts_in_the_project_too() {
         let d = std::env::temp_dir().join(format!("wb-setting-{}", std::process::id()));

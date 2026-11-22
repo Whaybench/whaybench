@@ -34,7 +34,7 @@ fn pairs(d: &Data, info: &Value) -> Vec<(&'static str, String)> {
         for n in m.get("nodes").and_then(Value::as_array).into_iter().flatten() { out.push((wb_core::i18n::t("map"), text(n, "label").to_string())); }
     }
     let read = |p: std::path::PathBuf| std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
-    if let Some(a) = read(d.root.join("answers").join(format!("{id}.json"))) { out.push((wb_core::i18n::t("answer"), text(&a, "text").to_string())); }
+    if let Some(a) = read(wb_core::roots::for_session(d, id).root.join("answers").join(format!("{id}.json"))) { out.push((wb_core::i18n::t("answer"), text(&a, "text").to_string())); }
     out
 }
 
@@ -71,7 +71,7 @@ fn respawn_block(d: &Data, id: &str) -> Option<&'static str> {
         _ => {}
     }
     // A self-paced /loop's wake-up is not brought back by a restart.
-    if sessions::schedules::live(&d.root, id).iter().any(|j| j["kind"] == "wakeup") { return Some("respawn-loop"); }
+    if sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).iter().any(|j| j["kind"] == "wakeup") { return Some("respawn-loop"); }
     None
 }
 
@@ -93,7 +93,7 @@ fn respawn(d: &Data, id: &str) {
 
 /// The sessions with a card waiting in the answer panel, read once for the whole list.
 fn asking(d: &Data) -> std::collections::BTreeSet<String> {
-    wb_core::ask::pending(&d.root).iter().filter_map(|a| a["session"].as_str().map(String::from)).collect()
+    wb_core::ask::pending_all(d).iter().filter_map(|a| a["session"].as_str().map(String::from)).collect()
 }
 
 fn describe(d: &Data, info: &Value, asking: &std::collections::BTreeSet<String>) -> (String, String) {
@@ -109,7 +109,7 @@ fn describe(d: &Data, info: &Value, asking: &std::collections::BTreeSet<String>)
         (_, Some("done")) => wb_core::i18n::t("answered").into(),
         _ => wb_core::i18n::t("running").into(),
     }, ago(info.get("lastActive").and_then(Value::as_i64).unwrap_or(0))];
-    let jobs = if alive { sessions::schedules::live(&d.root, id).len() } else { 0 };
+    let jobs = if alive { sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).len() } else { 0 };
     if jobs > 0 { parts.push(wb_core::i18n::f("schedules-count", &[("n", jobs.to_string())])); }
     if let Some(m) = sessions::map_of(d, id) {
         let nodes = m.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -154,7 +154,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let waiting = asking(d);
     let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}", open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
         let id = sid(s);
-        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id), sessions::schedules::live(&d.root, id).len(), sessions::old_version(id))
+        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id), sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).len(), sessions::old_version(id))
     }).collect::<Vec<_>>());
     if !force && view.borrow().signature == signature { return; }
     view.borrow_mut().signature = signature;

@@ -8,6 +8,8 @@ use crate::{paths::Data, sessions};
 
 /// The session and the ids before it: moved on by /background, or whose map it inherited.
 pub fn lineage(d: &Data, id: &str) -> Vec<String> {
+    // A conversation's earlier numbers are in its own root.
+    let d = &crate::roots::for_session(d, id);
     let records = sessions::all(d);
     let inherited: Value = fs::read_to_string(d.root.join("forks/inherited.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     let (mut ids, mut frontier) = (vec![id.to_string()], vec![id.to_string()]);
@@ -26,7 +28,7 @@ pub fn lineage(d: &Data, id: &str) -> Vec<String> {
 pub fn answers_of(d: &Data, ids: &[String]) -> Vec<Value> {
     let mut rows: BTreeMap<(i64, String), Value> = BTreeMap::new();
     for sid in ids {
-        let Ok(text) = fs::read_to_string(d.root.join("answer-log").join(format!("{sid}.jsonl"))) else { continue };
+        let Ok(text) = fs::read_to_string(crate::roots::for_session(d, sid).root.join("answer-log").join(format!("{sid}.jsonl"))) else { continue };
         for line in text.lines() {
             let Ok(row) = serde_json::from_str::<Value>(line) else { continue };
             let Some(at) = row.get("at").and_then(Value::as_i64) else { continue };
@@ -49,6 +51,7 @@ pub fn related_index(rows: &[Value], at: i64) -> Option<usize> { rows.iter().pos
 
 /// Every recorded read and change of the conversation, and the files attached to its nodes as `attached` touches.
 pub fn touches(d: &Data, id: &str) -> Vec<Value> {
+    let d = &crate::roots::for_session(d, id);
     let mut out = Vec::new();
     for sid in lineage(d, id) {
         if let Some(list) = fs::read_to_string(d.root.join("files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()) { out.extend(list); }
@@ -68,6 +71,7 @@ pub fn touches(d: &Data, id: &str) -> Vec<Value> {
 
 /// The AI's recorded edits of a file in the conversation, oldest first.
 pub fn file_edits(d: &Data, id: &str, path: &str) -> Vec<Value> {
+    let d = &crate::roots::for_session(d, id);
     let mut found: Vec<Value> = lineage(d, id).iter().filter_map(|sid| fs::read_to_string(d.root.join("files").join(format!("{sid}.edits.json"))).ok()).filter_map(|t| serde_json::from_str::<Value>(&t).ok()).filter_map(|v| v.as_array().cloned()).flatten().filter(|e| e.get("path").and_then(Value::as_str) == Some(path)).collect();
     found.sort_by_key(|e| e["at"].as_i64().unwrap_or(0));
     found
@@ -75,11 +79,13 @@ pub fn file_edits(d: &Data, id: &str, path: &str) -> Vec<Value> {
 
 /// Bash run times of the conversation: (start, end) ms.
 pub fn bash_runs(d: &Data, id: &str) -> Vec<(i64, i64)> {
+    let d = &crate::roots::for_session(d, id);
     lineage(d, id).iter().filter_map(|sid| fs::read_to_string(d.root.join("files").join(format!("{sid}.bash.json"))).ok()).filter_map(|t| serde_json::from_str::<Value>(&t).ok()).filter_map(|v| v.as_array().cloned()).flatten().filter_map(|r| { let a = r.as_array()?; Some((a.first()?.as_i64()?, a.get(1)?.as_i64()?)) }).collect()
 }
 
 /// Map node id to how many different files were read or changed while on it, or attached to it.
 pub fn file_counts(d: &Data, id: &str) -> HashMap<String, usize> {
+    let d = &crate::roots::for_session(d, id);
     let mut found: HashMap<String, HashSet<String>> = HashMap::new();
     for sid in lineage(d, id) {
         if let Some(list) = fs::read_to_string(d.root.join("files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()) {

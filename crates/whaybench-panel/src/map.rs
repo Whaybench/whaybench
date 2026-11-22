@@ -210,7 +210,7 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
         {
             let from = s(data, "from").to_string();
             let at = records::node_time(n);
-            let kept = !from.is_empty() && records::lineage(d, &from).iter().any(|n| d.root.join("answer-log").join(format!("{n}.jsonl")).exists());
+            let kept = !from.is_empty() && records::lineage(d, &from).iter().any(|n| wb_core::roots::for_session(d, n).root.join("answer-log").join(format!("{n}.jsonl")).exists());
             let (d2, id2) = (d.clone(), id.clone());
             items.add(wb_core::i18n::t("related-answers-3"), at.is_some() && kept, move || status::send(&d2, "answer", json!({"session": from, "node": id2, "at": at.unwrap_or(0)})));
         }
@@ -283,11 +283,11 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
             items.add(wb_core::i18n::t("open-source-imported"), true, move || open_node_source(&d2, &src));
         }
         // The person's important mark, written to this map as theirs.
-        if data.get("sessionId").and_then(Value::as_str).is_some() {
+        if let Some(owner) = data.get("sessionId").and_then(Value::as_str) {
             let marked = n.get("mark").is_some();
-            let (d2, id2) = (d.clone(), s(n, "nid").to_string());
+            let (d2, id2, t2) = (d.clone(), s(n, "nid").to_string(), owner.to_string());
             items.add(wb_core::i18n::t(if marked { "notify-unmark" } else { "notify-mark" }), true, move || {
-                if let Err(e) = wb_core::map::person(&d2.root, json!([{"id": id2, "mark": if marked { Value::Null } else { json!("important") }}])) {
+                if let Err(e) = wb_core::map::person(&wb_core::roots::for_session(&d2, &t2).root, json!([{"id": id2, "mark": if marked { Value::Null } else { json!("important") }}])) {
                     status::say(&d2, &wb_core::i18n::f("notify-not-written", &[("e", e.to_string())]), 8);
                 }
             });
@@ -351,7 +351,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
         let act = |branch: bool, what: String| {
             let (d2, t2, label2, id2, nid2) = (d.clone(), target.clone(), label.clone(), id.clone(), nid.clone());
             let n = if branch { below + 1 } else { 1 };
-            move || match wb_core::map::trash(&d2.root, &nid2, branch) {
+            move || match wb_core::map::trash(&wb_core::roots::for_session(&d2, &t2).root, &nid2, branch) {
                 Ok(_) => {
                     record::decide("map", "delete", &what, &[("session", t2.clone()), ("node", id2.clone())]);
                     status::say(&d2, &wb_core::i18n::f("moved-to-trash", &[("a1", cut(&label2, 24)), ("n", n.to_string())]), 8);

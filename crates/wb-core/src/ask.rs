@@ -37,17 +37,31 @@ fn new_id(sid: &str) -> String {
 /// Asks still waiting, oldest first: one a hook waits on while its process lives (no longer than the hooks'
 /// timeout, so a reused process number shows nothing), or one answered by a prompt. Only well-formed ids.
 pub fn pending(data: &Path) -> Vec<Value> {
+    let foreign = data.file_name().is_some_and(|n| n == crate::roots::PROJECT_DATA);
     let mut out: Vec<Value> = fs::read_dir(dir(data)).into_iter().flatten().flatten()
         .filter(|f| f.file_name().to_str().is_some_and(|n| n.ends_with(".json") && !n.ends_with(".answer.json")))
         .filter_map(|f| read_json(&f.path(), Value::Null).ok())
         .filter(|r| r["id"].as_str().is_some_and(|i| valid_id(i).is_ok()) && r["session"].as_str().is_some_and(|s| safe_id(s).is_ok()))
-        .filter(|r| r["via"] == "prompt" || (r["pid"].as_u64().is_some_and(|p| Path::new(&format!("/proc/{p}")).exists())
+        // A project's hook may run in its own process namespace: its number says nothing here, the time limit holds.
+        .filter(|r| r["via"] == "prompt" || ((foreign || r["pid"].as_u64().is_some_and(|p| Path::new(&format!("/proc/{p}")).exists()))
             && now_ms() - r["at"].as_i64().unwrap_or(0) < WAIT_MS + 10_000))
         // Answered, and the hook has not taken it yet.
         .filter(|r| !answer_file(data, r["id"].as_str().unwrap_or("")).exists())
         .collect();
     out.sort_by_key(|r| r["at"].as_i64().unwrap_or(0));
     out
+}
+
+/// Asks waiting in every root a caller sees (the host's and the open projects'), oldest first.
+pub fn pending_all(d: &crate::paths::Data) -> Vec<Value> {
+    let mut out: Vec<Value> = crate::roots::all_of(d).iter().flat_map(|r| pending(&r.root)).collect();
+    out.sort_by_key(|r| r["at"].as_i64().unwrap_or(0));
+    out
+}
+
+/// The data root an ask was written in, where its answer goes.
+pub fn root_of(d: &crate::paths::Data, id: &str) -> std::path::PathBuf {
+    crate::roots::all_of(d).into_iter().map(|r| r.root).find(|r| request_file(r, id).exists()).unwrap_or_else(|| d.root.clone())
 }
 
 /// The person's answer to one ask: decision allow, deny or terminal; answers by question text.
