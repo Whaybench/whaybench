@@ -83,6 +83,13 @@ fn write_views(d: &Data, list: &[(String, Link)]) {
 }
 
 pub fn set_view(d: &Data, name: &str, link: &Link) {
+    // A view held on a project's page or conversation is not written down on the host (its path, title, session).
+    let of_project = match link {
+        Link::Target(p, _) => { let p = Path::new(p.strip_prefix("file://").unwrap_or(p)); crate::beneath::split(p).is_some() || crate::roots::project_root_of(d, p).is_some() }
+        Link::Session(s) => crate::roots::Roots::new(d.clone()).project_of(s).is_some(),
+        Link::Follow => false,
+    };
+    if of_project { return; }
     let mut list = views(d);
     match list.iter_mut().find(|(n, _)| n == name) { Some(e) => e.1 = link.clone(), None => list.push((name.to_string(), link.clone())) }
     write_views(d, &list);

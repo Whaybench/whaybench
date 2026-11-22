@@ -135,15 +135,28 @@ fn keep_picture(v: &V, path: &Path) -> Option<String> {
 
 /// A file in a temporary folder will be gone one day, and with it what this session showed: the history keeps a copy.
 /// Elsewhere the file itself is shown, as it is now.
+/// The project of the session this view follows, if it is one's.
+fn project_followed(v: &V) -> Option<wb_core::roots::Stub> {
+    let id = wb_core::roots::Roots::new(v.d.clone()).project_of(v.followed.as_deref()?)?;
+    wb_core::roots::stubs(&v.d).into_iter().find(|st| st.id == id)
+}
+
+/// Whether a project's view may show this: a web page (http, https), or a file whose real path is in the project.
+fn in_project(s: &wb_core::roots::Stub, path: &str) -> bool {
+    if path.starts_with("http://") || path.starts_with("https://") { return true; }
+    let Ok(real) = std::fs::canonicalize(path.strip_prefix("file://").unwrap_or(path)) else { return false };
+    [s.folder.clone(), s.stored().root].iter().filter_map(|r| std::fs::canonicalize(r).ok()).any(|r| real.starts_with(r))
+}
+
 fn lasting(v: &V, path: &str) -> Option<String> {
     let p = Path::new(path);
     // A project session's request opens only what is in the project (its folder or its data), by real path: never a
-    // host file named through `..` or a link (spec 3.22).
-    if let Some(s) = v.followed.as_deref().and_then(|s| { let r = wb_core::roots::Roots::new(v.d.clone()); let id = r.project_of(s)?; wb_core::roots::stubs(&v.d).into_iter().find(|st| st.id == id) }) {
-        if view::is_web(path) { return Some(path.to_string()); }
-        let real = std::fs::canonicalize(p).ok()?;
-        let inside = [s.folder.clone(), s.stored().root].iter().filter_map(|r| std::fs::canonicalize(r).ok()).any(|r| real.starts_with(r));
-        if !inside { wb_core::log::warn("view", "request refused", "a project's view asked for a path outside the project", &[("project", s.id.clone())]); return None; }
+    // host file named through `..`, a link or a file:// address (spec 3.22).
+    if let Some(s) = project_followed(v) {
+        if path.starts_with("http://") || path.starts_with("https://") { return Some(path.to_string()); }
+        let path = path.strip_prefix("file://").unwrap_or(path);
+        let real = std::fs::canonicalize(path).ok()?;
+        if !in_project(&s, path) { wb_core::log::warn("view", "request refused", "a project's view asked for a path outside the project", &[("project", s.id.clone())]); return None; }
         if real.starts_with(std::fs::canonicalize(s.stored().root).ok()?) { return keep_picture(v, &s.open_at.join(real.strip_prefix(std::fs::canonicalize(s.stored().root).ok()?).ok()?)).or(Some(path.to_string())); }
         return Some(real.to_string_lossy().to_string());
     }
@@ -159,6 +172,11 @@ fn display(v: &V) {
     // The pages drawn here paint their own background, or leave it to a see-through panel.
     v.web.set_background_color(&gtk::gdk::RGBA::TRANSPARENT);
     match v.hist.current() {
+        // Checked again when shown: a file of the project may have become a link to a host file since.
+        Some((path, _)) if project_followed(v).is_some_and(|s| !in_project(&s, path)) => {
+            v.web.load_html(&format!("<!doctype html><meta charset='utf-8'><style>{}</style>", page_style(&v.d)), None);
+            v.place.set_text("");
+        }
         Some((path, title)) => {
             match text_page(&v.d, path) {
                 Some(page) => v.web.load_html(&page, Some(&file_uri(&Path::new(path).parent().map(|p| format!("{}/", p.display())).unwrap_or_default()))),
@@ -238,6 +256,9 @@ fn switch(v: &mut V) {
         for old in sessions::moved_from(&v.d, &now) { view::session_moved(&v.d, &old, &now); }
     }
     v.hist = History::load(view::history_dir(&v.d, &v.name, v.followed.as_deref()));
+    // A project's list is its agents' to write: only what it may show is kept.
+    if let Some(s) = project_followed(v) { v.hist.items.retain(|(p, _)| in_project(&s, p)); v.hist.pos = v.hist.items.len().saturating_sub(1); }
+    v.of_project = v.followed.is_some() && project_followed(v).is_some();
     v.seen = read_taken(v);
     incoming(v);
     display(v);

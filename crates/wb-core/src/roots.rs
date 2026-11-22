@@ -226,6 +226,24 @@ mod tests {
     }
 
     #[test]
+    fn a_view_held_on_a_projects_page_is_not_noted_on_the_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Data::new(dir.path().join("host"));
+        let stub = Stub::new(&host, "up", "Up", &dir.path().join("up"));
+        write_stub(&host, &stub).unwrap();
+        write_marker(&stub.stored(), "up").unwrap();
+        open_plain(&stub).unwrap();
+        fs::create_dir_all(&stub.folder).unwrap();
+        fs::write(stub.folder.join("plan.md"), "x").unwrap();
+        use crate::view::{Link, set_view, views};
+        set_view(&host, "view", &Link::Target(stub.folder.join("plan.md").to_string_lossy().to_string(), "plan".into()));
+        set_view(&host, "view2", &Link::Target(stub.open_at.join("view/a.html").to_string_lossy().to_string(), "a".into()));
+        assert!(views(&host).iter().all(|(_, l)| *l == Link::Follow), "nothing of the project noted");
+        set_view(&host, "view", &Link::Target("/tmp/x.html".into(), "x".into()));
+        assert!(views(&host).iter().any(|(_, l)| matches!(l, Link::Target(..))), "the host's own still kept");
+    }
+
+    #[test]
     fn a_project_cannot_take_a_host_conversations_number() {
         let dir = tempfile::tempdir().unwrap();
         let host = Data::new(dir.path().join("host"));

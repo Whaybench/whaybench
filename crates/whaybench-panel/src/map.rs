@@ -125,8 +125,10 @@ fn maps_dir(d: &Data) -> std::path::PathBuf { d.maps() }
 /// Writes the branch, or the whole map, as a file in the data directory; returns its path.
 fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str) -> std::io::Result<std::path::PathBuf> {
     // A project's map is saved in the project: nothing of it goes to the host's data folder (spec 3.22).
-    // A kept copy names where it came from instead of a session of its own.
-    let d = &wb_core::roots::for_session(d, data.get("sessionId").or_else(|| data.get("from")).and_then(Value::as_str).unwrap_or(""));
+    // A map read from a project's file goes back to that project, whatever the file says; a kept copy names where
+    // it came from instead of a session of its own.
+    let file_root = data.get("_file").and_then(Value::as_str).and_then(|f| wb_core::beneath::split(std::path::Path::new(f))).map(|(r, _)| Data::new(r));
+    let d = &file_root.unwrap_or_else(|| wb_core::roots::for_session(d, data.get("sessionId").or_else(|| data.get("from")).and_then(Value::as_str).unwrap_or("")));
     if wb_core::beneath::split(&maps_dir(d)).is_none() { std::fs::create_dir_all(maps_dir(d))?; }
     let tree = tree_of(data);
     let nodes: Vec<Value> = match root {
@@ -231,7 +233,9 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
         for p in store.list_projects() {
             let (pid, name) = (s(&p, "id").to_string(), s(&p, "name").to_string());
             let (st, d2, s2, l2, f2, label2) = (store.clone(), d.clone(), session.clone().unwrap_or_default(), lines.clone(), flow.clone(), label.clone());
-            sub.add(&name, session.is_some(), move || {
+            // A project's conversation does not write into the host's projects.
+            let host_session = session.as_deref().is_some_and(|s| wb_core::roots::Roots::new(d.clone()).project_of(s).is_none());
+            sub.add(&name, host_session, move || {
                 let Ok(q) = st.queue_add(&pid, "reflect", &label2, &s2) else { return };
                 if sessions::queue_prompt(&d2, &s2, &reflect_request(Some(&pid), Some(&q), &f2, &l2)) { status::say(&d2, &wb_core::i18n::f("project-reflection-request-sent-session", &[("a1", cut(&label2, 20)), ("a2", cut(&s2, 8))]), 8); }
                 else { st.queue_drop(&pid, &q); status::say(&d2, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(&s2, 8))]), 8); }
@@ -662,7 +666,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
     if let Some((a, b)) = &scope {
         let args = vec![a.clone(), b.clone()];
         // A project's map panel is not written down on the host (its path and title are the project's).
-        if wb_core::beneath::split(std::path::Path::new(a.trim_start_matches('@'))).is_none() { mapimport::remember(&d, &args); }
+        let of_project = wb_core::beneath::split(std::path::Path::new(a.trim_start_matches('@'))).is_some()
+            || sessions::target(&d).is_some_and(|t| wb_core::roots::Roots::new(d.clone()).project_of(&t).is_some());
+        if !of_project { mapimport::remember(&d, &args); }
         let d2 = d.clone();
         win.connect_close_request(move |_| { mapimport::forget(&d2, &args); glib::Propagation::Proceed });
     }
@@ -848,7 +854,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         // An imported map's file and a session's map both list nodes; their content comes from the memory.
         let (shown, mut data): (String, Option<Value>) = match imported_of(scope.as_ref()) {
             Some(path) => match wb_core::map::view_file(&d.root, std::path::Path::new(path)) {
-                Ok(m) => (path.to_string(), Some(m)),
+                // Where it was read from goes along, so an export of it goes back there.
+                Ok(mut m) => { m["_file"] = path.into(); (path.to_string(), Some(m)) }
                 // A project's map whose project closed: nothing of it stays on screen.
                 Err(_) if wb_core::beneath::split(std::path::Path::new(path)).is_some() => (path.to_string(), Some(serde_json::json!({"nodes": []}))),
                 Err(_) => return,

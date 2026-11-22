@@ -116,7 +116,9 @@ pub fn show(d: &Data, path: &Path, title: &str, node: Option<&str>) {
 /// Brings a source in: kept as a file, shown in a read-only panel.
 pub fn bring_in(d: &Data, source: &Source) {
     let Some((nodes, title, from)) = read(d, source) else { status::say(d, i18n::t("import-failed-no-map"), 6); return };
-    match keep(d, &nodes, &title, &from) {
+    // A file in a project's open place is kept in that project, whatever it says it came from.
+    let at = match source { Source::File(p) => wb_core::beneath::split(p).map(|(r, _)| Data::new(r)), Source::Session(..) => None };
+    match keep(at.as_ref().unwrap_or(d), &nodes, &title, &from) {
         Ok(path) => {
             show(d, &path, &title, None);
             status::say(d, &i18n::f("imported-map-opened", &[("title", title.chars().take(30).collect::<String>()), ("n", nodes.len().to_string())]), 8);

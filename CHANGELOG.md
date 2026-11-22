@@ -111,7 +111,12 @@ names another step.
   conversations then run in the container or are refused, whatever podman answers later; a start finding the
   container gone closes such a project. Tabs of a project come back after a restart as that project's (only while it
   is open), and a project's conversation ends with its tab instead of going to a background the host cannot see.
-  Without podman, a project's Codex tab opens again (its settings folder is made by the host from the add-on). `snapshot`, `snapshots` and `restore` take, list and go back to
+  Without podman, a project's Codex tab opens again (its settings folder is made by the host from the add-on).
+  The answer a panel follows is the project's by where it was read and its file's name, not what the file says. A
+  project's view shows only web pages (http, https) and files whose real path is in the project, its saved list
+  included, checked again each time one is shown; `file://` addresses go through the same check. Hidden files, a
+  held view, a branch panel, exports and imports of a project's map stay with the project; a project's conversation
+  cannot add to the host's projects; a status message is removed from the host's folder once it is over. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -20,6 +20,8 @@ pub fn current(d: &Data) -> Option<String> {
     crate::roots::all_of(d).iter().filter_map(|r| {
         let v: serde_json::Value = serde_json::from_str(&crate::paths::read_text(&status_file(r)).ok()?).ok()?;
         let until = v.get("until")?.as_u64()? as u128;
+        // Gone once over: a message about a project (a node's name) does not stay in the host's folder.
+        if until <= now_ms() && !crate::roots::is_project_root(r) { let _ = fs::remove_file(status_file(r)); }
         (until > now_ms()).then(|| Some((until, v.get("text")?.as_str()?.to_string()))).flatten()
     }).max_by_key(|m| m.0).map(|m| m.1)
 }

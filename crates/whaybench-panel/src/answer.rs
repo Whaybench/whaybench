@@ -246,7 +246,14 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
 /// The nearest answer in the conversation: a session moved on has none of its own at first.
 fn newest_answer(d: &Data, session: &str) -> Option<Value> {
     let root = wb_core::roots::for_session(d, session);
-    records::lineage(d, session).into_iter().find_map(|id| wb_core::paths::read_text(&root.root.join("answers").join(format!("{id}.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()))
+    // Whose it is comes from where it was read and the file's name, never from what the file says.
+    let project = wb_core::roots::is_project_root(&root);
+    records::lineage(d, session).into_iter().find_map(|id| {
+        let mut a: Value = serde_json::from_str(&wb_core::paths::read_text(&root.root.join("answers").join(format!("{id}.json"))).ok()?).ok()?;
+        a["sessionId"] = id.into();
+        a["fromProject"] = project.into();
+        Some(a)
+    })
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
@@ -444,7 +451,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             p.history.retain(|e| e["project"] != true || e["session"].as_str().is_some_and(|s| of_project(&d, s)));
             // Related answers opened from a project's node go with it too.
             let related_closed = p.related.as_ref().is_some_and(|(rows, _)| rows.first().and_then(|r| r["ofProject"].as_str()).is_some_and(|s| !of_project(&d, s)));
-            if p.history.len() != before || related_closed { p.pos = p.pos.min(p.history.len().saturating_sub(1)); p.related = None; w.shown.borrow_mut().clear(); }
+            if p.history.len() != before || related_closed { p.pos = p.pos.min(p.history.len().saturating_sub(1)); p.related = None; p.before = None; w.shown.borrow_mut().clear(); }
             if !fresh.is_empty() {
                 let first = p.history.is_empty();
                 for (sid, a) in fresh.iter().rev().take(KEEP).rev() {
@@ -476,7 +483,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                     let known = p.history.iter().any(|r| same(r, at, sid));
                     if !known {
                         let name = session.as_deref().map(|s| sessions::session_name(&d, s)).unwrap_or_default();
-                        p.history.push(json!({"at": at, "session": a["sessionId"], "prompt": a["prompt"], "text": a["text"], "title": cut(&name, 24), "project": of_project(&d, sid)}));
+                        p.history.push(json!({"at": at, "session": a["sessionId"], "prompt": a["prompt"], "text": a["text"], "title": cut(&name, 24), "project": a["fromProject"] == true}));
                         let skip = p.history.len().saturating_sub(KEEP);
                         p.history.drain(..skip);
                         p.pos = p.pos.saturating_sub(skip);

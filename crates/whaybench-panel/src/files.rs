@@ -48,7 +48,8 @@ fn mtime_ms(path: &str) -> Option<i64> {
     std::fs::metadata(path).ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok().map(|t| t.as_millis() as i64)
 }
 
-fn hidden_file(d: &Data) -> std::path::PathBuf { d.root.join("files-hidden.json") }
+// In the root of the conversation shown: a project's file paths stay in the project.
+fn hidden_file(d: &Data) -> std::path::PathBuf { wb_core::roots::for_session(d, &sessions::target(d).unwrap_or_default()).root.join("files-hidden.json") }
 
 fn hidden(d: &Data) -> HashSet<String> {
     wb_core::paths::read_kept(&hidden_file(d))
