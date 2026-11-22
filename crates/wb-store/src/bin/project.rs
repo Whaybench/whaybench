@@ -13,6 +13,9 @@ const HELP: &str = r#"Project store command. Only the AI writes projects, and on
                                                    where it can; --from copies a folder in), its data inside it
                                                    (<folder>/.whaybench), and the first snapshot. Its documents and map
                                                    are worked on with WHAYBENCH_DATA_DIR=<folder>/.whaybench
+  whaybench-project convert ID --folder DIR [--from SRC] [--encrypt]
+                                                   make a project of the older kind a Briefsafe one: its records move
+                                                   into the new folder's data; when the person asks
   whaybench-project open ID [--recovery] | close ID             let the host's programs see a Briefsafe project's data, or stop
   whaybench-project snapshot ID | snapshots ID     take a snapshot of the project folder (30 kept) / list them
   whaybench-project restore ID SNAPSHOT            put the folder back as it was; the state now is kept as a snapshot.
@@ -144,6 +147,21 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let note = recovery.as_ref().and_then(|k| wb_core::roots::stubs(&st.data).into_iter().find(|s| s.id == pid).map(|s| wb_core::vault::show_recovery(&s, &st.data, k)));
             out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning), "recovery_key": note}));
         }
+        "convert" => {
+            // A project of the older kind into a Briefsafe one, when the person asks (spec 3.22).
+            let folder = opt(&mut rest, "--folder").map(|f| absolute(&f)).ok_or("convert needs --folder DIR")?;
+            let from = opt(&mut rest, "--from").map(|f| absolute(&f));
+            let encrypt = flag(&mut rest, "--encrypt");
+            let pid = arg(&rest, 0)?;
+            if wb_core::map::safe_id(pid).is_err() { return Err(format!("{pid}: a Briefsafe project's id is letters, digits, - and _ only; make a new project and move its work instead")); }
+            if encrypt && !wb_core::container::isolation() { return Err("--encrypt needs podman and a container image for this system".into()); }
+            let name = st.get_project(pid).map(|p| p["name"].as_str().unwrap_or(pid).to_string()).unwrap_or_else(|| pid.to_string());
+            let would_be = wb_core::roots::Stub::new(&st.data, pid, &name, Path::new(&folder));
+            let (p, first, recovery) = wb_core::container::life(&would_be, || wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.convert_to_folder(pid, &folder, from.as_deref().map(Path::new), encrypt)))?;
+            let note = recovery.as_ref().and_then(|k| wb_core::roots::stubs(&st.data).into_iter().find(|s| s.id == pid).map(|s| wb_core::vault::show_recovery(&s, &st.data, k)));
+            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning), "recovery_key": note,
+                "left_on_the_host": "The conversations that worked on this project stay on the host as they were (their records, maps, answers and memory); only the project's own records moved. Its old files were deleted, but deleted files can remain in the disk's free space and in backups made before."}));
+        }
         "open" => {
             let recovery = flag(&mut rest, "--recovery");
             let st2 = stub_of(st, arg(&rest, 0)?)?;
@@ -162,6 +180,10 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 }
             }
             let opened = (|| -> Res<()> {
+            // A memory written by a newer Whaybench: said before anything starts on it (spec 3.22).
+            if let Some(v) = wb_core::db::newer_schema(&st2.stored().root) {
+                return Err(format!("this project's memory was written by a newer Whaybench (schema {v}): update Whaybench before logging in"));
+            }
             // Isolated where a container can run: the container first, the open place only once it runs (spec 3.22).
             if isolated {
                 let own = wb_core::paths::own_exe().map_err(|e| e.to_string())?;

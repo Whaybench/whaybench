@@ -123,20 +123,57 @@ pub fn prepare_claude(s: &Stub, home: &Path) -> Result<(), String> {
     let them = home.join(".claude");
     // Only what the agents need of the person's settings: not their environment, key helper or own hooks.
     const KEEP: [&str; 8] = ["enabledPlugins", "extraKnownMarketplaces", "language", "model", "theme", "permissions", "autoMode", "outputStyle"];
+    let host_json = |f: &str| -> serde_json::Value { std::fs::read_to_string(them.join(f)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default() };
+    let own_json = |rel: &str| -> serde_json::Value { crate::beneath::read(&rest, Path::new(rel), crate::beneath::READ_LIMIT).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default() };
     if !exists("claude/settings.json") {
-        let all: serde_json::Value = std::fs::read_to_string(them.join("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let all = host_json("settings.json");
         let kept: serde_json::Map<String, serde_json::Value> = all.as_object().into_iter().flatten().filter(|(k, _)| KEEP.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
         put("claude/settings.json", serde_json::Value::Object(kept).to_string().as_bytes())?;
+    } else {
+        // At each log in, the plugins the person has on (spec 3.22): an update of theirs moves a plugin's folder, and
+        // a new one should be there too. What the project's agents set beside them stays.
+        let (host, mut own) = (host_json("settings.json"), own_json("claude/settings.json"));
+        if own.is_object() && merge_keys(&mut own, &host, &["enabledPlugins", "extraKnownMarketplaces"]) { put("claude/settings.json", own.to_string().as_bytes())?; }
     }
-    for f in ["plugins/installed_plugins.json", "plugins/known_marketplaces.json"] {
+    for (f, key) in [("plugins/installed_plugins.json", Some("plugins")), ("plugins/known_marketplaces.json", None)] {
         let rel = format!("{CLAUDE_DIR}/{f}");
-        if !exists(&rel) && let Ok(bytes) = std::fs::read(them.join(f)) { put(&rel, &bytes)?; }
+        let host = host_json(f);
+        if host.is_null() { continue; }
+        if !exists(&rel) { put(&rel, host.to_string().as_bytes())?; continue; }
+        // The person's entries over the project's copy (their install paths change with each update), the rest kept.
+        let mut own = own_json(&rel);
+        let changed = match key {
+            Some(k) => own.is_object() && merge_keys(&mut own, &host, &[k]),
+            None => own.is_object() && { let keys: Vec<String> = host.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default(); let keys: Vec<&str> = keys.iter().map(String::as_str).collect(); merge_top(&mut own, &host, &keys) },
+        };
+        if changed { put(&rel, own.to_string().as_bytes())?; }
     }
     if !exists("claude/.claude.json") {
         let folder = s.folder.to_string_lossy().to_string();
         put("claude/.claude.json", serde_json::json!({"hasCompletedOnboarding": true, "projects": {folder: {"hasTrustDialogAccepted": true}}}).to_string().as_bytes())?;
     }
     Ok(())
+}
+
+/// Puts the person's entries of each named object into the project's (theirs win, the project's own others stay).
+/// Whether anything changed.
+fn merge_keys(own: &mut serde_json::Value, host: &serde_json::Value, keys: &[&str]) -> bool {
+    let mut changed = false;
+    for k in keys {
+        let Some(theirs) = host.get(*k).and_then(serde_json::Value::as_object) else { continue };
+        let mine = own.as_object_mut().map(|o| o.entry(k.to_string()).or_insert_with(|| serde_json::json!({})));
+        let Some(mine) = mine.and_then(serde_json::Value::as_object_mut) else { continue };
+        for (name, v) in theirs { if mine.get(name) != Some(v) { mine.insert(name.clone(), v.clone()); changed = true; } }
+    }
+    changed
+}
+
+/// The same for top-level entries.
+fn merge_top(own: &mut serde_json::Value, host: &serde_json::Value, keys: &[&str]) -> bool {
+    let Some(mine) = own.as_object_mut() else { return false };
+    let mut changed = false;
+    for k in keys { if let Some(v) = host.get(*k) && mine.get(*k) != Some(v) { mine.insert(k.to_string(), v.clone()); changed = true; } }
+    changed
 }
 
 /// The agents' ~/.local/bin in the container: links to the real places of the person's agent programs (Whaybench's
@@ -431,6 +468,18 @@ pub fn place_for(project: Option<&Stub>, isolation: bool, open: bool, runs: bool
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_persons_plugins_come_in_and_the_projects_own_stay() {
+        let mut own = serde_json::json!({"enabledPlugins": {"a@m": false, "mine@m": true}, "model": "x"});
+        let host = serde_json::json!({"enabledPlugins": {"a@m": true, "b@m": true}, "theme": "dark"});
+        assert!(merge_keys(&mut own, &host, &["enabledPlugins", "extraKnownMarketplaces"]));
+        assert_eq!(own, serde_json::json!({"enabledPlugins": {"a@m": true, "b@m": true, "mine@m": true}, "model": "x"}));
+        assert!(!merge_keys(&mut own, &host, &["enabledPlugins"]), "nothing new the second time");
+        let mut m = serde_json::json!({"mine": 1, "m": {"old": true}});
+        assert!(merge_top(&mut m, &serde_json::json!({"m": {"new": true}}), &["m"]));
+        assert_eq!(m, serde_json::json!({"mine": 1, "m": {"new": true}}));
+    }
+
     use super::*;
 
     #[test]

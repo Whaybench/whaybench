@@ -31,17 +31,34 @@ impl Store {
     /// made; a failure after it removes what was made. Answers the project and the first snapshot.
     #[allow(clippy::too_many_arguments)]
     /// With `vault`, its data is encrypted (spec 3.22): the answer also holds the recovery key, shown once.
-    pub fn create_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, mut paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
+    pub fn create_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
+        self.make_in_folder(pid, name, desc, parent, paths, always, folder, from, vault, false)
+    }
+
+    /// Turns a project of the older kind (`projects/<id>/` in the host's data) into a Briefsafe one (spec 3.22): made
+    /// as `create_in_folder` makes one, with the project's own records carried in, then its copy in the host's data
+    /// removed. It must stand alone (no parent, no sub-projects).
+    pub fn convert_to_folder(&self, pid: &str, folder: &str, from: Option<&Path>, vault: bool) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
+        let p = self.get_project(pid).ok_or_else(|| format!("no project of the older kind: {pid}"))?;
+        if !s(&p, "kind").is_empty() { return Err(format!("{pid} is already a Briefsafe project")); }
+        if !s(&p, "parent").is_empty() { return Err(format!("{pid} is under project {}: move it to the top first (whaybench-project move {pid} -)", s(&p, "parent"))); }
+        if let Some(c) = self.list_projects().into_iter().find(|c| s(c, "parent") == pid) { return Err(format!("project {} is under {pid}: move it out first", s(&c, "id"))); }
+        let paths: Vec<String> = arr(&p, "paths").iter().filter_map(Value::as_str).map(String::from).collect();
+        self.make_in_folder(pid, s(&p, "name"), s(&p, "desc"), "", paths, p["always"].as_bool().unwrap_or(false), folder, from, vault, true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn make_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, mut paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool, carry: bool) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
         use wb_core::roots::{self, Stub};
         // A plain name: its open place's marks are that name with an extension (`.lock`, `.closing`), which no other id may be.
         if wb_core::map::safe_id(pid).is_err() { return Err(format!("not a project id (letters, digits, - and _ only): {pid}")); }
-        if self.get_project(pid).is_some() || roots::stubs(&self.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
+        if (!carry && self.get_project(pid).is_some()) || roots::stubs(&self.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
         if !parent.is_empty() && self.get_project(parent).is_none() { return Err(format!("no parent project: {parent}")); }
         // Its records are in its own folder, where the host's projects are not: it stands on its own.
         if !parent.is_empty() { return Err("a Briefsafe project (--folder) has no parent project".into()); }
         let inside = |a: &str, b: &str| a == b || Path::new(a).starts_with(b) || Path::new(b).starts_with(a);
         let taken: Vec<(String, String)> = roots::stubs(&self.data).into_iter().map(|s| (s.id, s.folder.to_string_lossy().to_string()))
-            .chain(self.list_projects().iter().map(|p| (s(p, "id").to_string(), s(p, "folder").to_string()))).filter(|(_, f)| !f.is_empty()).collect();
+            .chain(self.list_projects().iter().map(|p| (s(p, "id").to_string(), s(p, "folder").to_string()))).filter(|(id, f)| !f.is_empty() && !(carry && id == pid)).collect();
         if let Some((other, _)) = taken.iter().find(|(_, f)| inside(folder, f)) {
             return Err(format!("the folder is inside or around the folder of project {other} (a snapshot would not hold the inner one)"));
         }
@@ -69,7 +86,16 @@ impl Store {
             let inner = Store::new(stub.stored());
             roots::write_marker_as(&inner.data, pid, &stub.made).map_err(|e| e.to_string())?;
             if !paths.iter().any(|p| p == folder) { paths.insert(0, folder.to_string()); }
-            inner.create_project(pid, name, desc, parent, paths, always)?;
+            if carry {
+                // Its own records as they are (map, documents, their history, work queue), its folder noted below.
+                fs::create_dir_all(inner.pdir(pid)).map_err(|e| e.to_string())?;
+                crate::folder::copy_into(&self.pdir(pid), &inner.pdir(pid))?;
+                let mut p = inner.get_project(pid).ok_or_else(|| format!("{pid}: its record did not come along"))?;
+                p["paths"] = serde_json::json!(paths);
+                write_json(&inner.pdir(pid).join("project.json"), &p)?;
+            } else {
+                inner.create_project(pid, name, desc, parent, paths, always)?;
+            }
             let p = inner.set_folder(pid, folder, subvolume)?;
             // The templates as they are now: later changes to the add-ons do not reach this project.
             let templates = self.data.root.join("addons/project-docs");
@@ -93,9 +119,16 @@ impl Store {
                 return Err(match crate::folder::discard(dir, subvolume) { Ok(()) => e, Err(e2) => format!("{e}; the folder made is left at {folder}: {e2}") });
             }
         };
+        // Carried: the host's plain copy goes (said where it may still be, by the caller).
+        let left = if carry { fs::remove_dir_all(self.pdir(pid)).err().map(|e| format!("the project's old copy could not be removed from {}: {e}", self.pdir(pid).display())) } else { None };
         // The first state, before anything is changed in it.
         // The project is made either way: a first snapshot that failed is said, not taken for a failed project.
         let first = subvolume.then(|| crate::folder::snapshot(dir).unwrap_or_else(|e| crate::folder::Taken { name: String::new(), warning: Some(format!("no first snapshot: {e}")) }));
+        let first = match (first, left) {
+            (Some(mut t), Some(w)) => { t.warning = Some(t.warning.map_or(w.clone(), |x| format!("{x}; {w}"))); Some(t) }
+            (None, Some(w)) => Some(crate::folder::Taken { name: String::new(), warning: Some(w) }),
+            (f, None) => f,
+        };
         Ok((p, first, recovery))
     }
 

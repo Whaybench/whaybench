@@ -78,6 +78,18 @@ pub fn open(data: &Path) -> Result<Connection> {
     }
 }
 
+/// The schema of a data root's memory file when it is newer than this program knows (spec 3.22): read from the
+/// file's header beneath the root (a project's), without opening it. None: none, unreadable, or one this program reads.
+pub fn newer_schema(root: &Path) -> Option<i64> {
+    use std::io::Read;
+    let mut head = [0u8; 64];
+    crate::beneath::open_file(root, Path::new("memory/memory.db")).ok()?.read_exact(&mut head).ok()?;
+    // SQLite's header: "SQLite format 3\0", and the user version as a big-endian number at byte 60.
+    if &head[..16] != b"SQLite format 3\0" { return None; }
+    let found = i64::from(i32::from_be_bytes([head[60], head[61], head[62], head[63]]));
+    (found > VERSION).then_some(found)
+}
+
 fn open_once(data: &Path) -> Result<Connection> {
     let dir = data.join("memory");
     // A project's database is its agents' to change: never one reached through a link they left (spec 3.22).
@@ -314,6 +326,21 @@ pub fn search(conn: &Connection, words: &[String], limit: usize) -> Result<Vec<V
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_memory_written_by_a_newer_program_is_told_before_it_is_opened() {
+        let root = std::env::temp_dir().join(format!("wb-newer-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("memory")).unwrap();
+        let mut head = vec![0u8; 100];
+        head[..16].copy_from_slice(b"SQLite format 3\0");
+        head[60..64].copy_from_slice(&((VERSION + 1) as i32).to_be_bytes());
+        std::fs::write(root.join("memory/memory.db"), &head).unwrap();
+        assert_eq!(newer_schema(&root), Some(VERSION + 1));
+        head[60..64].copy_from_slice(&(VERSION as i32).to_be_bytes());
+        std::fs::write(root.join("memory/memory.db"), &head).unwrap();
+        assert_eq!(newer_schema(&root), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     use super::*;
 
     #[test]
