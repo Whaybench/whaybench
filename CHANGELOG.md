@@ -241,7 +241,11 @@ names another step.
   deleting a project's node logs no node id; an app started on a project's file logs only its program; `session wait`
   reads and checks one root per poll.
   From the seventh review: a host map file naming a session exports to the host again; deleting a node or carrying a
-  map as shown does nothing for a project that has just locked; a new host project never takes a Briefsafe project's id. `snapshot`, `snapshots` and `restore` take, list and go back to
+  map as shown does nothing for a project that has just locked; a new host project never takes a Briefsafe project's id.
+  From the final check: a restore keeps only a vault's own key file and never copies one through a link; the view
+  panel does not read a Briefsafe project's page out to the host; a request of the host's (the recovery key page) is
+  shown even while the view follows a project, so the key is never dropped unseen; a Briefsafe project's id is letters,
+  digits, `-` and `_` only; the Files panel's Remove from list does nothing once its project has locked (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -33,6 +33,8 @@ impl Store {
     /// With `vault`, its data is encrypted (spec 3.22): the answer also holds the recovery key, shown once.
     pub fn create_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, mut paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
         use wb_core::roots::{self, Stub};
+        // A plain name: its open place's marks are that name with an extension (`.lock`, `.closing`), which no other id may be.
+        if wb_core::map::safe_id(pid).is_err() { return Err(format!("not a project id (letters, digits, - and _ only): {pid}")); }
         if self.get_project(pid).is_some() || roots::stubs(&self.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
         if !parent.is_empty() && self.get_project(parent).is_none() { return Err(format!("no parent project: {parent}")); }
         // Its records are in its own folder, where the host's projects are not: it stands on its own.

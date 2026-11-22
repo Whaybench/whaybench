@@ -138,11 +138,14 @@ fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dy
     }
     {
         let (d2, p, redraw) = (d.clone(), path.to_string(), redraw.clone());
+        // The list of the root the menu was opened in: pressed after that changed (its project locked), nothing.
+        let file_then = hidden_file(d);
         add(&sec, wb_core::i18n::t("remove-from-list"), Box::new(move || {
-            let mut h: Vec<String> = hidden(&d2).into_iter().collect();
+            if hidden_file(&d2) != file_then { return; }
+            let mut h: Vec<String> = wb_core::paths::read_kept::<HashSet<String>>(&file_then).into_iter().collect();
             h.push(p.clone());
             h.sort();
-            let _ = wb_core::paths::write_atomic(&hidden_file(&d2), json!(h).to_string());
+            let _ = wb_core::paths::write_atomic(&file_then, json!(h).to_string());
             status::say(&d2, &wb_core::i18n::f("removed-from-list", &[("a1", (Path::new(&p).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()).to_string())]), 5);
             redraw();
         }));

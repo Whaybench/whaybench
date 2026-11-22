@@ -162,11 +162,13 @@ fn in_project(s: &wb_core::roots::Stub, path: &str) -> bool {
         && !std::fs::canonicalize(s.folder.join(wb_core::roots::PROJECT_DATA)).is_ok_and(|r| real.starts_with(&r) && !s.stored().root.starts_with(&r))
 }
 
-fn lasting(v: &V, path: &str) -> Option<String> {
+/// `own`: a request of the host's (this view's own, which only the host can leave): shown wherever it is, as the host
+/// may give a project's view anything (spec 3.22: host -> project is allowed).
+fn lasting(v: &V, path: &str, own: bool) -> Option<String> {
     let p = Path::new(path);
     // A project session's request opens only what is in the project (its folder or its data), by real path: never a
     // host file named through `..`, a link or a file:// address (spec 3.22).
-    if let Some(s) = project_followed(v) {
+    if let Some(s) = project_followed(v).filter(|_| !own) {
         if path.starts_with("http://") || path.starts_with("https://") { return Some(path.to_string()); }
         let path = path.strip_prefix("file://").unwrap_or(path);
         let real = std::fs::canonicalize(path).ok()?;
@@ -248,7 +250,7 @@ fn incoming(v: &mut V) -> bool {
     }
     for r in view::take_requests(&v.d, &view::for_session(&session)) {
         if let Some(p) = r.get("path").and_then(Value::as_str) {
-            let Some(kept) = lasting(v, p) else { continue };
+            let Some(kept) = lasting(v, p, false) else { continue };
             v.hist.push(&kept, &title_for(p));
             v.page = page_of(&r);
             came = true;
@@ -347,6 +349,11 @@ fn answer_read(v: &V, all: bool, reply: String) {
     let url = v.hist.current().map(|c| c.0.clone()).unwrap_or_default();
     let link = view::link_note(&v.d, &v.link, v.followed.as_deref());
     let d = v.d.clone();
+    // Asked from the host: a project's page is not read out to it (spec 3.22: project -> host is blocked).
+    if v.of_project || wb_core::beneath::split(Path::new(url.strip_prefix("file://").unwrap_or(&url))).is_some() {
+        write_reply(&d, &reply, &json!({"url": "", "title": "", "selected": [], "text": [wb_core::i18n::t("briefsafe-view-not-read")], "link": link}));
+        return;
+    }
     // The engine's PDF viewer keeps its text to itself, so a PDF is read from the file.
     if !view::is_web(&url) && url.to_lowercase().ends_with(".pdf") {
         let text = std::process::Command::new("pdftotext").args(["-layout", &url, "-"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
@@ -384,7 +391,7 @@ fn tick(s: &Shared) {
                     v.hist = History::only(p, &title_for(p));
                     retitle(&v);
                 } else {
-                    let Some(kept) = lasting(&v, p) else { continue };
+                    let Some(kept) = lasting(&v, p, true) else { continue };
                     v.hist.push(&kept, &title_for(p));
                 }
                 v.page = page_of(&r);

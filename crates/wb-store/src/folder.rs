@@ -214,7 +214,10 @@ fn restore_keeping(dir: &Path, name: &str, limit: usize) -> Res<Restored> {
     // since the snapshot, and the data's own key, the recovery key, never changes, so today's file opens the restored
     // data. Not put in: nothing is swapped. (gocryptfs leaves it read-only: replaced, not written over.)
     let conf = Path::new(wb_core::roots::PROJECT_DATA).join("gocryptfs.conf");
-    if dir.join(&conf).is_file() {
+    // Only a vault's (the snapshot has one too), and only a plain file: never through a link to somewhere else.
+    let plain = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file())
+        && fs::symlink_metadata(p.parent().unwrap_or(p)).is_ok_and(|m| m.file_type().is_dir());
+    if plain(&dir.join(&conf)) && plain(&fresh.join(&conf)) {
         let put = fs::remove_file(fresh.join(&conf)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }).and_then(|_| fs::copy(dir.join(&conf), fresh.join(&conf)));
         if let Err(e) = put { let _ = discard(&fresh, true); return Err(format!("the vault's key file could not be kept: {e}; nothing was changed")); }
     }
@@ -266,6 +269,8 @@ mod tests {
         // A project's folder: its marker says whose its snapshots are.
         let mark = |id: &str| { fs::create_dir_all(dir.join(".whaybench")).unwrap(); fs::write(dir.join(".whaybench/briefsafe.json"), format!(r#"{{"id":"{id}","made":"1"}}"#)).unwrap(); };
         mark("t");
+        // A vault: its key file is in every snapshot.
+        fs::write(dir.join(".whaybench/gocryptfs.conf"), "then").unwrap();
         let first = snapshot(&dir).unwrap().name;
         fs::write(dir.join("src/main.rs"), "changed").unwrap();
         let second = snapshot(&dir).unwrap().name;
@@ -276,6 +281,7 @@ mod tests {
         assert_eq!(fs::read_to_string(snapshot_dir(&dir).join(&first).join("src/main.rs")).unwrap(), "fn main() {}");
 
         // A vault's key file as it is now stays (its key may have changed since the snapshot).
+        let _ = fs::remove_file(dir.join(".whaybench/gocryptfs.conf"));
         fs::write(dir.join(".whaybench/gocryptfs.conf"), "now").unwrap();
         let before = restore(&dir, &first).unwrap().before;
         assert_eq!(fs::read_to_string(dir.join(".whaybench/gocryptfs.conf")).unwrap(), "now");
