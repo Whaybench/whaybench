@@ -157,6 +157,12 @@ impl Relay {
             env.push((paths::ENV_DATA_DIR.into(), s.open_at.to_string_lossy().to_string()));
             env.push(("CLAUDE_CONFIG_DIR".into(), s.open_at.join(wb_core::roots::CLAUDE_DIR).to_string_lossy().to_string()));
             for k in ["LANG", "LC_ALL"] { if let Ok(v) = std::env::var(k) { env.push((k.into(), v)); } }
+            // An add-on agent (Codex) keeps its settings, sign-in and conversations in the project too.
+            if let Some(a) = &agent {
+                env.push((wb_core::agents::ENV_AGENT.into(), a.id.clone()));
+                let isolated = matches!(place, wb_core::container::Place::Container);
+                if let Some((var, folder)) = wb_core::container::agent_home(s, isolated, &a.id)? { env.push((var, folder)); }
+            }
             if !addon {
                 match wb_core::secret::get(wb_core::secret::CLAUDE_TOKEN) {
                     Ok(Some(t)) => env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t)),

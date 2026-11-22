@@ -64,6 +64,8 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
     // (notmpcopyup: podman would otherwise copy what is under it into the tmpfs).
     let resting = s.folder.join(PROJECT_DATA);
     bind(&s.stored().root, &s.open_at, false);
+    // The host's agent add-ons, read-only where the project's data names them: a project's agents are set up from them.
+    if let Some(host) = s.open_at.ancestors().nth(3) && host.join("addons/agents").is_dir() { bind(&host.join("addons/agents"), &s.open_at.join("addons/agents"), true); }
     for p in ["/usr", "/etc/alternatives", "/etc/pki", "/etc/ssl", "/etc/ca-certificates"].map(Path::new).iter().filter(|p| p.exists()) { bind(p, p, true); }
     // A home of the project's own, writable (tool caches, settings), where the person's is: nothing of theirs in it.
     bind(&s.stored().root.join("home"), home, false);
@@ -159,6 +161,11 @@ pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
         }
         // A container left from before (stopped) is made again with today's mounts.
         let _ = Command::new("podman").args(["rm", "-f", "--ignore", &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        // What is mounted inside the project's home is made there first, by the person: podman would make the folders
+        // on the way as another user, and the agents could not write their own settings there (~/.codex).
+        for p in read.iter().chain([home.join(".claude/plugins/cache"), home.join(".rustup"), home.join(".cargo/bin"), home.join(".local/bin"), s.folder.clone(), s.open_at.clone()].iter()) {
+            if let Ok(rel) = p.strip_prefix(&home) && (p.exists() || p == &s.open_at) { crate::beneath::mkdir(&s.stored().root, &Path::new("home").join(rel)).map_err(|e| format!("{}: {e}", rel.display()))?; }
+        }
         let out = Command::new("podman").args(run_args(s, &image, &home, &read)).output().map_err(|e| format!("podman: {e}"))?;
         if out.status.success() { Ok(()) } else { Err(format!("podman: {}", String::from_utf8_lossy(&out.stderr).trim())) }
     })
@@ -227,6 +234,25 @@ pub fn tidy(s: &Stub, isolated: bool) {
         c
     };
     let _ = c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+}
+
+/// An add-on agent's settings folder for a project's tab (`CODEX_HOME` and where), made in the project's data: in its
+/// container (from the add-on's files and the project's own home, so its login is the project's), or without one by
+/// the host's `whaybench` on the open place.
+pub fn agent_home(s: &Stub, isolated: bool, id: &str) -> Result<Option<(String, String)>, String> {
+    let mut c = if isolated {
+        let mut c = Command::new("podman");
+        c.args(["exec", &name(s), "whaybench", "agent-home", id]);
+        c
+    } else {
+        let own = crate::paths::own_exe().map_err(|e| e.to_string())?;
+        let mut c = Command::new(own.with_file_name("whaybench"));
+        c.args(["agent-home", id]).env(crate::paths::ENV_DATA_DIR, &s.open_at);
+        c
+    };
+    let out = c.stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
 }
 
 /// Runs `work` with the project's container paused, if it runs (a snapshot of one moment).

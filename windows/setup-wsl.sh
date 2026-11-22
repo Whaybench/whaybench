@@ -22,6 +22,9 @@ say "account $user"
 id "$user" >/dev/null 2>&1 || useradd -m "$user"
 # Out of wheel too, should Fedora's first-start setup have made the account before this ran.
 gpasswd -d "$user" wheel >/dev/null 2>&1 || true
+# Briefsafe projects run in rootless podman containers, which need the account's own range of user ids. useradd gives
+# one; an account made otherwise gets it here.
+grep -q "^$user:" /etc/subuid || usermod --add-subuids 524288-589823 --add-subgids 524288-589823 "$user"
 # No sudo without a password: an agent running as this user could take root with it. Root work goes through
 # `wsl -d Whaybench -u root` from Windows. Earlier versions wrote the rule; a new run takes it away.
 rm -f /etc/sudoers.d/whaybench
@@ -39,8 +42,9 @@ say "packages"
 # panels draw as icons (a file, a folder); default-fonts-other-sans has the scripts Noto Sans leaves out (Arabic,
 # Hebrew, Thai, Indic). dbus-send (dbus-tools) is how Whaybench finds a running fcitx5 to join (start.rs): without it
 # every start would start another one. awk is for the Codex and Whaybench installers, git for Claude Code's plugin
-# marketplace; Fedora's WSL image has neither.
-dnf install -y -q webkitgtk6.0 wl-clipboard firefox google-noto-sans-fonts google-noto-sans-cjk-fonts google-noto-color-emoji-fonts default-fonts-other-sans dbus-tools minisign curl gawk git-core procps-ng btrfs-progs xfsprogs
+# marketplace; Fedora's WSL image has neither. podman runs Briefsafe projects' agents in containers, and gnome-keyring
+# keeps the token they sign in with (the Secret Service; WSL has no desktop to bring one).
+dnf install -y -q webkitgtk6.0 wl-clipboard firefox google-noto-sans-fonts google-noto-sans-cjk-fonts google-noto-color-emoji-fonts default-fonts-other-sans dbus-tools minisign curl gawk git-core procps-ng btrfs-progs xfsprogs podman gnome-keyring
 # fcitx5 without its weak dependencies: its setting program (Whaybench has its own) and the GTK and Qt input modules.
 # The apps inside Whaybench type through the compositor (Wayland text-input).
 dnf install -y -q --setopt=install_weak_deps=False fcitx5
@@ -136,7 +140,8 @@ mount)
     dev=$(blkid -L "$label") || { echo "whaybench-work-disk: work disk not attached" >&2; exit 3; }
     type=$(blkid -o value -s TYPE "$dev")
     opts=noatime
-    if [ "$type" = btrfs ]; then modprobe btrfs 2>/dev/null || true; opts="$opts,compress=zstd:1,discard=async"; fi
+    # user_subvol_rm_allowed: a Briefsafe project's snapshots past the 30 kept are deleted by the user, not root.
+    if [ "$type" = btrfs ]; then modprobe btrfs 2>/dev/null || true; opts="$opts,compress=zstd:1,discard=async,user_subvol_rm_allowed"; fi
     install -d -m 0755 "$disk"
     mountpoint -q "$disk" || mount -o "$opts" "$dev" "$disk"
     if [ ! -d "$disk/work" ]; then
