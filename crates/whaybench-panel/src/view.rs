@@ -34,6 +34,8 @@ struct V {
     link: Link,
     /// The session whose views are here; none for a view held on one thing, or when no session is chosen.
     followed: Option<String>,
+    /// The followed session is a project's: its pages leave the panel when the project closes.
+    of_project: bool,
     hist: History,
     /// The page a PDF was asked to open at, for the next display.
     page: Option<u32>,
@@ -370,9 +372,17 @@ fn tick(s: &Shared) {
         if !first && own { display(&v); }
     }
     let now = session_now(&v);
+    let project_of = |s: Option<&str>| s.is_some_and(|s| wb_core::roots::Roots::new(d.clone()).project_of(s).is_some());
+    if v.of_project && !project_of(v.followed.as_deref()) {
+        // The project closed: nothing of it stays on screen (spec 3.22).
+        v.of_project = false;
+        v.hist = History::default();
+        display(&v);
+    }
     if !matches!(v.link, Link::Target(..)) && now != v.followed {
         record::detail("view", "session changed", &[("view", name.clone()), ("session", short(now.as_deref()))]);
         switch(&mut v);
+        v.of_project = project_of(v.followed.as_deref());
         // The link line names the session followed now.
         retitle(&v);
     } else if incoming(&mut v) {
@@ -421,7 +431,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
     win.set_child(Some(&body));
 
     let link = view::views(&d).into_iter().find(|(n, _)| *n == name).map(|(_, l)| l).unwrap_or_default();
-    let s: Shared = Rc::new(RefCell::new(V { d: d.clone(), name: name.clone(), link, followed: None, hist: History::default(), page: None, style: String::new(), seen: HashMap::new(), web, place, tie: tie.clone(), back: back.clone(), forward: forward.clone(), drop_it: drop_it.clone(), win: win.clone() }));
+    let s: Shared = Rc::new(RefCell::new(V { d: d.clone(), name: name.clone(), link, followed: None, of_project: false, hist: History::default(), page: None, style: String::new(), seen: HashMap::new(), web, place, tie: tie.clone(), back: back.clone(), forward: forward.clone(), drop_it: drop_it.clone(), win: win.clone() }));
     { let mut v = s.borrow_mut(); switch(&mut v); retitle(&v); }
 
     { let s = s.clone(); tie.connect_clicked(move |_| link_menu(&s)); }

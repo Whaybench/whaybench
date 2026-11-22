@@ -124,7 +124,9 @@ fn maps_dir(d: &Data) -> std::path::PathBuf { d.maps() }
 
 /// Writes the branch, or the whole map, as a file in the data directory; returns its path.
 fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str) -> std::io::Result<std::path::PathBuf> {
-    std::fs::create_dir_all(maps_dir(d))?;
+    // A project's map is saved in the project: nothing of it goes to the host's data folder (spec 3.22).
+    let d = &wb_core::roots::for_session(d, data.get("sessionId").and_then(Value::as_str).unwrap_or(""));
+    if wb_core::beneath::split(&maps_dir(d)).is_none() { std::fs::create_dir_all(maps_dir(d))?; }
     let tree = tree_of(data);
     let nodes: Vec<Value> = match root {
         None => data.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default(),
@@ -529,6 +531,8 @@ fn shown_tree(data: &Value, flipped: &HashSet<String>) -> (Vec<String>, String) 
 /// A new conversation from the map as this panel shows it now.
 fn carry_shown(d: &Data, agent: &str, data: &Value, style: &str, shown: &[String], screen: &str) {
     let Some(session) = sessions::target(d) else { return status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6) };
+    // A project's map goes on only in the project's own conversations.
+    if wb_core::roots::Roots::new(d.clone()).project_of(&session).is_some() { return status::say(d, wb_core::i18n::t("briefsafe-map-stays"), 8); }
     let Some(path) = mapstyles::carry_file(d, &session, data, style, shown, screen) else { return status::say(d, wb_core::i18n::t("carry-shown-failed"), 6) };
     record::decide("map", "carried as shown", "the person chose", &[("style", style.to_string()), ("nodes", shown.len().to_string())]);
     crate::common::ctl(d, crate::menu::session_args(d, &["new", "--agent", agent, &path.to_string_lossy()]));
@@ -844,7 +848,11 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
             Some(path) => { let Ok(m) = wb_core::map::view_file(&d.root, std::path::Path::new(path)) else { return }; (path.to_string(), Some(m)) }
             // A tab without a session in front: an empty map, not the one seen before.
             None if sessions::empty_chosen(&d) => (String::new(), Some(serde_json::json!({"nodes": []}))),
-            None => { let Some(t) = sessions::target(&d) else { return }; let Some(m) = sessions::map_of(&d, &t) else { return }; (t, Some(m)) }
+            // No map to read (a project that closed among them): an empty map, not the one drawn before.
+            None => match sessions::target(&d) {
+                Some(t) => { let m = sessions::map_of(&d, &t).unwrap_or_else(|| serde_json::json!({"nodes": []})); (t, Some(m)) }
+                None => (String::new(), Some(serde_json::json!({"nodes": []}))),
+            },
         };
         let text = data.as_ref().map(Value::to_string).unwrap_or_default();
         let counts = sessions::target(&d).map(|t| { let mut c: Vec<_> = records::file_counts(&d, &t).into_iter().collect(); c.sort(); format!("{c:?}") }).unwrap_or_default();

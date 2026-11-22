@@ -172,7 +172,7 @@ pub fn carry_file(d: &Data, session: &str, data: &Value, style: &str, shown: &[S
     ids.extend(path_to(nodes, s(data, "current")).iter().map(|n| s(n, "id").to_string()));
     let kept = carried(nodes, &ids);
     if !shown.iter().any(|i| kept.iter().any(|n| s(n, "id") == i)) { return None; }
-    let dir = d.cache().join("carry");
+    let dir = wb_core::roots::for_session(d, session).cache().join("carry");
     // Read when their conversation started; a day later they are of no use.
     for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
         if e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() > 86_400) { let _ = fs::remove_file(e.path()); }

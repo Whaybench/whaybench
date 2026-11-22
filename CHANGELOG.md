@@ -54,7 +54,12 @@ names another step.
   Claude Code folder gets only the settings agents need (plugins, language, model, permissions; not `env`, the key
   helper or hooks), written without following links. `LANG` reaches the agents, Ctrl-P is not taken by podman,
   closing a tab ends its agent in the container, and a missing token or a keyring that does not answer is said in the
-  status line. `snapshot`, `snapshots` and `restore` take, list and go back to
+  status line.
+  Nothing of a project stays with the host: its answers are marked as the project's when they arrive and never saved
+  to the host's answer history, and leave the Answer panel when the project closes, as its pages leave the View panel
+  and its map the Map panel. Exported, imported and carried maps and the Files panel's AI-edit pages are written in
+  the project's data; a project's map does not start a conversation outside the project. The terminal's rewind and
+  move records and `whaybench-files` use the conversation's own root. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

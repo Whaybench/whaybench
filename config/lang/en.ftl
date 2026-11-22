@@ -300,6 +300,7 @@ new-tab-keep-map-not-opened-2 = New tab (keep map) not opened · The selected se
 tab-not-opened = Conversation tab not opened · { $e }
 briefsafe-no-token = No Claude Code token for projects · run `claude setup-token`, then `whaybench token set`
 briefsafe-keyring-failed = Project token not read from the keyring (locked?) · the agent may ask to sign in
+briefsafe-map-stays = A project's map stays in the project · start its new conversation from the project
 panel-left-closed = Panel crashed repeatedly · logged
 not-run-no-conversation-tab-open = { $head } not run · No conversation tab · Open it from the session list
 session-ended-hidden-in-the-session = Session ended · Hidden in the session list

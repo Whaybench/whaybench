@@ -235,7 +235,7 @@ impl Relay {
     fn slash(&mut self, name: &str) {
         // The agent's hooks cannot see these commands: the map does not roll back, and the next session takes it over.
         if ["rewind", "checkpoint", "undo"].contains(&name) {
-            if let Some(s) = &self.session { wb_core::hook::note_rewind(&self.data.root, s); }
+            if let Some(s) = &self.session { wb_core::hook::note_rewind(&wb_core::roots::for_session(&self.data, s).root, s); }
             write_all(self.master, b"\r");
             return;
         }
@@ -352,7 +352,8 @@ impl Relay {
         let Some(me) = self.session.clone() else { return };
         let Some((target, empty)) = sessions::resumed_elsewhere(&self.data, &me) else { return };
         self.resumed_at = None;
-        match wb_core::session_record::moved(&self.data.root, &me, &target, empty.as_deref()) {
+        // In the conversation's own root: a project's move stays in the project.
+        match wb_core::session_record::moved(&wb_core::roots::for_session(&self.data, &me).root, &me, &target, empty.as_deref()) {
             Ok(()) => record::decide("session", "number change", "/resume opened a session running in the background", &[("tab", self.tab.clone()), ("old", me), ("new", target), ("empty", empty.unwrap_or_default())]),
             Err(e) => record::error("session", "move not recorded", &[("error", e.to_string())]),
         }

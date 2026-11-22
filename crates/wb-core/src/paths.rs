@@ -161,6 +161,10 @@ pub fn read_tail(path: &Path, max: u64) -> std::io::Result<String> {
 /// Missing or empty is the default.
 pub fn read_kept<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
     // Bytes, not text: a file that is not UTF-8 is unreadable too and is set aside, not taken for a missing one.
+    // In a project's open place: beneath it, never through a link (and nothing there is set aside or renamed).
+    if let Some((root, rel)) = crate::beneath::split(path) {
+        return crate::beneath::read(&root, &rel, crate::beneath::READ_LIMIT).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    }
     let Ok(bytes) = std::fs::read(path) else { return T::default() };
     if bytes.iter().all(u8::is_ascii_whitespace) { return T::default(); }
     serde_json::from_slice(&bytes).unwrap_or_else(|e| {

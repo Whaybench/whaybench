@@ -212,6 +212,13 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 && !m.starts_with('/') && !data.root.join(format!("{m}.json")).exists() {
                     return Err(wb_core::i18n::t("new-tab-keep-map-not-opened-2").into());
                 }
+            // A project's map (a file in its data) does not start a conversation outside the project (spec 3.22).
+            if let Some(m) = map_from.as_deref().filter(|m| m.starts_with('/')) {
+                let real = std::fs::canonicalize(m).unwrap_or_else(|_| m.into());
+                let in_project = wb_core::beneath::split(std::path::Path::new(m)).is_some()
+                    || wb_core::roots::stubs(data).iter().any(|s| std::fs::canonicalize(s.stored().root).is_ok_and(|r| real.starts_with(r)));
+                if in_project { return Err(wb_core::i18n::t("briefsafe-map-stays").into()); }
+            }
             post(data, &Request::OpenTerm { open: TermOpen { map_from, agent, ..Default::default() } })
         }
         Some("show") => show_session(data, words.get(1).ok_or("session show needs an id")?),

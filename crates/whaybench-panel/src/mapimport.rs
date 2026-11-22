@@ -87,7 +87,9 @@ pub fn read(d: &Data, source: &Source) -> Option<(Vec<Value>, String, String)> {
 
 /// Keeps a copy as a file of its own, with the session it came from (for its related answers). Its path.
 pub fn keep(d: &Data, nodes: &[Value], title: &str, from: &str) -> std::io::Result<PathBuf> {
-    fs::create_dir_all(imported_dir(d))?;
+    // A project's map is kept in the project (spec 3.22).
+    let d = &wb_core::roots::for_session(d, from);
+    if wb_core::beneath::split(&imported_dir(d)).is_none() { fs::create_dir_all(imported_dir(d))?; }
     let path = wb_core::map::free_path(&imported_dir(d), &wb_core::map::file_name(sessions::span(d, from, nodes), None, ""));
     let imported = wb_core::clock::local_now("%Y-%m-%d %H:%M");
     wb_core::paths::write_atomic(&path, json!({"format": "whaybench-map", "title": title, "imported": imported, "from": from, "nodes": wb_core::map::saved_nodes(nodes)}).to_string())?;

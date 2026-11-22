@@ -113,15 +113,14 @@ fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dy
     if let Some(session) = sessions::target(d) {
         let edits = records::file_edits(d, &session, path);
         if !edits.is_empty() {
-            let (d2, p) = (d.clone(), path.to_string());
+            // A project's file differences are written in the project, not the host's data folder (spec 3.22).
+            let (d2, p, at) = (d.clone(), path.to_string(), wb_core::roots::for_session(d, &session));
             add(&sec, wb_core::i18n::t("ai-edits"), Box::new(move || {
                 let t = wb_core::theme::load_active(&d2);
                 let bg = if t.see_through() { "transparent".to_string() } else { wb_core::theme::hex(t.panel) };
                 let html = diff_page(&p, &edits, &bg, &wb_core::theme::ink_hex(t.ink));
-                let dir = d2.cache().join("diffs");
-                let _ = std::fs::create_dir_all(&dir);
-                let out = dir.join(format!("{}.html", wb_core::clock::now_ms()));
-                if std::fs::write(&out, html).is_ok() { let _ = view::open(&d2, &out.to_string_lossy(), None); }
+                let out = at.cache().join("diffs").join(format!("{}.html", wb_core::clock::now_ms()));
+                if wb_core::paths::write_atomic(&out, html).is_ok() { let _ = view::open(&d2, &out.to_string_lossy(), None); }
             }));
         }
     }

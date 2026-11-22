@@ -29,6 +29,9 @@ fn run(mut args: Vec<String>, data: &Data) -> Result<(), String> {
         args.drain(i..=i + 1);
     }
     let session = session.or_else(|| sessions::target(data)).ok_or(wb_core::i18n::t("no-session"))?;
+    // The session's own root: a project's attachments and memory are the project's (spec 3.22).
+    let at = wb_core::roots::for_session(data, &session);
+    let data = &at;
     let path = data.root.join("node-files").join(format!("{session}.json"));
     let mut table: Map<String, Value> = paths::read_kept(&path);
     let listed = |v: Option<&Value>| -> Vec<String> { v.and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() };

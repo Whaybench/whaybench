@@ -54,10 +54,12 @@ fn time_of(ms: i64, format: &str) -> String {
 
 fn history_file(d: &Data) -> std::path::PathBuf { d.root.join("answer-history.json") }
 
+/// Whether an answer is a project's: marked when it comes in, while the project is open.
+fn of_project(d: &Data, sid: &str) -> bool { wb_core::roots::Roots::new(d.clone()).project_of(sid).is_some() }
+
 fn save(d: &Data, h: &[Value]) {
     // A project's answers are not written to the host's root (spec 3.22): they stay in this panel while it runs.
-    let roots = wb_core::roots::Roots::new(d.clone());
-    let kept: Vec<Value> = h.iter().filter(|e| e["session"].as_str().is_none_or(|s| roots.project_of(s).is_none())).cloned().collect();
+    let kept: Vec<Value> = h.iter().filter(|e| e["project"] != true).cloned().collect();
     let _ = wb_core::paths::write_atomic(&history_file(d), Value::Array(kept).to_string());
 }
 
@@ -431,13 +433,17 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             let moved = matches!((&p.followed, &session), (Some(f), Some(s)) if sessions::current_id(&d, f) == *s);
             let switched = session != p.followed && !moved;
             let on_newest = switched || (p.related.is_none() && shows_newest(&p.history, p.pos, &mine));
+            // A project that closed takes its answers off the panel too: nothing of it stays on screen.
+            let before = p.history.len();
+            p.history.retain(|e| e["project"] != true || e["session"].as_str().is_some_and(|s| of_project(&d, s)));
+            if p.history.len() != before { p.pos = p.pos.min(p.history.len().saturating_sub(1)); p.related = None; w.shown.borrow_mut().clear(); }
             if !fresh.is_empty() {
                 let first = p.history.is_empty();
                 for (sid, a) in fresh.iter().rev().take(KEEP).rev() {
                     let at = a["at"].as_i64().unwrap_or(0);
                     p.seen = p.seen.max(at);
                     if p.history.iter().any(|r| same(r, at, sid)) { continue; }
-                    p.history.push(json!({"at": at, "session": sid, "prompt": a["prompt"], "text": a["text"], "title": cut(&sessions::session_name(&d, sid), 24)}));
+                    p.history.push(json!({"at": at, "session": sid, "prompt": a["prompt"], "text": a["text"], "title": cut(&sessions::session_name(&d, sid), 24), "project": of_project(&d, sid)}));
                     // Another session's answer waits in the list.
                     if on_newest && mine.contains(sid) { p.pos = p.history.len() - 1; p.last_at = at; }
                 }
@@ -462,7 +468,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                     let known = p.history.iter().any(|r| same(r, at, sid));
                     if !known {
                         let name = session.as_deref().map(|s| sessions::session_name(&d, s)).unwrap_or_default();
-                        p.history.push(json!({"at": at, "session": a["sessionId"], "prompt": a["prompt"], "text": a["text"], "title": cut(&name, 24)}));
+                        p.history.push(json!({"at": at, "session": a["sessionId"], "prompt": a["prompt"], "text": a["text"], "title": cut(&name, 24), "project": of_project(&d, sid)}));
                         let skip = p.history.len().saturating_sub(KEEP);
                         p.history.drain(..skip);
                         p.pos = p.pos.saturating_sub(skip);
