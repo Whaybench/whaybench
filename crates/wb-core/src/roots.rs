@@ -40,6 +40,8 @@ impl Stub {
     pub fn open(&self) -> bool {
         fs::symlink_metadata(&self.open_at).is_ok_and(|m| m.file_type().is_symlink())
             && fs::read_link(&self.open_at).is_ok_and(|t| t == self.stored().root)
+            // A vault's link alone is not enough: where it points is an empty folder unless the vault is there.
+            && (!self.vault || crate::vault::ready(self))
     }
     /// The open vault's own marker (inside the encrypted data) names this project: it opened with the right key.
     pub fn intact_open(&self) -> bool {

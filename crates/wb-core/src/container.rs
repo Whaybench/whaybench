@@ -50,6 +50,11 @@ pub fn note_isolated(s: &Stub, on: bool) -> std::io::Result<()> {
 }
 pub fn opened_isolated(s: &Stub) -> bool { std::fs::symlink_metadata(isolated_mark(s)).is_ok() }
 
+fn status(s: &Stub) -> Option<String> {
+    Command::new("podman").args(["container", "inspect", "-f", "{{.State.Status}}", &name(s)]).stderr(Stdio::null()).output().ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
 pub fn running(s: &Stub) -> bool {
     // Paused (for a snapshot) is running too: podman says Running false then.
     Command::new("podman").args(["container", "inspect", "-f", "{{.State.Status}}", &name(s)]).stderr(Stdio::null()).output()
@@ -187,8 +192,12 @@ fn flock_with<T>(file: &Path, how: i32, work: impl FnOnce() -> Result<T, String>
 /// made only after this worked (spec 3.22).
 pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
     locked(s, || {
-        if running(s) { return Ok(()); }
-        if s.vault && !crate::vault::mounted(s) { return Err(format!("project {}'s vault is not open", s.id)); }
+        if s.vault && !crate::vault::ready(s) { return Err(format!("project {}'s vault is not open", s.id)); }
+        if running(s) {
+            // Paused and left so (a snapshot that did not finish): going again.
+            if status(s).as_deref() == Some("paused") { let _ = Command::new("podman").args(["unpause", &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status(); }
+            return Ok(());
+        }
         if !s.intact() { return Err(format!("{} does not hold project {}'s data", s.stored().root.display(), s.id)); }
         let image = host_image().ok_or("no container image for this distribution")?;
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("no home folder")?;
@@ -246,6 +255,9 @@ pub fn stop(s: &Stub) -> Result<(), String> {
 
 /// After a crash or a restart: a project left open without its container, or a container left without its open
 /// project, is closed. Where projects are not isolated (no podman), an open link is left as it is.
+/// The host's open link is there (whether or not what it leads to is ready).
+fn fs_link(s: &Stub) -> bool { std::fs::symlink_metadata(&s.open_at).is_ok_and(|m| m.file_type().is_symlink()) }
+
 pub fn reconcile(host: &Data) {
     let podman = podman_found();
     for s in crate::roots::stubs(host) {
@@ -254,12 +266,14 @@ pub fn reconcile(host: &Data) {
       let _ = flock_with(&s.open_at.with_extension("life"), libc::LOCK_EX | libc::LOCK_NB, || {
         let (open, runs) = (s.open(), podman && running(&s));
         // Opened in its container and the container is gone (or podman is): closed, not left for the host to run.
-        if open && !runs && opened_isolated(&s) {
+        // (A vault: its link goes only once the vault is off, so its data is never left in the clear unseen.)
+        let gone = !runs && opened_isolated(&s) && fs_link(&s);
+        if gone && (!s.vault || crate::vault::unmount(&s).is_ok()) {
             let _ = crate::roots::close_plain(&s);
             let _ = note_isolated(&s, false);
             crate::log::decide("session", "project closed", "left open without its container", &[("project", s.id.clone())]);
         }
-        if !open { let _ = note_isolated(&s, false); }
+        if !fs_link(&s) { let _ = note_isolated(&s, false); }
         // A vault left open by a crash, its project not open (or just closed above): closed.
         if s.vault && !s.open() { let _ = crate::vault::unmount(&s); }
         if runs && !open { let _ = stop(&s); crate::log::decide("session", "project container stopped", "left running without its open project", &[("project", s.id.clone())]); }

@@ -168,7 +168,12 @@ names another step.
   put back (gocryptfs itself takes any master key when changing the password). A key file left by an interrupted
   recovery is set aside instead of blocking the next one.
   A vault project's run folder is mounted read-only in its container: the agents write in the vault only, not plain
-  files beside it or the program links the host runs. `snapshot`, `snapshots` and `restore` take, list and go back to
+  files beside it or the program links the host runs.
+  A vault project counts as open only while its vault is mounted and its gocryptfs answers; a dead one is taken off
+  and opened again by the next `open`, and a failed open leaves nothing open. `close` closes the vault before the open
+  place: when something still holds a file in it, the project stays open and says so. Restore and forget refuse a
+  mounted vault, a start finding a lost container closes the vault before the link, and a container left paused is
+  resumed. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

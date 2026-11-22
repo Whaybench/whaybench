@@ -180,8 +180,11 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             wb_core::container::tidy(&st2, isolated);
             Ok(())
             })();
-            // Not opened: the vault closes again.
-            if opened.is_err() && st2.vault { let _ = wb_core::vault::unmount(&st2); }
+            // Not opened: nothing of it is left open (a link from an earlier open whose container died, the vault).
+            if opened.is_err() && st2.vault {
+                let _ = wb_core::container::stop(&st2);
+                if wb_core::vault::unmount(&st2).is_ok() { let _ = wb_core::roots::close_plain(&st2); let _ = wb_core::container::note_isolated(&st2, false); }
+            }
             opened
             })?;
             out(json!({"open": st2.id, "data": st2.open_at, "isolated": isolated}));
@@ -191,10 +194,11 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             // The open place goes only once the container is gone: a project is never taken for closed while it runs.
             wb_core::container::life(&st2, || {
                 if wb_core::container::podman_found() { wb_core::container::stop(&st2)?; }
+                // The vault before the open place: one that will not close (a panel holds a file in it) leaves the
+                // project open, said so, and never closed in name with its data still in the clear.
+                if st2.vault { wb_core::vault::unmount(&st2).map_err(|e| format!("{e}; the project stays open: close what uses it, then close again"))?; }
                 wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())?;
                 wb_core::container::note_isolated(&st2, false).map_err(|e| e.to_string())?;
-                // Last: nothing of the project is to be read in the clear once it is closed.
-                if st2.vault { wb_core::vault::unmount(&st2)?; }
                 Ok(())
             })?;
             out(json!({"closed": st2.id}));
@@ -210,7 +214,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         "restore" => {
             let stub = owned(st, arg(&rest, 0)?)?;
             let r = wb_core::container::life(&stub, || {
-                if wb_core::container::running(&stub) || stub.open() { return Err(format!("project {} is open: close it, then restore", stub.id)); }
+                if wb_core::container::running(&stub) || stub.open() || (stub.vault && wb_core::vault::mounted(&stub)) { return Err(format!("project {} is open: close it, then restore", stub.id)); }
                 folder::restore(&stub.folder, arg(&rest, 1)?)
             })?;
             out(json!({"restored": arg(&rest, 1)?, "before": r.before, "warning": r.warning}));
@@ -218,7 +222,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         "forget" => {
             // Off the host's list; the folder, its data and its snapshots stay where they are.
             let stub = stub_of(st, arg(&rest, 0)?)?;
-            if wb_core::container::running(&stub) || stub.open() { return Err(format!("project {} is open: close it, then forget it", stub.id)); }
+            if wb_core::container::running(&stub) || stub.open() || (stub.vault && wb_core::vault::mounted(&stub)) { return Err(format!("project {} is open: close it, then forget it", stub.id)); }
             wb_core::roots::remove_stub(&st.data, &stub.id);
             out(json!({"forgotten": stub.id, "folder": stub.folder}));
         }

@@ -69,10 +69,15 @@ pub fn mounted(s: &Stub) -> bool {
     std::fs::read_to_string("/proc/self/mountinfo").is_ok_and(|t| t.lines().any(|l| l.split(' ').nth(4) == Some(escaped.as_str())))
 }
 
+/// Open and answering: mounted, and its gocryptfs still there (a dead one leaves the mount, which then fails).
+pub fn ready(s: &Stub) -> bool { mounted(s) && std::fs::metadata(mountpoint(s)).is_ok() }
+
 /// Opens the vault with the key from the keyring. None in the keyring: `NO_KEY`.
 pub const NO_KEY: &str = "no key for this project in the keyring";
 pub fn mount(s: &Stub) -> Result<(), String> {
-    if mounted(s) { return Ok(()); }
+    if ready(s) { return Ok(()); }
+    // A mount whose gocryptfs died ("transport endpoint is not connected"): taken off before opening again.
+    if mounted(s) { let _ = Command::new("fusermount3").args(["-u", "-z", &mountpoint(s).to_string_lossy()]).output(); }
     let key = crate::secret::get(&key_name(s))?.ok_or(NO_KEY)?;
     mount_with(s, &[], &key)
 }
