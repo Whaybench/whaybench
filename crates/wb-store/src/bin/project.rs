@@ -3,12 +3,17 @@ use std::{io::Read, path::Path};
 
 use serde_json::{Value, json};
 use wb_core::paths::{self, Data};
-use wb_store::{Res, Store, markdown::headings, s};
+use wb_store::{Res, Store, folder, markdown::headings, s};
 
 const HELP: &str = r#"Project store command. Only the AI writes projects, and only through this; the person asks.
 
   whaybench-project list | tree                    projects (tree: parent by id)
-  whaybench-project new ID NAME [--parent P] [--path DIR] [--always] [--desc D]
+  whaybench-project new ID NAME [--parent P] [--path DIR] [--always] [--desc D] [--folder DIR [--from SRC]]
+                                                   --folder makes the project folder (a btrfs subvolume where it can;
+                                                   --from copies a folder in) and takes its first snapshot
+  whaybench-project snapshot ID | snapshots ID     take a snapshot of the project folder (30 kept) / list them
+  whaybench-project restore ID SNAPSHOT            put the folder back as it was; the state now is kept as a snapshot.
+                                                   Run it from outside the project folder, with nothing working in it
   whaybench-project move ID PARENT|-               put a project under another (- = top)
   whaybench-project for-cwd [DIR]                  project linked to a folder
   whaybench-project map ID                         the project map (JSON)
@@ -75,6 +80,12 @@ fn input(rest: &[String]) -> Res<Value> {
     serde_json::from_str(&t).map_err(|e| e.to_string())
 }
 
+fn project_folder(st: &Store, pid: &str) -> Res<std::path::PathBuf> {
+    let p = st.get_project(pid).ok_or_else(|| format!("no project: {pid}"))?;
+    if !p["subvolume"].as_bool().unwrap_or(false) { return Err(format!("project {pid} has no snapshot folder (made without --folder, or not on btrfs)")); }
+    Ok(std::path::PathBuf::from(s(&p, "folder")))
+}
+
 fn arg(rest: &[String], i: usize) -> Res<&str> { rest.get(i).map(String::as_str).ok_or_else(|| "missing argument".to_string()) }
 
 fn run(a: Vec<String>, st: &Store) -> Res<i32> {
@@ -94,7 +105,37 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let mut paths = Vec::new();
             while let Some(p) = opt(&mut rest, "--path") { paths.push(absolute(&p)); }
             let always = flag(&mut rest, "--always");
-            out(st.create_project(arg(&rest, 0)?, arg(&rest, 1)?, &desc, &parent, paths, always)?);
+            let folder = opt(&mut rest, "--folder").map(|f| absolute(&f));
+            let from = opt(&mut rest, "--from").map(|f| absolute(&f));
+            let (pid, name) = (arg(&rest, 0)?, arg(&rest, 1)?);
+            let Some(folder) = folder else {
+                if from.is_some() { return Err("--from needs --folder".into()); }
+                out(st.create_project(pid, name, &desc, &parent, paths, always)?);
+                return Ok(0);
+            };
+            // Everything that can refuse is asked before the folder is made, so a refusal leaves nothing behind.
+            if st.get_project(pid).is_some() { return Err(format!("project exists: {pid}")); }
+            if !parent.is_empty() && st.get_project(&parent).is_none() { return Err(format!("no parent project: {parent}")); }
+            if let Some(other) = st.list_projects().iter().find(|p| { let f = s(p, "folder"); !f.is_empty() && (folder.starts_with(&format!("{f}/")) || f.starts_with(&format!("{folder}/"))) }) {
+                return Err(format!("the folder is inside or around the folder of project {} (a snapshot would not hold the inner one)", s(other, "id")));
+            }
+            let dir = Path::new(&folder);
+            let subvolume = folder::make(dir, from.as_deref().map(Path::new))?;
+            if !paths.contains(&folder) { paths.insert(0, folder.clone()); }
+            let made = st.create_project(pid, name, &desc, &parent, paths, always).and_then(|_| st.set_folder(pid, &folder, subvolume));
+            let p = match made {
+                Ok(p) => p,
+                Err(e) => return Err(match folder::discard(dir, subvolume) { Ok(()) => e, Err(e2) => format!("{e}; the folder made is left at {folder}: {e2}") }),
+            };
+            // The first state, before anything is changed in it (spec 3.22).
+            let first = if subvolume { Some(folder::snapshot(dir)?) } else { None };
+            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name), "warning": first.and_then(|t| t.warning)}));
+        }
+        "snapshot" => { let t = folder::snapshot(&project_folder(st, arg(&rest, 0)?)?)?; out(json!({"snapshot": t.name, "warning": t.warning})); }
+        "snapshots" => { let dir = project_folder(st, arg(&rest, 0)?)?; out(json!(folder::snapshots(&dir))); }
+        "restore" => {
+            let r = folder::restore(&project_folder(st, arg(&rest, 0)?)?, arg(&rest, 1)?)?;
+            out(json!({"restored": arg(&rest, 1)?, "before": r.before, "warning": r.warning}));
         }
         "move" => { let to = arg(&rest, 1)?; out(st.move_project(arg(&rest, 0)?, if to == "-" { "" } else { to })?); }
         "for-cwd" => {

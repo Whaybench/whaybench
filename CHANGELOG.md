@@ -10,6 +10,13 @@ names another step.
 ## [0.9.0] - 2026-11-21
 
 ### Added
+- Project folders (Briefsafe, first part): `whaybench-project new ID NAME --folder DIR [--from SRC]` makes the
+  project folder as a btrfs subvolume (a plain folder where btrfs is not there), copies a folder in with reflinks
+  where it can, and takes its first snapshot. `snapshot`, `snapshots` and `restore` take, list and go back to
+  read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
+  before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
+  another project's folder is refused. Deleting snapshots needs the file system mounted with
+  `user_subvol_rm_allowed`; without it the extra snapshots are kept and the answer says so.
 - The answer panel has ⟳ (the newest answer) and ↶ (the answer shown before ⟳ was pressed, or the node's answers).
 - The answer panel moves to a new answer only while its newest one is shown; while an earlier answer or a node's
   answers are shown, a new one only joins the list. The same conversation under a new number (/resume) is not taken

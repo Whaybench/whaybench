@@ -2,7 +2,8 @@
 //! request and decide. One file per part of a project:
 //!
 //! ```text
-//! projects/<pid>/project.json             name, desc, parent, docs [{id, addon, name, original}], paths
+//! projects/<pid>/project.json             name, desc, parent, docs [{id, addon, name, original}], paths,
+//!                                         folder, subvolume (the project folder, spec 3.22)
 //! projects/<pid>/docs/<doc>/document.md   the document; headings carry their numbers
 //! projects/<pid>/docs/<doc>/meta.json     {sha, sections: {heading path: last change ms}}
 //! projects/<pid>/work/<session>/...       a session's working copies
@@ -11,6 +12,7 @@
 //! ```
 pub mod docaddons;
 pub mod documents;
+pub mod folder;
 pub mod history;
 pub mod items;
 pub mod markdown;

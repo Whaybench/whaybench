@@ -14,6 +14,15 @@ impl Store {
         Ok(p)
     }
 
+    /// Notes the project folder and whether it is a subvolume (spec 3.22).
+    pub fn set_folder(&self, pid: &str, folder: &str, subvolume: bool) -> Res<Value> {
+        let mut p = self.get_project(pid).ok_or_else(|| format!("no project: {pid}"))?;
+        p["folder"] = json!(folder);
+        p["subvolume"] = json!(subvolume);
+        write_json(&self.pdir(pid).join("project.json"), &p)?;
+        Ok(p)
+    }
+
     pub fn project_for_cwd(&self, cwd: &str) -> Option<Value> {
         let mut best: Option<(Value, usize)> = None;
         for p in self.list_projects() {
