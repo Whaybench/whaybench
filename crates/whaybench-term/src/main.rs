@@ -182,6 +182,8 @@ impl Relay {
             }
         }
         if let (Some(s), wb_core::container::Place::Container) = (&project, &place) {
+            // The agents' programs as they are now: an update since the container started moved them.
+            if let Some(home) = std::env::var_os("HOME") { let _ = wb_core::container::programs_bin(s, std::path::Path::new(&home)); }
             let podman = wb_core::versions::find_program("podman", &std::env::var("PATH").unwrap_or_default(), None).ok_or("podman is not installed")?;
             let names: Vec<String> = env.iter().map(|(k, _)| k.clone()).collect();
             let inner = wb_core::container::exec_args(s, std::path::Path::new(&cwd), &names, &program.to_string_lossy(), &args);
@@ -333,6 +335,14 @@ impl Relay {
     /// Every 2 seconds: which session this tab holds, its name, and whether it carried on under a new id.
     fn tick(&mut self) {
         if self.closing { return; }
+        // The tab's project closed: its tab goes too, nothing of it stays on screen or is found again by a later open.
+        if let Some(id) = sessions::tab_project(&self.data, &self.tab)
+            && !wb_core::roots::stubs(&self.data).iter().any(|s| s.id == id && s.open()) {
+                record::decide("session", "tab closed", "its project closed", &[("tab", self.tab.clone()), ("project", id)]);
+                self.closing = true;
+                self.leave_at = Some(Instant::now());
+                return;
+            }
         if let Some(found) = sessions::session_of_tab(&self.data, &self.tab)
             && self.session.as_deref() != Some(&found) && !self.session.as_deref().is_some_and(|s| sessions::current_id(&self.data, s) != s) {
                 record::decide("session", "tab session found", "a session record names this tab", &[("tab", self.tab.clone()), ("old", self.session.clone().unwrap_or_default()), ("new", found.clone())]);
@@ -379,6 +389,9 @@ impl Relay {
     /// conversation: if another tab already shows it, this one gives way. A copy left behind is stopped.
     fn follow_move(&mut self) {
         let Some(old) = self.session.clone() else { return };
+        // A project's conversation has no background the host sees: what its record says of one (a host session's
+        // number) is not followed, stopped or taken over.
+        if sessions::tab_project(&self.data, &self.tab).is_some() { return; }
         // Program gone and no move recorded: Claude Code's own note may still say where it went.
         let now = if self.running { sessions::current_id(&self.data, &old) } else { sessions::locate(&self.data, &old) };
         if now == old { return; }

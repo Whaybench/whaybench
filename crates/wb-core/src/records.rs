@@ -53,6 +53,20 @@ pub fn node_time(node: &Value) -> Option<i64> {
 /// The answer of the turn a node came up in: the first one finished at or after that time.
 pub fn related_index(rows: &[Value], at: i64) -> Option<usize> { rows.iter().position(|r| r["at"].as_i64().unwrap_or(0) >= at) }
 
+/// The files a node's pattern names. A project's patterns are its agents' to write: only ones in its folder count, and
+/// only files whose real path is there; a few hundred at most, so no pattern makes a panel walk a disk.
+fn attached(d: &Data, pattern: &str) -> Vec<std::path::PathBuf> {
+    const MOST: usize = 500;
+    let hits = |p: &str| glob::glob(p).into_iter().flatten().flatten().filter(|x| x.is_file());
+    if !crate::roots::is_project_root(d) { return hits(pattern).take(MOST).collect(); }
+    let id = d.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let host = Data::new(d.root.ancestors().nth(3).map(std::path::Path::to_path_buf).unwrap_or_default());
+    let Some(folder) = crate::roots::stubs(&host).into_iter().find(|s| s.id == id).and_then(|s| fs::canonicalize(s.folder).ok()) else { return Vec::new() };
+    let p = std::path::Path::new(pattern);
+    if !p.starts_with(&folder) || p.components().any(|c| c == std::path::Component::ParentDir) { return Vec::new(); }
+    hits(pattern).filter(|h| fs::canonicalize(h).is_ok_and(|r| r.starts_with(&folder))).take(MOST).collect()
+}
+
 /// Every recorded read and change of the conversation, and the files attached to its nodes as `attached` touches.
 pub fn touches(d: &Data, id: &str) -> Vec<Value> {
     let d = &crate::roots::for_session(d, id);
@@ -62,7 +76,7 @@ pub fn touches(d: &Data, id: &str) -> Vec<Value> {
         if let Some(table) = crate::paths::read_text(&d.root.join("node-files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
             for (node, patterns) in table.as_object().into_iter().flatten() {
                 for p in patterns.as_array().into_iter().flatten().filter_map(Value::as_str) {
-                    for hit in glob::glob(p).into_iter().flatten().flatten().filter(|x| x.is_file()) {
+                    for hit in attached(d, p) {
                         let at = fs::metadata(&hit).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|t| t.as_millis() as u64).unwrap_or(0);
                         out.push(serde_json::json!({"path": hit.to_string_lossy(), "op": "attached", "at": at, "node": node}));
                     }
@@ -102,7 +116,7 @@ pub fn file_counts(d: &Data, id: &str) -> HashMap<String, usize> {
         if let Some(table) = crate::paths::read_text(&d.root.join("node-files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
             for (node, patterns) in table.as_object().into_iter().flatten() {
                 for p in patterns.as_array().into_iter().flatten().filter_map(Value::as_str) {
-                    for hit in glob::glob(p).into_iter().flatten().flatten().filter(|x| x.is_file()) {
+                    for hit in attached(d, p) {
                         found.entry(node.clone()).or_default().insert(hit.to_string_lossy().to_string());
                     }
                 }
@@ -115,6 +129,27 @@ pub fn file_counts(d: &Data, id: &str) -> HashMap<String, usize> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn a_projects_node_files_are_only_its_own() {
+        use crate::{paths::Data, roots::{Stub, open_plain, write_marker, write_stub}};
+        let dir = tempfile::tempdir().unwrap();
+        let host = Data::new(dir.path().join("host"));
+        let stub = Stub::new(&host, "up", "Up", &dir.path().join("up"));
+        write_stub(&host, &stub).unwrap();
+        write_marker(&stub.stored(), "up").unwrap();
+        open_plain(&stub).unwrap();
+        std::fs::write(stub.folder.join("plan.md"), "x").unwrap();
+        std::fs::write(dir.path().join("secret.txt"), "x").unwrap();
+        let root = stub.root();
+        std::fs::create_dir_all(root.root.join("sessions")).unwrap();
+        std::fs::write(root.root.join("sessions/p1.json"), r#"{"id":"p1"}"#).unwrap();
+        let folder = std::fs::canonicalize(&stub.folder).unwrap();
+        let table = json!({"n1": [format!("{}/*.md", folder.display()), format!("{}/*.txt", dir.path().display()), format!("{}/../*.txt", folder.display())]});
+        crate::paths::write_atomic(&root.root.join("node-files/p1.json"), table.to_string()).unwrap();
+        let hits: Vec<String> = super::touches(&host, "p1").iter().filter_map(|t| t["path"].as_str().map(String::from)).collect();
+        assert_eq!(hits, vec![folder.join("plan.md").to_string_lossy().to_string()], "only the project's file");
+    }
 
     use super::*;
     fn data(name: &str) -> Data {

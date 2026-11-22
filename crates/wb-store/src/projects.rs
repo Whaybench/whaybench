@@ -42,6 +42,8 @@ impl Store {
         if let Some((other, _)) = taken.iter().find(|(_, f)| inside(folder, f)) {
             return Err(format!("the folder is inside or around the folder of project {other} (a snapshot would not hold the inner one)"));
         }
+        // podman takes a mount as `from:to[:options]`: a folder with a colon in its path could not be mounted.
+        if folder.contains(':') { return Err(format!("a project folder's path cannot hold ':' ({folder})")); }
         let dir = Path::new(folder);
         let subvolume = crate::folder::make(dir, from)?;
         let stub = Stub::new(&self.data, pid, name, dir);
