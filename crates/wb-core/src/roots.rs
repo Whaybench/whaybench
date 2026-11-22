@@ -169,7 +169,11 @@ pub fn known_session(d: &Data, session: &str) -> Option<Data> {
 }
 
 // In a project's root by `beneath`: no link at the record, nor on the way to it (a `sessions` that is a link).
-fn has_session(d: &Data, session: &str) -> bool { crate::paths::meta(&d.root.join("sessions").join(format!("{session}.json"))).is_ok_and(|m| m.is_file()) && (is_project_root(d) || fs::symlink_metadata(d.root.join("sessions").join(format!("{session}.json"))).is_ok_and(|m| m.is_file())) }
+fn has_session(d: &Data, session: &str) -> bool {
+    if crate::map::safe_id(session).is_err() { return false; }
+    let record = d.root.join("sessions").join(format!("{session}.json"));
+    crate::paths::meta(&record).is_ok_and(|m| m.is_file()) && (is_project_root(d) || fs::symlink_metadata(&record).is_ok_and(|m| m.is_file()))
+}
 
 /// The project data root a folder is in, if it is inside a Briefsafe project folder.
 pub fn project_root_of(host: &Data, dir: &Path) -> Option<Stub> {
@@ -248,6 +252,27 @@ mod tests {
         assert!(views(&host).iter().all(|(_, l)| *l == Link::Follow), "nothing of the project noted");
         set_view(&host, "view", &Link::Target("/tmp/x.html".into(), "x".into()));
         assert!(views(&host).iter().any(|(_, l)| matches!(l, Link::Target(..))), "the host's own still kept");
+    }
+
+    #[test]
+    fn a_projects_records_cannot_give_its_tab_a_path_or_a_host_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Data::new(dir.path().join("host"));
+        let stub = Stub::new(&host, "up", "Up", &dir.path().join("up"));
+        write_stub(&host, &stub).unwrap();
+        write_marker(&stub.stored(), "up").unwrap();
+        open_plain(&stub).unwrap();
+        let rec = |d: &Data, file: &str, v: &str| { fs::create_dir_all(d.root.join("sessions")).unwrap(); fs::write(d.root.join("sessions").join(file), v).unwrap(); };
+        rec(&host, "h1.json", r#"{"id":"h1"}"#);
+        crate::sessions::set_tab_project(&host, "t1", Some("up"));
+        rec(&stub.root(), "z.json", r#"{"id":"../../../.bashrc","tab":"t1","lastActive":9}"#);
+        rec(&stub.root(), "y.json", r#"{"id":"p9","tab":"t1","lastActive":9}"#);
+        rec(&stub.root(), "h1.json", r#"{"id":"h1","tab":"t1","lastActive":9}"#);
+        assert_eq!(crate::sessions::session_of_tab(&host, "t1"), None, "a path, a number not its file's, a host number");
+        rec(&stub.root(), "p1.json", r#"{"id":"p1","tab":"t1","lastActive":1,"movedTo":""}"#);
+        assert_eq!(crate::sessions::session_of_tab(&host, "t1").as_deref(), Some("p1"));
+        rec(&stub.root(), "p2.json", r#"{"id":"p2","movedTo":"../settings"}"#);
+        assert_eq!(crate::sessions::current_id(&host, "p2"), "p2", "a move to a path is not followed");
     }
 
     #[test]

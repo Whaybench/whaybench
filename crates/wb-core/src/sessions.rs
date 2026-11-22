@@ -44,7 +44,10 @@ fn read_json(p: &Path) -> Option<Value> { serde_json::from_str(&crate::paths::re
 /// project's sessions too.
 fn at(d: &Data, id: &str) -> Data { crate::roots::for_session(d, id) }
 
-pub fn record_of(d: &Data, id: &str) -> Option<Value> { read_json(&sessions_dir(&at(d, id)).join(format!("{id}.json"))) }
+/// A session number as Whaybench and Claude Code make them; anything else (a path, `..`) names no session.
+fn plain_id(id: &str) -> bool { crate::map::safe_id(id).is_ok() }
+
+pub fn record_of(d: &Data, id: &str) -> Option<Value> { if !plain_id(id) { return None; } read_json(&sessions_dir(&at(d, id)).join(format!("{id}.json"))) }
 
 /// Where a session lives now: /background carries it on under a new id and the old record says where it
 /// moved, possibly more than once.
@@ -54,7 +57,7 @@ pub fn current_id(d: &Data, id: &str) -> String {
     while !seen.contains(&now) {
         seen.push(now.clone());
         match record_of(d, &now).and_then(|r| r.get("movedTo").and_then(Value::as_str).map(String::from)) {
-            Some(next) if !next.is_empty() => now = next,
+            Some(next) if plain_id(&next) => now = next,
             _ => break,
         }
     }
@@ -88,11 +91,14 @@ pub fn session_of_tab(d: &Data, tab: &str) -> Option<String> {
             None => vec![d.clone()],
         }
     };
-    for f in roots.iter().flat_map(|r| crate::paths::list_dir(&sessions_dir(r))) {
+    for (root, f) in roots.iter().flat_map(|r| crate::paths::list_dir(&sessions_dir(r)).into_iter().map(move |f| (r, f))) {
         let Some(r) = read_json(&f) else { continue };
         if r.get("tab").and_then(Value::as_str) != Some(tab) || r.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty()) { continue; }
         let at = r.get("lastActive").and_then(Value::as_i64).unwrap_or(0);
         let Some(id) = r.get("id").and_then(Value::as_str) else { continue };
+        // A record is its file's: the number it says is the file's name, a plain one, and of that root (a project
+        // cannot hand its tab a host conversation's number).
+        if !plain_id(id) || f.file_stem().and_then(|s| s.to_str()) != Some(id) || crate::roots::known_session(d, id).is_none_or(|k| k.root != root.root) { continue; }
         if best.as_ref().is_none_or(|(b, _)| at >= *b) { best = Some((at, id.to_string())); }
     }
     best.map(|b| b.1)
@@ -382,6 +388,7 @@ pub fn background(id: &str) -> bool { agent(id).is_some_and(|a| a.get("kind").an
 
 /// Whether a process holds this session: Claude Code's list, else the mod's heartbeat (30 seconds).
 pub fn alive(d: &Data, id: &str) -> bool {
+    if !plain_id(id) { return false; }
     if agent(id).is_some() { return true; }
     heartbeat(&alive_dir(&at(d, id)).join(id))
 }
@@ -392,6 +399,7 @@ fn heartbeat(p: &Path) -> bool {
 }
 
 pub fn mark_off(d: &Data, id: &str) {
+    if !plain_id(id) { return; }
     // About an existing session only: a closed project's is left alone, not noted in the host's root.
     let own = crate::roots::known_session(d, id).or_else(|| alive_dir(d).join(id).exists().then(|| d.clone()));
     if let Some(r) = own { let _ = write_atomic(&alive_dir(&r).join(id), "0"); }
@@ -399,6 +407,7 @@ pub fn mark_off(d: &Data, id: &str) {
 
 /// A session the person ended: kept on disk, listed under the hidden ones, never left as "working".
 pub fn mark_ended(d: &Data, id: &str) {
+    if !plain_id(id) { return; }
     let Some(d) = &crate::roots::known_session(d, id) else { return };
     let p = sessions_dir(d).join(format!("{id}.json"));
     if let Some(mut r) = read_json(&p) {
@@ -441,7 +450,7 @@ pub fn unend(d: &Data, id: &str) {
     }
 }
 
-pub fn state_of(d: &Data, id: &str) -> Option<String> { read_json(&state_dir(&at(d, id)).join(format!("{id}.json")))?.get("state")?.as_str().map(String::from) }
+pub fn state_of(d: &Data, id: &str) -> Option<String> { if !plain_id(id) { return None; } read_json(&state_dir(&at(d, id)).join(format!("{id}.json")))?.get("state")?.as_str().map(String::from) }
 
 
 pub fn clear_focus(d: &Data) { let _ = fs::remove_file(focus_file(d)); }

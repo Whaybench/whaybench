@@ -261,7 +261,8 @@ impl Relay {
             write_all(self.master, b"\r");
             return;
         }
-        let in_background = self.session.as_deref().is_some_and(sessions::background);
+        // A project's tab never holds a host background session, whatever number its records gave it.
+        let in_background = sessions::tab_project(&self.data, &self.tab).is_none() && self.session.as_deref().is_some_and(sessions::background);
         record::decide("session", "typed command", if in_background { "a background session" } else { "this tab's session" }, &[("tab", self.tab.clone()), ("command", name.to_string())]);
         if !in_background {
             write_all(self.master, b"\r");
