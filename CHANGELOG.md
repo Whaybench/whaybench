@@ -71,7 +71,11 @@ names another step.
   restored or pruned. Restoring refuses while the project is open, refuses when the folder cannot be fully checked
   for inner subvolumes, and puts the restored folder in place by a rename that replaces nothing. A first snapshot that
   fails is a warning, not a failed project, and a folder made by a failed creation (or set aside by a restore) is
-  removed even without `user_subvol_rm_allowed`. `snapshot`, `snapshots` and `restore` take, list and go back to
+  removed even without `user_subvol_rm_allowed`.
+  Creating: a Briefsafe project takes no `--parent` (said, instead of failing in its own empty store), a plain project
+  cannot take a Briefsafe project's id, a folder copied with `--from` does not bring its `.whaybench` (another
+  project's data, or a link to one), and `.whaybench` is kept out of git in a repository around the folder too.
+  `whaybench-project forget ID` takes a closed Briefsafe project off the list and leaves its folder. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

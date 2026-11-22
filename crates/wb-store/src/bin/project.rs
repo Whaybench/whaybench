@@ -17,6 +17,7 @@ const HELP: &str = r#"Project store command. Only the AI writes projects, and on
   whaybench-project snapshot ID | snapshots ID     take a snapshot of the project folder (30 kept) / list them
   whaybench-project restore ID SNAPSHOT            put the folder back as it was; the state now is kept as a snapshot.
                                                    Run it from outside the project folder, with nothing working in it
+  whaybench-project forget ID                      take a closed Briefsafe project off the list; its folder stays
   whaybench-project move ID PARENT|-               put a project under another (- = top)
   whaybench-project for-cwd [DIR]                  project linked to a folder
   whaybench-project map ID                         the project map (JSON)
@@ -119,6 +120,8 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let (pid, name) = (arg(&rest, 0)?, arg(&rest, 1)?);
             let Some(folder) = folder else {
                 if from.is_some() { return Err("--from needs --folder".into()); }
+                // One id for one project: a Briefsafe project's id is taken too.
+                if wb_core::roots::stubs(&st.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
                 out(st.create_project(pid, name, &desc, &parent, paths, always)?);
                 return Ok(0);
             };
@@ -164,6 +167,13 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             if wb_core::container::running(&stub) || stub.open() { return Err(format!("project {} is open: close it, then restore", stub.id)); }
             let r = folder::restore(&stub.folder, arg(&rest, 1)?)?;
             out(json!({"restored": arg(&rest, 1)?, "before": r.before, "warning": r.warning}));
+        }
+        "forget" => {
+            // Off the host's list; the folder, its data and its snapshots stay where they are.
+            let stub = stub_of(st, arg(&rest, 0)?)?;
+            if wb_core::container::running(&stub) || stub.open() { return Err(format!("project {} is open: close it, then forget it", stub.id)); }
+            wb_core::roots::remove_stub(&st.data, &stub.id);
+            out(json!({"forgotten": stub.id, "folder": stub.folder}));
         }
         "move" => { let to = arg(&rest, 1)?; out(st.move_project(arg(&rest, 0)?, if to == "-" { "" } else { to })?); }
         "for-cwd" => {

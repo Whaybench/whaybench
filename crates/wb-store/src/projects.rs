@@ -34,6 +34,8 @@ impl Store {
         use wb_core::roots::{self, Stub};
         if self.get_project(pid).is_some() || roots::stubs(&self.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
         if !parent.is_empty() && self.get_project(parent).is_none() { return Err(format!("no parent project: {parent}")); }
+        // Its records are in its own folder, where the host's projects are not: it stands on its own.
+        if !parent.is_empty() { return Err("a Briefsafe project (--folder) has no parent project".into()); }
         let inside = |a: &str, b: &str| a == b || Path::new(a).starts_with(b) || Path::new(b).starts_with(a);
         let taken: Vec<(String, String)> = roots::stubs(&self.data).into_iter().map(|s| (s.id, s.folder.to_string_lossy().to_string()))
             .chain(self.list_projects().iter().map(|p| (s(p, "id").to_string(), s(p, "folder").to_string()))).filter(|(_, f)| !f.is_empty()).collect();
@@ -44,6 +46,13 @@ impl Store {
         let subvolume = crate::folder::make(dir, from)?;
         let stub = Stub::new(&self.data, pid, name, dir);
         let made = (|| -> Res<Value> {
+            // A copied folder's own Whaybench data (another project's, or a link to one) is not this project's.
+            let data = dir.join(roots::PROJECT_DATA);
+            match fs::symlink_metadata(&data) {
+                Ok(m) if m.is_dir() => fs::remove_dir_all(&data).map_err(|e| e.to_string())?,
+                Ok(_) => fs::remove_file(&data).map_err(|e| e.to_string())?,
+                Err(_) => {}
+            }
             let inner = Store::new(stub.stored());
             roots::write_marker(&inner.data, pid).map_err(|e| e.to_string())?;
             if !paths.iter().any(|p| p == folder) { paths.insert(0, folder.to_string()); }
@@ -131,11 +140,13 @@ impl Store {
 /// The project's data stays out of a git repository in its folder: `.whaybench/` in `.git/info/exclude`, so a
 /// commit of everything does not take it along. The repository's own files are not changed.
 fn exclude_from_git(dir: &Path) -> Res<()> {
-    let git = dir.join(".git");
-    if !git.is_dir() { return Ok(()); }
+    // The repository the folder is in: its own, or one around it.
+    let Some(top) = dir.ancestors().find(|a| a.join(".git").is_dir()) else { return Ok(()) };
+    let git = top.join(".git");
     let file = git.join("info/exclude");
     let now = fs::read_to_string(&file).unwrap_or_default();
-    let line = format!("/{}/", wb_core::roots::PROJECT_DATA);
+    let rel = dir.strip_prefix(top).map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
+    let line = if rel.is_empty() { format!("/{}/", wb_core::roots::PROJECT_DATA) } else { format!("/{rel}/{}/", wb_core::roots::PROJECT_DATA) };
     if now.lines().any(|l| l.trim() == line) { return Ok(()); }
     fs::create_dir_all(git.join("info")).map_err(|e| e.to_string())?;
     let sep = if now.is_empty() || now.ends_with('\n') { "" } else { "\n" };
@@ -177,9 +188,16 @@ mod tests {
         let src = work.join("old");
         fs::create_dir_all(src.join(".git/info")).unwrap();
         fs::write(src.join("a.txt"), "hi").unwrap();
+        // The source's own Whaybench data, here a link to somewhere else: not copied in as this project's.
+        let elsewhere = work.join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, src.join(".whaybench")).unwrap();
         let folder = work.join("up").to_string_lossy().to_string();
         assert!(host.create_in_folder("up", "Up", "", "nosuch", vec![], false, &folder, Some(&src)).is_err());
         assert!(!Path::new(&folder).exists(), "a refusal makes nothing");
+        host.create_project("top", "Top", "", "", vec![], false).unwrap();
+        assert!(host.create_in_folder("up", "Up", "", "top", vec![], false, &folder, Some(&src)).is_err(), "no parent for a Briefsafe project");
+        assert!(!Path::new(&folder).exists());
         let (p, _) = host.create_in_folder("up", "Up", "", "", vec![], false, &folder, Some(&src)).unwrap();
         assert_eq!(s(&p, "kind"), "briefsafe");
         assert!(host.get_project("up").is_none(), "the project is not in the host's store");
@@ -191,6 +209,7 @@ mod tests {
         assert_eq!(s(&inner.get_project("up").unwrap(), "folder"), folder);
         assert_eq!(fs::read_to_string(inner.data.root.join("addons/project-docs/wbs/WBS.md")).unwrap(), "# WBS\n");
         assert_eq!(fs::read_to_string(Path::new(&folder).join(".git/info/exclude")).unwrap(), "/.whaybench/\n");
+        assert!(fs::symlink_metadata(Path::new(&folder).join(".whaybench")).unwrap().is_dir() && fs::read_dir(&elsewhere).unwrap().count() == 0, "its own data, nothing written through the link");
         assert!(host.create_in_folder("up", "Up", "", "", vec![], false, &format!("{folder}2"), None).is_err(), "the id is taken");
         assert!(host.create_in_folder("in", "In", "", "", vec![], false, &format!("{folder}/in"), None).is_err(), "not inside another");
         // Snapshots of a test folder on btrfs are read-only: clean up the way the program prunes.
