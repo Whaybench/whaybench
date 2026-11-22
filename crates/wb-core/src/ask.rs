@@ -37,7 +37,7 @@ fn new_id(sid: &str) -> String {
 /// Asks still waiting, oldest first: one a hook waits on while its process lives (no longer than the hooks'
 /// timeout, so a reused process number shows nothing), or one answered by a prompt. Only well-formed ids.
 pub fn pending(data: &Path) -> Vec<Value> {
-    let foreign = data.file_name().is_some_and(|n| n == crate::roots::PROJECT_DATA);
+    let foreign = data.join(crate::roots::MARKER).is_file();
     let mut out: Vec<Value> = fs::read_dir(dir(data)).into_iter().flatten().flatten()
         .filter(|f| f.file_name().to_str().is_some_and(|n| n.ends_with(".json") && !n.ends_with(".answer.json")))
         .filter_map(|f| read_json(&f.path(), Value::Null).ok())

@@ -42,9 +42,10 @@ impl Store {
         }
         let dir = Path::new(folder);
         let subvolume = crate::folder::make(dir, from)?;
-        let stub = Stub { id: pid.into(), name: name.into(), folder: dir.to_path_buf() };
+        let stub = Stub::new(&self.data, pid, name, dir);
         let made = (|| -> Res<Value> {
-            let inner = Store::new(stub.root());
+            let inner = Store::new(stub.stored());
+            roots::write_marker(&inner.data, pid).map_err(|e| e.to_string())?;
             if !paths.iter().any(|p| p == folder) { paths.insert(0, folder.to_string()); }
             inner.create_project(pid, name, desc, parent, paths, always)?;
             let p = inner.set_folder(pid, folder, subvolume)?;
@@ -182,7 +183,9 @@ mod tests {
         assert_eq!(s(&p, "kind"), "briefsafe");
         assert!(host.get_project("up").is_none(), "the project is not in the host's store");
         let stubs = wb_core::roots::stubs(&host.data);
-        assert_eq!((stubs.len(), stubs[0].open()), (1, true));
+        assert_eq!((stubs.len(), stubs[0].open()), (1, false), "made closed");
+        wb_core::roots::open_plain(&stubs[0]).unwrap();
+        assert!(stubs[0].open());
         let inner = Store::new(stubs[0].root());
         assert_eq!(s(&inner.get_project("up").unwrap(), "folder"), folder);
         assert_eq!(fs::read_to_string(inner.data.root.join("addons/project-docs/wbs/WBS.md")).unwrap(), "# WBS\n");

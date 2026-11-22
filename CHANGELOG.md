@@ -19,7 +19,13 @@ names another step.
   them to a worker outside the project. The panels list and show a project's sessions (map, answers, states, views,
   permission questions, status messages) from its folder and write what they change there; the answer panel does not
   keep a project's answers in its history file. From a project's folder the compositor takes only requests to bring a
-  panel forward, and lets its agents type only into the same project's conversations. `snapshot`, `snapshots` and `restore` take, list and go back to
+  panel forward, and lets its agents type only into the same project's conversations.
+  `whaybench-project open ID` makes an open project's data seen at `cache/open/<id>` of the data folder (the same
+  path on the host and in its container) and, where podman and an official image of the host's distribution and
+  version are there, starts the project's container: the project folder, the open data place and the host's programs
+  (read-only, with the plugin code), nothing of the host's data or agent settings, the resting data hidden. Its
+  agents get their own Claude Code folder, made once from the person's settings and plugin lists, so their
+  conversations and background sessions stay in the project. `close` stops it and the data is no longer seen. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

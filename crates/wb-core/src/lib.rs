@@ -16,6 +16,7 @@ pub mod records;
 pub mod roots;
 pub mod session_record;
 pub mod clock;
+pub mod container;
 pub mod sessions;
 pub mod status;
 pub mod theme;

@@ -13,6 +13,7 @@ const HELP: &str = r#"Project store command. Only the AI writes projects, and on
                                                    where it can; --from copies a folder in), its data inside it
                                                    (<folder>/.whaybench), and the first snapshot. Its documents and map
                                                    are worked on with WHAYBENCH_DATA_DIR=<folder>/.whaybench
+  whaybench-project open ID | close ID             let the host's programs see a Briefsafe project's data, or stop
   whaybench-project snapshot ID | snapshots ID     take a snapshot of the project folder (30 kept) / list them
   whaybench-project restore ID SNAPSHOT            put the folder back as it was; the state now is kept as a snapshot.
                                                    Run it from outside the project folder, with nothing working in it
@@ -82,10 +83,12 @@ fn input(rest: &[String]) -> Res<Value> {
     serde_json::from_str(&t).map_err(|e| e.to_string())
 }
 
-fn project_folder(st: &Store, pid: &str) -> Res<std::path::PathBuf> {
-    wb_core::roots::stubs(&st.data).into_iter().find(|s| s.id == pid).map(|s| s.folder)
+fn stub_of(st: &Store, pid: &str) -> Res<wb_core::roots::Stub> {
+    wb_core::roots::stubs(&st.data).into_iter().find(|s| s.id == pid)
         .ok_or_else(|| format!("no project with its own folder: {pid} (made with new --folder)"))
 }
+
+fn project_folder(st: &Store, pid: &str) -> Res<std::path::PathBuf> { stub_of(st, pid).map(|s| s.folder) }
 
 fn arg(rest: &[String], i: usize) -> Res<&str> { rest.get(i).map(String::as_str).ok_or_else(|| "missing argument".to_string()) }
 
@@ -121,6 +124,22 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             };
             let (p, first) = st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new))?;
             out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name), "warning": first.and_then(|t| t.warning)}));
+        }
+        "open" => {
+            let st2 = stub_of(st, arg(&rest, 0)?)?;
+            wb_core::roots::open_plain(&st2).map_err(|e| e.to_string())?;
+            // Isolated where a container can run; else open as before (spec 3.22).
+            let own = wb_core::paths::own_exe().map_err(|e| e.to_string())?;
+            let isolated = if wb_core::container::podman_found() && wb_core::container::host_image().is_some() {
+                wb_core::container::start(&st2, &wb_core::container::programs(&own)).map(|_| true)
+            } else { Ok(false) };
+            out(json!({"open": st2.id, "data": st2.open_at, "container": isolated.as_ref().ok(), "error": isolated.err()}));
+        }
+        "close" => {
+            let st2 = stub_of(st, arg(&rest, 0)?)?;
+            wb_core::container::stop(&st2.id);
+            wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())?;
+            out(json!({"closed": st2.id}));
         }
         "snapshot" => { let t = folder::snapshot(&project_folder(st, arg(&rest, 0)?)?)?; out(json!({"snapshot": t.name, "warning": t.warning})); }
         "snapshots" => { let dir = project_folder(st, arg(&rest, 0)?)?; out(json!(folder::snapshots(&dir))); }

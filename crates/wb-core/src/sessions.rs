@@ -483,11 +483,14 @@ mod tests {
         let b = std::env::temp_dir().join(format!("wb-sess-roots-{}", std::process::id()));
         let _ = fs::remove_dir_all(&b);
         let host = Data::new(b.join("host"));
-        let stub = Stub { id: "up".into(), name: "Up".into(), folder: b.join("work/up") };
+        let stub = Stub::new(&host, "up", "Up", &b.join("work/up"));
         write_stub(&host, &stub).unwrap();
+        let st = stub.stored();
+        fs::create_dir_all(st.root.join("projects/up")).unwrap();
+        fs::write(st.root.join("projects/up/project.json"), "{}").unwrap();
+        crate::roots::write_marker(&st, "up").unwrap();
+        crate::roots::open_plain(&stub).unwrap();
         let pr = stub.root();
-        fs::create_dir_all(pr.root.join("projects/up")).unwrap();
-        fs::write(pr.root.join("projects/up/project.json"), "{}").unwrap();
         let record = serde_json::json!({"id": "p1", "tab": "t9", "lastActive": 5, "cwd": "/w/up", "firstPrompt": "secret-plan-4q"});
         write_atomic(&sessions_dir(&pr).join("p1.json"), record.to_string()).unwrap();
         write_atomic(&state_dir(&pr).join("p1.json"), r#"{"state":"working"}"#).unwrap();

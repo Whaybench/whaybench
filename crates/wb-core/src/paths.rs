@@ -38,7 +38,7 @@ impl Data {
     /// Claude Code's folder for the sessions kept here: a Briefsafe project's own (`<project root>/claude`, which its
     /// agents get as CLAUDE_CONFIG_DIR), else the person's ($CLAUDE_CONFIG_DIR, else ~/.claude).
     pub fn claude_dir(&self) -> Option<PathBuf> {
-        if self.root.file_name().is_some_and(|n| n == crate::roots::PROJECT_DATA) { return Some(self.root.join(crate::roots::CLAUDE_DIR)); }
+        if crate::roots::is_project_root(self) { return Some(self.root.join(crate::roots::CLAUDE_DIR)); }
         std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude")))
     }
