@@ -10,6 +10,11 @@ names another step.
 ## [0.9.0] - 2026-11-21
 
 ### Added
+- The answer panel has ⟳ (the newest answer) and ↶ (the answer shown before ⟳ was pressed, or the node's answers).
+- The answer panel moves to a new answer only while its newest one is shown; while an earlier answer or a node's
+  answers are shown, a new one only joins the list. The same conversation under a new number (/resume) is not taken
+  for another tab, an answer dropped with ✕ no longer comes back for a moment, and the panel opened from a map node
+  keeps that node's answers.
 - The computer does not go to sleep while an agent works (Preferences → "Prevent sleep while an agent works", on
   at first): a turn worked or waiting on the person (a command approved in the terminal runs meanwhile),
   or a subagent still running after it. On Linux a `systemd-inhibit` block on sleep and the lid switch, under WSL

@@ -22,6 +22,8 @@ struct Panel {
     /// The newest answer taken from the logs, and when they were last looked at.
     seen: i64,
     scanned: i64,
+    /// What was shown before the newest answer was asked for: a node's answers, and the kept answer as (at, session).
+    before: Option<(Option<(Vec<Value>, usize)>, i64, String)>,
 }
 
 /// Answers in the logs after `since`, oldest first, as (session, row). A log not written to since `scanned` is not read.
@@ -39,6 +41,11 @@ fn logged_after(d: &Data, since: i64, scanned: i64) -> Vec<(String, Value)> {
     out
 }
 
+/// No answer of the followed session comes after the one shown.
+fn shows_newest(history: &[Value], pos: usize, mine: &[String]) -> bool {
+    !history.iter().skip(pos + 1).any(|r| r["session"].as_str().is_some_and(|s| mine.iter().any(|m| m == s)))
+}
+
 fn same(r: &Value, at: i64, session: &str) -> bool { r["at"].as_i64() == Some(at) && r["session"].as_str() == Some(session) }
 
 fn time_of(ms: i64, format: &str) -> String {
@@ -51,7 +58,7 @@ fn save(d: &Data, h: &[Value]) {
     let _ = wb_core::paths::write_atomic(&history_file(d), Value::Array(h.to_vec()).to_string());
 }
 
-struct Widgets { web: webkit6::WebView, where_: gtk::Label, back: gtk::Button, forward: gtk::Button, drop: gtk::Button, shown: RefCell<String> }
+struct Widgets { web: webkit6::WebView, where_: gtk::Label, back: gtk::Button, forward: gtk::Button, drop: gtk::Button, newest: gtk::Button, ret: gtk::Button, shown: RefCell<String> }
 
 fn style(d: &Data) -> String {
     let p = Page::of(d);
@@ -82,6 +89,8 @@ fn draw(p: &Panel, w: &Widgets, d: &Data) {
     w.back.set_sensitive(can_back);
     w.forward.set_sensitive(can_forward);
     w.drop.set_sensitive(row.is_some());
+    w.newest.set_sensitive(p.related.is_some() || p.pos + 1 < p.history.len());
+    w.ret.set_sensitive(p.before.is_some());
     w.drop.set_tooltip_text(Some(if p.related.is_some() { wb_core::i18n::t("close-related-answers") } else { wb_core::i18n::t("remove-from-history") }));
     let top = format!("<!doctype html><meta charset='utf-8'><style>{}</style>", style(d));
     let Some(row) = row else { return show(w, top) };
@@ -237,13 +246,18 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     where_.set_ellipsize(gtk::pango::EllipsizeMode::End);
     where_.add_css_class("small");
     let (back, forward, drop) = (gtk::Button::with_label("◀"), gtk::Button::with_label("▶"), gtk::Button::with_label("✕"));
-    for b in [&back, &forward, &drop] { b.add_css_class("flat"); }
+    let (ret, newest) = (gtk::Button::with_label("↶"), gtk::Button::with_label("⟳"));
+    ret.set_tooltip_text(Some(wb_core::i18n::t("answer-shown-before")));
+    newest.set_tooltip_text(Some(wb_core::i18n::t("answer-newest")));
+    for b in [&back, &forward, &drop, &ret, &newest] { b.add_css_class("flat"); }
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     bar.set_margin_start(8);
     bar.set_margin_end(4);
     bar.append(&where_);
+    bar.append(&ret);
     bar.append(&back);
     bar.append(&forward);
+    bar.append(&newest);
     bar.append(&drop);
     let web = webkit6::WebView::new();
     crate::common::set_up_web(&web, &d);
@@ -285,8 +299,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let pos = history.len().saturating_sub(1);
     // A first start takes the last answers already logged; after that, what came while the panel was closed.
     let seen = history.iter().filter_map(|r| r["at"].as_i64()).max().unwrap_or(0);
-    let panel = Rc::new(RefCell::new(Panel { history, pos, related: None, followed: None, last_at: 0, seen, scanned: 0 }));
-    let w = Rc::new(Widgets { web, where_, back: back.clone(), forward: forward.clone(), drop: drop.clone(), shown: RefCell::default() });
+    let panel = Rc::new(RefCell::new(Panel { history, pos, related: None, followed: sessions::target(&d), last_at: 0, seen, scanned: 0, before: None }));
+    let w = Rc::new(Widgets { web, where_, back: back.clone(), forward: forward.clone(), drop: drop.clone(), newest: newest.clone(), ret: ret.clone(), shown: RefCell::default() });
     draw(&panel.borrow(), &w, &d);
 
     let go = |step: i64, panel: Rc<RefCell<Panel>>, w: Rc<Widgets>, d: Data| move |_: &gtk::Button| {
@@ -303,6 +317,35 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         draw(&panel.borrow(), &w, &d);
     };
     back.connect_clicked(go(-1, panel.clone(), w.clone(), d.clone()));
+    {
+        let (panel, w, d) = (panel.clone(), w.clone(), d.clone());
+        newest.connect_clicked(move |_| {
+            {
+                let mut p = panel.borrow_mut();
+                let key = p.history.get(p.pos).map(|r| (r["at"].as_i64().unwrap_or(0), r["session"].as_str().unwrap_or("").to_string()));
+                if let Some((at, sid)) = key && (p.related.is_some() || p.pos + 1 < p.history.len()) {
+                    let related = p.related.take();
+                    p.before = Some((related, at, sid));
+                    p.pos = p.history.len() - 1;
+                }
+            }
+            draw(&panel.borrow(), &w, &d);
+        });
+    }
+    {
+        let (panel, w, d) = (panel.clone(), w.clone(), d.clone());
+        ret.connect_clicked(move |_| {
+            {
+                let mut p = panel.borrow_mut();
+                if let Some((related, at, sid)) = p.before.take() {
+                    // The answer may have left the list meanwhile; the place shown then stays.
+                    if let Some(i) = p.history.iter().position(|r| same(r, at, &sid)) { p.pos = i; }
+                    p.related = related;
+                }
+            }
+            draw(&panel.borrow(), &w, &d);
+        });
+    }
     forward.connect_clicked(go(1, panel.clone(), w.clone(), d.clone()));
     {
         let (panel, w, d) = (panel.clone(), w.clone(), d.clone());
@@ -350,7 +393,6 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             }
             *card_of.borrow_mut() = next.map(id_of);
         }
-        let mut changed = false;
         {
             let mut p = panel.borrow_mut();
             // From the map's menu: {"session", "node", "at"}.
@@ -366,7 +408,6 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                         status::say(&d, &if tidied { wb_core::i18n::f("related-answers-node-created-at-map", &[("a1", (i + 1).to_string()), ("a2", (rows.len()).to_string())]) } else { wb_core::i18n::f("related-answers-2", &[("a1", (i + 1).to_string()), ("a2", (rows.len()).to_string())]) }, 8);
                         p.related = Some((rows, i));
                         status::focus_app(&d, "dev.whaybench.answer");
-                        changed = true;
                     }
                     None => {
                         wb_core::log::decide("answer", "related answers", "no kept answer after it", &[("session", session), ("kept_answers", rows.len().to_string())]);
@@ -378,31 +419,39 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             let now = wb_core::clock::now_ms();
             let fresh = logged_after(&d, p.seen, p.scanned);
             p.scanned = now;
+            let mine = session.as_deref().map(|s| records::lineage(&d, s)).unwrap_or_default();
+            // Showing the followed session's newest answer, a new one of it is shown; while a node's answers or an
+            // earlier answer are shown, it only joins the list. Choosing another session shows its newest; the same
+            // conversation going on under a new number (/resume) is not another session.
+            let moved = matches!((&p.followed, &session), (Some(f), Some(s)) if sessions::current_id(&d, f) == *s);
+            let switched = session != p.followed && !moved;
+            let on_newest = switched || (p.related.is_none() && shows_newest(&p.history, p.pos, &mine));
             if !fresh.is_empty() {
-                let mine = session.as_deref().map(|s| records::lineage(&d, s)).unwrap_or_default();
+                let first = p.history.is_empty();
                 for (sid, a) in fresh.iter().rev().take(KEEP).rev() {
                     let at = a["at"].as_i64().unwrap_or(0);
                     p.seen = p.seen.max(at);
                     if p.history.iter().any(|r| same(r, at, sid)) { continue; }
                     p.history.push(json!({"at": at, "session": sid, "prompt": a["prompt"], "text": a["text"], "title": cut(&sessions::session_name(&d, sid), 24)}));
-                    // The followed session's answer is shown; another's waits in the list.
-                    if p.related.is_none() && mine.contains(sid) { p.pos = p.history.len() - 1; p.last_at = at; }
+                    // Another session's answer waits in the list.
+                    if on_newest && mine.contains(sid) { p.pos = p.history.len() - 1; p.last_at = at; }
                 }
                 let skip = p.history.len().saturating_sub(KEEP);
                 p.history.drain(..skip);
                 p.pos = p.pos.saturating_sub(skip).min(p.history.len().saturating_sub(1));
+                // With no session followed, a first list opens on its newest answer.
+                if first && mine.is_empty() { p.pos = p.history.len().saturating_sub(1); }
                 save(&d, &p.history);
-                changed = true;
             }
             if session != p.followed {
                 p.followed = session.clone();
-                p.related = None;
-                p.last_at = 0;
-                changed = true;
+                if switched { p.related = None; p.last_at = 0; }
             }
             if let Some(a) = session.as_deref().and_then(|s| newest_answer(&d, s)) {
                 let at = a["at"].as_i64().unwrap_or(0);
-                if at != p.last_at {
+                // Only a newer one: the log line is written before this file, so for a moment this file can hold
+                // the answer before the one just taken from the log (and bring back one the person dropped).
+                if at > p.last_at {
                     p.last_at = at;
                     let sid = a["sessionId"].as_str().unwrap_or("");
                     let known = p.history.iter().any(|r| same(r, at, sid));
@@ -411,17 +460,15 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                         p.history.push(json!({"at": at, "session": a["sessionId"], "prompt": a["prompt"], "text": a["text"], "title": cut(&name, 24)}));
                         let skip = p.history.len().saturating_sub(KEEP);
                         p.history.drain(..skip);
+                        p.pos = p.pos.saturating_sub(skip);
                         save(&d, &p.history);
-                        p.related = None;
                     }
-                    if p.related.is_none()
+                    if on_newest
                         && let Some(i) = p.history.iter().position(|r| same(r, at, sid)) { p.pos = i; }
-                    changed = true;
                 }
             }
         }
         // Drawn each time: the page holds the theme's colours, and the same page is not loaded again.
-        let _ = changed;
         draw(&panel.borrow(), &w, &d);
     });
 }
@@ -435,6 +482,15 @@ mod tests {
         let shown = about(&json!({"command": "ls\u{202e}txt.exe\u{0}; rm -rf x", "n": 2}));
         assert!(shown.contains("\\u{202e}") && shown.contains("\\u{0}") && shown.ends_with("n: 2"), "{shown}");
         assert!(shown.contains("; rm -rf x"), "nothing after the NUL is lost");
+    }
+
+    #[test]
+    fn only_the_newest_answer_shown_moves_on() {
+        let h: Vec<Value> = ["a", "b", "a", "b"].iter().map(|s| json!({"session": s})).collect();
+        let mine = vec!["a".to_string()];
+        assert!(shows_newest(&h, 2, &mine), "only another session's answer after it");
+        assert!(!shows_newest(&h, 0, &mine), "an earlier answer is shown");
+        assert!(shows_newest(&[], 0, &mine));
     }
 
     #[test]
