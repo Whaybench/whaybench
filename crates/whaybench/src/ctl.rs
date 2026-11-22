@@ -189,7 +189,11 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
         }
         let from = from.as_str();
         match deliver(data, to, text, Some(from), true) {
-            Ok(()) => record::decide("request", "asked by an agent", "a sandboxed agent's request, checked here", &[("session", to.to_string()), ("from", from.to_string())]),
+            Ok(()) => {
+                // When it was asked, where the asker's `session wait` looks (its own root).
+                if project.is_some() { let _ = write_atomic(&asked_file(root, to), now_ms().to_string().as_bytes()); }
+                record::decide("request", "asked by an agent", "a sandboxed agent's request, checked here", &[("session", to.to_string()), ("from", from.to_string())]);
+            }
             // A project's request: a fixed reason (the error may quote its text).
             Err(Refused::Rule(e) | Refused::Write(e)) => record::warn("request", "agent's request not delivered", if project.is_some() { "refused for a project's request" } else { &e }, &[("session", to.to_string()), ("from", from.to_string())]),
         }
@@ -459,7 +463,8 @@ pub fn send(data: &Data, words: &[String]) -> Result<(), String> {
         if out.exists() {
             println!("{}", out.display());
             // Said to whoever asked, not only in the log: a picture taken while a project is open goes after a while.
-            if matches!(request, Request::Shot { .. }) && !wb_core::roots::Roots::new(data.clone()).projects().is_empty() {
+            if matches!(request, Request::Shot { .. }) && (!wb_core::roots::Roots::new(data.clone()).projects().is_empty()
+                || wb_core::paths::list_dir(&data.cache()).iter().any(|f| f.file_name().is_some_and(|n| n.to_string_lossy().starts_with("view-protected-")))) {
                 eprintln!("{}", wb_core::i18n::t("shot-removed-later"));
             }
             return Ok(());

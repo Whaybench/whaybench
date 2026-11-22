@@ -279,7 +279,11 @@ names another step.
   its address as text; `session type` and `wait` work between a project's own conversations; in a project the view
   tool says which commands are the host's instead of timing out; a failed vault log in shows the real reason; links
   of an older project whose id has a colon work; a detached view keeps its own name; a view's mark left by a crash
-  is cleared at start; a project's file pattern with a wildcard in a folder part is refused when attached (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
+  is cleared at start; a project's file pattern with a wildcard in a folder part is refused when attached (en, ko).
+  From its cross-check: the host's own file loads in a view that follows a project and stays in its list; a project
+  conversation's status line runs the program on the container's path; an answer that comes before a project's
+  `session wait` starts is still found; `whaybench-view shot` passes on the removal notice, which follows the same
+  rule as the removal; the menu bar's new tab with this map works in a project. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

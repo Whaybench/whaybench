@@ -297,7 +297,7 @@ fn switch(v: &mut V) {
     }
     v.hist = History::load(view::history_dir(&v.d, &v.name, v.followed.as_deref()));
     // A project's list is its agents' to write: only what it may show is kept.
-    if let Some(s) = project_followed(v) { v.hist.items.retain(|(p, _)| in_project(&s, p)); v.hist.pos = v.hist.items.len().saturating_sub(1); }
+    if let Some(s) = project_followed(v) { let own = v.own.clone(); v.hist.items.retain(|(p, _)| own.contains(p) || in_project(&s, p)); v.hist.pos = v.hist.items.len().saturating_sub(1); }
     v.of_project = v.followed.is_some() && project_followed(v).is_some();
     v.seen = read_taken(v);
     incoming(v);
@@ -534,7 +534,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
             let Some(s) = weak.upgrade() else { return false };
             let Ok(v) = s.try_borrow() else { return false };
             let path = gio::File::for_uri(&uri).path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-            if !wb_core::vault::is_recovery_page(&path) && project_followed(&v).is_some_and(|p| !in_project(&p, &path)) {
+            // The host's own file (and its folder, the base of a text page drawn from it) is let through as well.
+            let own = v.own.iter().any(|o| { let o = view::local_path(o); o == Path::new(&path) || o.parent() == Some(Path::new(&path)) });
+            if !wb_core::vault::is_recovery_page(&path) && !own && project_followed(&v).is_some_and(|p| !in_project(&p, &path)) {
                 record::warn("view", "page refused", "a project's page went to a file outside the project", &[]);
                 decision.ignore();
                 return true;

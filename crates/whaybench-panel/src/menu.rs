@@ -111,7 +111,10 @@ pub(crate) fn session_args(d: &Data, rest: &[&str]) -> Vec<String> {
 
 fn new_tab_with_map(d: &Data, agent: &str) {
     let Some(s) = sessions::target(d) else { return status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6) };
-    ctl(d, session_args(d, &["new", "--agent", agent, &s]));
+    // A project's conversation: the new one is in that project too (its map stays there).
+    let mut args = session_args(d, &["new", "--agent", agent, &s]);
+    if let (Some(p), Some(i)) = (wb_core::roots::Roots::new(d.clone()).project_of(&s), args.iter().position(|a| a == "new")) { args.splice(i + 1..i + 1, ["--project".to_string(), p]); }
+    ctl(d, args);
 }
 
 /// As shown: the main map panel knows what is on its screen, folds included, so it passes the map on itself.

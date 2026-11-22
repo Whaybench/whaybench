@@ -190,6 +190,8 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
             let o = Command::new(exe).args(["ctl", "--data-dir", &d.root.to_string_lossy(), "shot", "--out", &out, "--app", if flag(&args, "--firefox") { view::FIREFOX_APP } else { view::VIEW_APP }]).output().map_err(|e| e.to_string())?;
             if !o.status.success() { return Err(String::from_utf8_lossy(&o.stderr).trim().to_string()); }
             print!("{}", String::from_utf8_lossy(&o.stdout));
+            // What ctl says besides (a picture to be removed later) reaches the caller too.
+            eprint!("{}", String::from_utf8_lossy(&o.stderr));
             Ok(())
         }
         Some(w @ ("detach" | "attach")) => move_browser(d, w == "detach"),
