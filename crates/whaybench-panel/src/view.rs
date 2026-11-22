@@ -189,7 +189,7 @@ fn display(v: &V) {
     v.web.set_background_color(&gtk::gdk::RGBA::TRANSPARENT);
     match v.hist.current() {
         // Checked again when shown: a file of the project may have become a link to a host file since.
-        Some((path, _)) if project_followed(v).is_some_and(|s| !in_project(&s, path)) => {
+        Some((path, _)) if !wb_core::vault::is_recovery_page(path) && project_followed(v).is_some_and(|s| !in_project(&s, path)) => {
             v.web.load_html(&format!("<!doctype html><meta charset='utf-8'><style>{}</style>", page_style(&v.d)), None);
             v.place.set_text("");
         }
@@ -350,7 +350,9 @@ fn answer_read(v: &V, all: bool, reply: String) {
     let link = view::link_note(&v.d, &v.link, v.followed.as_deref());
     let d = v.d.clone();
     // Asked from the host: a project's page is not read out to it (spec 3.22: project -> host is blocked).
-    if v.of_project || wb_core::beneath::split(Path::new(url.strip_prefix("file://").unwrap_or(&url))).is_some() {
+    // Nor a file of a project's folder (a pinned view may show one), nor a recovery key page (it never goes to a tool).
+    let file = Path::new(url.strip_prefix("file://").unwrap_or(&url));
+    if v.of_project || wb_core::beneath::split(file).is_some() || wb_core::roots::project_root_of(&d, file).is_some() || wb_core::vault::is_recovery_page(&url) {
         write_reply(&d, &reply, &json!({"url": "", "title": "", "selected": [], "text": [wb_core::i18n::t("briefsafe-view-not-read")], "link": link}));
         return;
     }
@@ -502,7 +504,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
             let Some(s) = weak.upgrade() else { return false };
             let Ok(v) = s.try_borrow() else { return false };
             let path = gio::File::for_uri(&uri).path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-            if project_followed(&v).is_some_and(|p| !in_project(&p, &path)) {
+            if !wb_core::vault::is_recovery_page(&path) && project_followed(&v).is_some_and(|p| !in_project(&p, &path)) {
                 record::warn("view", "page refused", "a project's page went to a file outside the project", &[]);
                 decision.ignore();
                 return true;

@@ -245,7 +245,10 @@ names another step.
   From the final check: a restore keeps only a vault's own key file and never copies one through a link; the view
   panel does not read a Briefsafe project's page out to the host; a request of the host's (the recovery key page) is
   shown even while the view follows a project, so the key is never dropped unseen; a Briefsafe project's id is letters,
-  digits, `-` and `_` only; the Files panel's Remove from list does nothing once its project has locked (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
+  digits, `-` and `_` only; the Files panel's Remove from list does nothing once its project has locked (en, ko).
+  From the eighth review: the recovery key page is shown whatever the view follows and is never read out to a tool;
+  a host read of a project folder's file (a pinned view) is refused; the Files panel looks only at a project
+  conversation's own paths; a Briefsafe id is checked before any lock is made from it. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -181,6 +181,12 @@ fn draw(d: &Data, list: &gtk::ListBox, panel: &RefCell<Panel>, unit: i32, force:
         }
         touches.retain(|t| branch.contains(s(t, "node")));
     }
+    // A project's conversation: only paths of that project are looked at (its records are its agents' to write).
+    if let Some(pid) = wb_core::roots::Roots::new(d.clone()).project_of(&session) {
+        let mine = |p: &str| { let p = std::path::Path::new(p); wb_core::beneath::split(p).is_some_and(|(r, _)| r.file_name().is_some_and(|n| n.to_string_lossy() == pid))
+            || wb_core::roots::project_root_of(d, p).is_some_and(|st| st.id == pid) };
+        touches.retain(|t| mine(s(t, "path")));
+    }
     let hide = hidden(d);
     let mut last_ai: HashMap<String, i64> = HashMap::new();
     for t in touches.iter().filter(|t| matches!(s(t, "op"), "read" | "edit")) {

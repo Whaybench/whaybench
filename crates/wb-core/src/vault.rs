@@ -67,6 +67,15 @@ pub fn create(s: &Stub) -> Result<String, String> {
 /// Shows the recovery key to the person once, never to whoever ran the command (an AI's transcript keeps what it
 /// reads): on a page in the view panel, from a file in the person's runtime folder (memory, private) that goes once
 /// the panel has it; without a panel on the terminal itself; without either the file stays there, said by path.
+/// Whether a path is a recovery key page `show_recovery` wrote (in the person's runtime folder, nowhere else): the
+/// view shows it whatever it follows, keeps it out of its lists and never reads it out to a tool.
+pub fn is_recovery_page(path: &str) -> bool {
+    let p = Path::new(path.strip_prefix("file://").unwrap_or(path));
+    // Safety: getuid has no preconditions.
+    let base = PathBuf::from(format!("/run/user/{}/whaybench", unsafe { libc::getuid() }));
+    p.parent() == Some(base.as_path()) && p.file_name().is_some_and(|n| { let n = n.to_string_lossy(); n.starts_with("recovery-") && n.ends_with(".md") })
+}
+
 /// Answers what the command may print.
 pub fn show_recovery(s: &Stub, host: &crate::paths::Data, recovery: &str) -> String {
     use std::os::unix::fs::OpenOptionsExt;

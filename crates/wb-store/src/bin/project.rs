@@ -124,6 +124,8 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let from = opt(&mut rest, "--from").map(|f| absolute(&f));
             let encrypt = flag(&mut rest, "--encrypt");
             let (pid, name) = (arg(&rest, 0)?, arg(&rest, 1)?);
+            // Before any lock or file is made from it.
+            if folder.is_some() && wb_core::map::safe_id(pid).is_err() { return Err(format!("not a project id (letters, digits, - and _ only): {pid}")); }
             let Some(folder) = folder else {
                 if from.is_some() { return Err("--from needs --folder".into()); }
                 if encrypt { return Err("--encrypt needs --folder".into()); }
