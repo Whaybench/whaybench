@@ -14,7 +14,8 @@ names another step.
   Briefsafe one when the person asks: its records move into the new folder's data and its old copy is deleted; the
   output says what stays on the host and that deleted files can remain on the disk. A project's Claude settings take
   the person's plugins again at each log in (an update moves a plugin's folder), keeping the project's own; a project
-  whose memory a newer Whaybench wrote is not logged in to, and says so.
+  whose memory a newer Whaybench wrote is not logged in to, and says so. A plugin the person turns on or off later follows in the
+  project unless its agents set it themselves; one the person removes goes; converting waits for map edits.
 - Project folders (Briefsafe, first part): `whaybench-project new ID NAME --folder DIR [--from SRC]` makes the
   project folder as a btrfs subvolume (a plain folder where btrfs is not there), copies a folder in with reflinks
   where it can, and takes its first snapshot. The project's data (map, documents, a copy of every document

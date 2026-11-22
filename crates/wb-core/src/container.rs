@@ -145,16 +145,21 @@ pub fn prepare_claude(s: &Stub, home: &Path) -> Result<(), String> {
         let all = host_json("settings.json");
         let kept: serde_json::Map<String, serde_json::Value> = all.as_object().into_iter().flatten().filter(|(k, _)| KEEP.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
         put("claude/settings.json", serde_json::Value::Object(kept).to_string().as_bytes())?;
+        put("claude/whaybench-seen.json", serde_json::json!({"enabledPlugins": all.get("enabledPlugins").cloned().unwrap_or_default()}).to_string().as_bytes())?;
     } else {
         // At each log in (spec 3.22): a plugin the person added is on here too, unless the project's agents set it
         // themselves (their on or off stays); the person's marketplaces as theirs are now; one the person removed goes.
         let (host, mut own) = (host_json("settings.json"), own_json("claude/settings.json"));
         if own.is_object() {
-            let mut changed = merge_keys(&mut own, &host, &["enabledPlugins"], true) | merge_keys(&mut own, &host, &["extraKnownMarketplaces"], false);
+            // The person's on or off as last brought in: where the project's still equals it, the person's change follows.
+            let seen = own_json("claude/whaybench-seen.json");
+            let mut changed = follow_person(&mut own, &host, &seen, "enabledPlugins") | merge_keys(&mut own, &host, &["extraKnownMarketplaces"], false);
             if let Some(on) = own.get_mut("enabledPlugins").and_then(serde_json::Value::as_object_mut) {
                 for id in &removed { changed |= on.remove(id).is_some(); }
             }
             if changed { put("claude/settings.json", own.to_string().as_bytes())?; }
+            let now = serde_json::json!({"enabledPlugins": host.get("enabledPlugins").cloned().unwrap_or_default()});
+            if seen != now { put("claude/whaybench-seen.json", now.to_string().as_bytes())?; }
         }
     }
     if !exists("claude/.claude.json") {
@@ -166,6 +171,21 @@ pub fn prepare_claude(s: &Stub, home: &Path) -> Result<(), String> {
 
 /// Puts the person's entries of each named object into the project's (theirs win, the project's own others stay).
 /// Whether anything changed.
+/// One object of the person's settings into the project's: a name the project lacks is added, and one whose value
+/// is still what the person had last time (`seen`) takes the person's value now; one the project's agents changed
+/// stays theirs.
+fn follow_person(own: &mut serde_json::Value, host: &serde_json::Value, seen: &serde_json::Value, key: &str) -> bool {
+    let Some(theirs) = host.get(key).and_then(serde_json::Value::as_object) else { return false };
+    let before = seen.get(key).and_then(serde_json::Value::as_object);
+    let Some(mine) = own.as_object_mut().map(|o| o.entry(key.to_string()).or_insert_with(|| serde_json::json!({}))).and_then(serde_json::Value::as_object_mut) else { return false };
+    let mut changed = false;
+    for (name, v) in theirs {
+        let take = match mine.get(name) { None => true, Some(m) => m != v && before.and_then(|b| b.get(name)) == Some(m) };
+        if take { mine.insert(name.clone(), v.clone()); changed = true; }
+    }
+    changed
+}
+
 /// `fill_only`: only names the project has not set.
 fn merge_keys(own: &mut serde_json::Value, host: &serde_json::Value, keys: &[&str], fill_only: bool) -> bool {
     let mut changed = false;
@@ -187,8 +207,9 @@ fn merge_installs(own: &mut serde_json::Value, host: &serde_json::Value, key: &s
     let mut changed = false;
     for (id, list) in theirs {
         let mut next: Vec<serde_json::Value> = list.as_array().cloned().unwrap_or_default();
+        // The project's own installs stay beside them; older copies of the person's (from their cache) do not.
         for e in mine.get(id).and_then(serde_json::Value::as_array).into_iter().flatten() {
-            if e.get("scope").and_then(serde_json::Value::as_str) != Some("user") && !next.contains(e) { next.push(e.clone()); }
+            if !from_person(e) && !next.contains(e) { next.push(e.clone()); }
         }
         let next = serde_json::Value::Array(next);
         if mine.get(id) != Some(&next) { mine.insert(id.clone(), next); changed = true; }
@@ -513,10 +534,17 @@ mod tests {
         assert!(merge_keys(&mut own, &host, &["enabledPlugins", "extraKnownMarketplaces"], true));
         assert_eq!(own, serde_json::json!({"enabledPlugins": {"a@m": false, "b@m": true, "mine@m": true}, "model": "x"}), "the project's own off stays, a new one comes");
         assert!(!merge_keys(&mut own, &host, &["enabledPlugins"], true), "nothing new the second time");
-        let mut own = serde_json::json!({"plugins": {"p@m": [{"scope": "user", "installPath": "/old"}, {"scope": "project", "projectPath": "/w"}]}});
-        let host = serde_json::json!({"plugins": {"p@m": [{"scope": "user", "installPath": "/new"}]}});
+        let mut own = serde_json::json!({"plugins": {"p@m": [{"scope": "user", "installPath": "/cache/m/p/1.0"}, {"scope": "project", "installPath": "/cache/m/p/1.0", "projectPath": "/w"}, {"scope": "project", "installPath": "/w/own", "projectPath": "/w"}]}});
+        let host = serde_json::json!({"plugins": {"p@m": [{"scope": "user", "installPath": "/cache/m/p/1.1"}]}});
         assert!(merge_installs(&mut own, &host, "plugins", Path::new("/cache")).0);
-        assert_eq!(own["plugins"]["p@m"], serde_json::json!([{"scope": "user", "installPath": "/new"}, {"scope": "project", "projectPath": "/w"}]));
+        assert_eq!(own["plugins"]["p@m"], serde_json::json!([{"scope": "user", "installPath": "/cache/m/p/1.1"}, {"scope": "project", "installPath": "/w/own", "projectPath": "/w"}]), "older copies of the person's go, the project's own stays");
+        let mut own = serde_json::json!({"enabledPlugins": {"a@m": false, "b@m": true}});
+        let seen = serde_json::json!({"enabledPlugins": {"a@m": false, "b@m": false}});
+        let host = serde_json::json!({"enabledPlugins": {"a@m": true, "b@m": true, "c@m": true}});
+        assert!(follow_person(&mut own, &host, &seen, "enabledPlugins"));
+        assert_eq!(own["enabledPlugins"], serde_json::json!({"a@m": true, "b@m": true, "c@m": true}), "the person's turning on follows where the project left it as it was");
+        let mut own = serde_json::json!({"enabledPlugins": {"a@m": false}});
+        assert!(!follow_person(&mut own, &serde_json::json!({"enabledPlugins": {"a@m": true}}), &serde_json::json!({"enabledPlugins": {"a@m": true}}), "enabledPlugins"), "the project's own off stays");
         let mut own = serde_json::json!({"plugins": {"gone@m": [{"scope": "user", "installPath": "/cache/m/gone/1"}], "own@m": [{"scope": "user", "installPath": "/w/own"}]}});
         let (_, removed) = merge_installs(&mut own, &serde_json::json!({"plugins": {}}), "plugins", Path::new("/cache"));
         assert_eq!(removed, vec!["gone@m".to_string()]);
