@@ -143,7 +143,7 @@ fn locked<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, St
 /// (A lock of its own: `start` takes the container's lock inside an open.)
 pub fn life<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> { flocked(&s.open_at.with_extension("life"), work) }
 
-fn flocked<T>(file: &Path, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+pub fn flocked<T>(file: &Path, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     use std::os::fd::AsRawFd;
     if let Some(dir) = file.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(file).map_err(|e| e.to_string())?;
@@ -277,7 +277,10 @@ pub fn agent_home(s: &Stub, isolated: bool, agent: &crate::agents::Agent) -> Res
 /// Runs `work` with the project's container paused, if it runs (a snapshot of one moment).
 pub fn paused<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let podman = |what: &str| Command::new("podman").args([what, &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|x| x.success());
-    let held = running(s) && podman("pause");
+    let runs = running(s);
+    // Not paused, not taken: a snapshot of files being written is not one moment.
+    if runs && !podman("pause") { return Err(format!("the project's container could not be paused (podman pause {}): no snapshot taken", name(s))); }
+    let held = runs;
     let out = work();
     if held && !podman("unpause") { return Err(format!("the project's container stays paused: podman unpause {}", name(s))); }
     out

@@ -116,7 +116,11 @@ names another step.
   project's view shows only web pages (http, https) and files whose real path is in the project, its saved list
   included, checked again each time one is shown; `file://` addresses go through the same check. Hidden files, a
   held view, a branch panel, exports and imports of a project's map stay with the project; a project's conversation
-  cannot add to the host's projects; a status message is removed from the host's folder once it is over. `snapshot`, `snapshots` and `restore` take, list and go back to
+  cannot add to the host's projects; a status message is removed from the host's folder once it is over.
+  Snapshots are taken in turn with opening, closing and restoring, and not at all when the running container cannot be
+  paused or a subvolume is inside the folder. Only read-only snapshots whose marker names this project count (a folder
+  with no marker has none), and the snapshot commands refuse a folder that no longer holds the project. Projects are
+  created one at a time. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

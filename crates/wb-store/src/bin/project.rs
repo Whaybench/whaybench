@@ -89,7 +89,12 @@ fn stub_of(st: &Store, pid: &str) -> Res<wb_core::roots::Stub> {
         .ok_or_else(|| format!("no project with its own folder: {pid} (made with new --folder)"))
 }
 
-fn project_folder(st: &Store, pid: &str) -> Res<std::path::PathBuf> { stub_of(st, pid).map(|s| s.folder) }
+/// The stub, and its folder still this project's (another project may have been made where it was).
+fn owned(st: &Store, pid: &str) -> Res<wb_core::roots::Stub> {
+    let s = stub_of(st, pid)?;
+    if !s.intact() { return Err(format!("{} does not hold project {pid}'s data now", s.folder.display())); }
+    Ok(s)
+}
 
 fn arg(rest: &[String], i: usize) -> Res<&str> { rest.get(i).map(String::as_str).ok_or_else(|| "missing argument".to_string()) }
 
@@ -125,7 +130,8 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 out(st.create_project(pid, name, &desc, &parent, paths, always)?);
                 return Ok(0);
             };
-            let (p, first) = st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new))?;
+            // One creation at a time: two with the same id must not both pass the check, nor one undo the other's.
+            let (p, first) = wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new)))?;
             out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning)}));
         }
         "open" => {
@@ -164,13 +170,14 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         }
         "snapshot" => {
             // Its container held still meanwhile: one moment of every file, not files caught half written.
-            let stub = stub_of(st, arg(&rest, 0)?)?;
-            let t = wb_core::container::paused(&stub, || folder::snapshot(&stub.folder))?;
+            let stub = owned(st, arg(&rest, 0)?)?;
+            // In turn with open, close and restore: a restore must not lose the snapshot it goes back to.
+            let t = wb_core::container::life(&stub, || wb_core::container::paused(&stub, || folder::snapshot(&stub.folder)))?;
             out(json!({"snapshot": t.name, "warning": t.warning}));
         }
-        "snapshots" => { let dir = project_folder(st, arg(&rest, 0)?)?; out(json!(folder::snapshots(&dir))); }
+        "snapshots" => { let dir = owned(st, arg(&rest, 0)?)?.folder; out(json!(folder::snapshots(&dir))); }
         "restore" => {
-            let stub = stub_of(st, arg(&rest, 0)?)?;
+            let stub = owned(st, arg(&rest, 0)?)?;
             let r = wb_core::container::life(&stub, || {
                 if wb_core::container::running(&stub) || stub.open() { return Err(format!("project {} is open: close it, then restore", stub.id)); }
                 folder::restore(&stub.folder, arg(&rest, 1)?)

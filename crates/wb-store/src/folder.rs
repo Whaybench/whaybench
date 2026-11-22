@@ -28,6 +28,14 @@ fn btrfs(args: &[&OsStr]) -> Res<()> { run("btrfs", args) }
 
 fn on_btrfs(path: &Path) -> bool { output("stat", &["-f".as_ref(), "-c".as_ref(), "%T".as_ref(), path.as_os_str()]).is_ok_and(|t| t == "btrfs") }
 
+/// Read-only, as a snapshot is: writing there is refused by the file system (EROFS).
+fn read_only(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return false };
+    // Safety: a path as a C string, valid for the call.
+    unsafe { libc::access(c.as_ptr(), libc::W_OK) != 0 && *libc::__errno_location() == libc::EROFS }
+}
+
 fn is_subvolume(path: &Path) -> bool { fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && m.ino() == SUBVOLUME_INODE) }
 
 /// Makes the project folder: a subvolume on btrfs, else a plain folder. With `from`, everything in that folder is
@@ -94,10 +102,11 @@ fn snapshot_dir(dir: &Path) -> PathBuf {
 pub fn snapshots(dir: &Path) -> Vec<String> {
     let at = snapshot_dir(dir);
     if !fs::symlink_metadata(&at).is_ok_and(|m| m.is_dir()) { return Vec::new(); }
-    let mine = owner(dir);
+    // A folder of no project has no snapshots of its own to tell apart; only read-only ones are snapshots.
+    let Some(mine) = owner(dir) else { return Vec::new() };
     let mut names: Vec<String> = fs::read_dir(&at).into_iter().flatten().flatten()
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| n.parse::<u64>().is_ok() && is_subvolume(&at.join(n)) && owner(&at.join(n)) == mine).collect();
+        .filter(|n| n.parse::<u64>().is_ok() && is_subvolume(&at.join(n)) && read_only(&at.join(n)) && owner(&at.join(n)).as_ref() == Some(&mine)).collect();
     names.sort_by_key(|n| n.parse::<u64>().unwrap_or(0));
     names
 }
@@ -113,6 +122,8 @@ pub fn snapshot(dir: &Path) -> Res<Taken> {
 
 fn take(dir: &Path) -> Res<String> {
     if !is_subvolume(dir) { return Err(format!("no snapshot: {} is not a btrfs subvolume", dir.display())); }
+    // A snapshot holds an inner subvolume as an empty folder: it would not be the whole project.
+    if let Some(inner) = nested_subvolume(dir)? { return Err(format!("no snapshot: a subvolume is inside the project folder ({inner}), and a snapshot would not hold it")); }
     let at = snapshot_dir(dir);
     if fs::symlink_metadata(&at).is_ok_and(|m| !m.is_dir()) { return Err(format!("{} is not a folder", at.display())); }
     fs::create_dir_all(&at).map_err(|e| e.to_string())?;
@@ -241,6 +252,9 @@ mod tests {
             return;
         }
         eprintln!("btrfs: snapshots checked");
+        // A project's folder: its marker says whose its snapshots are.
+        let mark = |id: &str| { fs::create_dir_all(dir.join(".whaybench")).unwrap(); fs::write(dir.join(".whaybench/briefsafe.json"), format!(r#"{{"id":"{id}","made":"1"}}"#)).unwrap(); };
+        mark("t");
         let first = snapshot(&dir).unwrap().name;
         fs::write(dir.join("src/main.rs"), "changed").unwrap();
         let second = snapshot(&dir).unwrap().name;
@@ -255,11 +269,21 @@ mod tests {
         assert_eq!(fs::read_to_string(snapshot_dir(&dir).join(&before).join("src/main.rs")).unwrap(), "changed", "the state before is kept");
         fs::write(dir.join("new"), "x").unwrap();
         assert!(restore(&dir, "1").is_err(), "a link is not a snapshot");
-        // Snapshots of another project (here: of none) left beside a folder of the same name are not this one's.
-        fs::create_dir_all(dir.join(".whaybench")).unwrap();
-        fs::write(dir.join(".whaybench/briefsafe.json"), r#"{"id":"up"}"#).unwrap();
+        // Snapshots of another project left beside a folder of the same name are not this one's, nor any of a folder
+        // that is no project's.
+        mark("up");
         assert!(snapshots(&dir).is_empty() && restore(&dir, &first).is_err());
         fs::remove_dir_all(dir.join(".whaybench")).unwrap();
+        assert!(snapshots(&dir).is_empty());
+        mark("t");
+        // A writable subvolume with a number for a name is not a snapshot.
+        btrfs(&["subvolume".as_ref(), "snapshot".as_ref(), dir.as_os_str(), snapshot_dir(&dir).join("5").as_os_str()]).unwrap();
+        assert!(!snapshots(&dir).contains(&"5".to_string()));
+        discard(&snapshot_dir(&dir).join("5"), true).unwrap();
+        // A subvolume inside: no snapshot that would miss it.
+        btrfs(&["subvolume".as_ref(), "create".as_ref(), dir.join("inner").as_os_str()]).unwrap();
+        assert!(snapshot(&dir).is_err());
+        discard(&dir.join("inner"), true).unwrap();
         // At the limit, going back to the oldest still works: it is pruned only after.
         let r = restore_keeping(&dir, &first, 3).unwrap();
         assert!(!dir.join("new").exists());
