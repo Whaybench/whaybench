@@ -136,7 +136,8 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         }
         "open" => {
             let st2 = stub_of(st, arg(&rest, 0)?)?;
-            let isolated = wb_core::container::isolation();
+            // Opened in its container before: there again, or not at all.
+            let isolated = wb_core::container::opened_isolated(&st2) || wb_core::container::isolation();
             wb_core::container::life(&st2, || {
             // Isolated where a container can run: the container first, the open place only once it runs (spec 3.22).
             if isolated {
@@ -148,11 +149,15 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 let home = std::env::var_os("HOME").map(std::path::PathBuf::from).ok_or("no home folder")?;
                 wb_core::container::prepare_claude(&st2, &home)?;
             }
-            if let Err(e) = wb_core::roots::open_plain(&st2) {
-                if isolated { let _ = wb_core::container::stop(&st2); }
+            // Noted before the open place is there: nothing ever sees it open without knowing it is isolated.
+            if isolated && let Err(e) = wb_core::container::note_isolated(&st2, true) {
+                let _ = wb_core::container::stop(&st2);
                 return Err(e.to_string());
             }
-            if isolated { wb_core::container::note_isolated(&st2, true).map_err(|e| e.to_string())?; }
+            if let Err(e) = wb_core::roots::open_plain(&st2) {
+                if isolated { let _ = wb_core::container::stop(&st2); let _ = wb_core::container::note_isolated(&st2, false); }
+                return Err(e.to_string());
+            }
             wb_core::container::tidy(&st2, isolated);
             Ok(())
             })?;

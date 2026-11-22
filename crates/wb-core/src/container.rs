@@ -51,8 +51,9 @@ pub fn note_isolated(s: &Stub, on: bool) -> std::io::Result<()> {
 pub fn opened_isolated(s: &Stub) -> bool { std::fs::symlink_metadata(isolated_mark(s)).is_ok() }
 
 pub fn running(s: &Stub) -> bool {
-    Command::new("podman").args(["container", "inspect", "-f", "{{.State.Running}}", &name(s)]).stderr(Stdio::null()).output()
-        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
+    // Paused (for a snapshot) is running too: podman says Running false then.
+    Command::new("podman").args(["container", "inspect", "-f", "{{.State.Status}}", &name(s)]).stderr(Stdio::null()).output()
+        .is_ok_and(|o| matches!(String::from_utf8_lossy(&o.stdout).trim(), "running" | "paused"))
 }
 
 /// The folder a program is in, followed through links: the host's programs are mounted read-only from there.
@@ -143,12 +144,14 @@ fn locked<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, St
 /// (A lock of its own: `start` takes the container's lock inside an open.)
 pub fn life<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> { flocked(&s.open_at.with_extension("life"), work) }
 
-pub fn flocked<T>(file: &Path, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+pub fn flocked<T>(file: &Path, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> { flock_with(file, libc::LOCK_EX, work) }
+
+fn flock_with<T>(file: &Path, how: i32, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     use std::os::fd::AsRawFd;
     if let Some(dir) = file.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(file).map_err(|e| e.to_string())?;
     // Safety: flock on a descriptor this function owns; the lock goes with it.
-    if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 { return Err(std::io::Error::last_os_error().to_string()); }
+    if unsafe { libc::flock(f.as_raw_fd(), how) } != 0 { return Err(std::io::Error::last_os_error().to_string()); }
     work()
 }
 
@@ -202,6 +205,9 @@ pub fn stop(s: &Stub) -> Result<(), String> {
 pub fn reconcile(host: &Data) {
     let podman = podman_found();
     for s in crate::roots::stubs(host) {
+      // In turn with open, close, snapshot and restore: never between an open's container and its open place. One
+      // being done right now is left to finish (the window does not wait for an image to download).
+      let _ = flock_with(&s.open_at.with_extension("life"), libc::LOCK_EX | libc::LOCK_NB, || {
         let (open, runs) = (s.open(), podman && running(&s));
         // Opened in its container and the container is gone (or podman is): closed, not left for the host to run.
         if open && !runs && opened_isolated(&s) {
@@ -211,6 +217,8 @@ pub fn reconcile(host: &Data) {
         }
         if !open { let _ = note_isolated(&s, false); }
         if runs && !open { let _ = stop(&s); crate::log::decide("session", "project container stopped", "left running without its open project", &[("project", s.id.clone())]); }
+        Ok(())
+      });
     }
 }
 
