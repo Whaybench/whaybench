@@ -156,7 +156,15 @@ impl Relay {
             env.retain(|(k, _)| k != paths::ENV_DATA_DIR);
             env.push((paths::ENV_DATA_DIR.into(), s.open_at.to_string_lossy().to_string()));
             env.push(("CLAUDE_CONFIG_DIR".into(), s.open_at.join(wb_core::roots::CLAUDE_DIR).to_string_lossy().to_string()));
-            if !addon && let Ok(Some(t)) = wb_core::secret::get(wb_core::secret::CLAUDE_TOKEN) { env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t)); }
+            for k in ["LANG", "LC_ALL"] { if let Ok(v) = std::env::var(k) { env.push((k.into(), v)); } }
+            if !addon {
+                match wb_core::secret::get(wb_core::secret::CLAUDE_TOKEN) {
+                    Ok(Some(t)) => env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t)),
+                    // Said, not left to a sign-in screen nobody expects: the agent can still sign in by itself.
+                    Ok(None) => wb_core::status::say(&self.data, wb_core::i18n::t("briefsafe-no-token"), 15),
+                    Err(e) => { record::warn("session", "no token for the project", &e, &[("tab", self.tab.clone())]); wb_core::status::say(&self.data, wb_core::i18n::t("briefsafe-keyring-failed"), 15); }
+                }
+            }
         }
         if let (Some(s), wb_core::container::Place::Container) = (&project, &place) {
             let podman = wb_core::versions::find_program("podman", &std::env::var("PATH").unwrap_or_default(), None).ok_or("podman is not installed")?;
@@ -482,8 +490,13 @@ impl Relay {
             && let Some(s) = &self.session { sessions::mark_off(&self.data, s); }
         if self.running {
             unsafe { libc::kill(self.child, libc::SIGHUP); }
+            // In a project's container the agent is not the child's own: it is ended there.
+            if let Some(p) = sessions::tab_project(&self.data, &self.tab).and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|s| s.id == id)) {
+                wb_core::container::hang_up(&p, &self.tab);
+            }
         }
         let _ = fs::remove_file(sessions::tab_file(&self.data, &self.tab));
+        sessions::set_tab_project(&self.data, &self.tab, None);
         let _ = fs::remove_dir_all(sessions::tab_inbox(&self.data, &self.tab));
     }
 }

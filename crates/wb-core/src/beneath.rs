@@ -100,6 +100,30 @@ pub fn write(root: &Path, rel: &Path, bytes: &[u8]) -> io::Result<()> {
     done
 }
 
+/// Makes a folder (and those above it) beneath the root, none through a link.
+pub fn mkdir(root: &Path, rel: &Path) -> io::Result<()> {
+    let base = root_fd(root)?;
+    let mut made = PathBuf::new();
+    for part in rel.components() {
+        made.push(part);
+        // Safety: mkdirat beneath the root's descriptor; what exists is checked by the open below.
+        unsafe { libc::mkdirat(base.as_raw_fd(), c(&made)?.as_ptr(), 0o700) };
+    }
+    at(&base, rel, libc::O_RDONLY | libc::O_DIRECTORY, 0).map(|_| ())
+}
+
+/// Puts a link at `rel` beneath the root (in place of what was there), pointing to `target`.
+pub fn link(root: &Path, rel: &Path, target: &Path) -> io::Result<()> {
+    let (parent, name) = (rel.parent().unwrap_or(Path::new("")), rel.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?);
+    if !parent.as_os_str().is_empty() { mkdir(root, parent)?; }
+    let dir = dir_of(root, parent)?;
+    let n = c(Path::new(name))?;
+    // Safety: unlinkat and symlinkat on a descriptor this function owns; a name without a slash.
+    unsafe { libc::unlinkat(dir.as_raw_fd(), n.as_ptr(), 0) };
+    if unsafe { libc::symlinkat(c(target)?.as_ptr(), dir.as_raw_fd(), n.as_ptr()) } != 0 { return Err(Error::last_os_error()); }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

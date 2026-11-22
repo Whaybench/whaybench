@@ -47,7 +47,14 @@ names another step.
   A tab looks for its session only in the root it runs for (the terminal notes a project tab's project), so a
   project's record cannot take a host tab. A project's agent may type into another conversation only if both the
   asked one and where it lands after moves are the project's own, only plain text, and it is shown as from the
-  project; a project's permission question counts only for a session of that project. `snapshot`, `snapshots` and `restore` take, list and go back to
+  project; a project's permission question counts only for a session of that project.
+  The project container runs with no capabilities and no gaining of privileges, has a writable home of its own (tool
+  caches, settings) and in `~/.local/bin` only links to the agents' programs; the person's `~/.local`, plugin lists
+  and other folders are not mounted beyond the programs, plugin code and a rustup toolchain, read-only. The project's
+  Claude Code folder gets only the settings agents need (plugins, language, model, permissions; not `env`, the key
+  helper or hooks), written without following links. `LANG` reaches the agents, Ctrl-P is not taken by podman,
+  closing a tab ends its agent in the container, and a missing token or a keyring that does not answer is said in the
+  status line. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

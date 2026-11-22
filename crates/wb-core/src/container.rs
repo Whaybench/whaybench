@@ -55,7 +55,9 @@ fn real_dir(program: &Path) -> Option<PathBuf> { std::fs::canonicalize(program).
 pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec<String> {
     let path = |p: &Path| p.to_string_lossy().to_string();
     let data = path(&s.open_at);
-    let mut a: Vec<String> = ["run", "-d", "--init", "--name", &name(s), "--userns=keep-id", "--security-opt", "label=disable"].map(String::from).to_vec();
+    // No capabilities and no gaining of privileges: the agents work as the person, in their project.
+    let mut a: Vec<String> = ["run", "-d", "--init", "--name", &name(s), "--userns=keep-id", "--security-opt", "label=disable",
+        "--cap-drop=ALL", "--security-opt=no-new-privileges"].map(String::from).to_vec();
     let mut bind = |from: &Path, to: &Path, ro: bool| { a.push("-v".into()); a.push(format!("{}:{}{}", path(from), path(to), if ro { ":ro" } else { "" })); };
     bind(&s.folder, &s.folder, false);
     // The data where it rests is not for the agents to touch: they see it at its open place only. An empty place
@@ -63,18 +65,24 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
     let resting = s.folder.join(PROJECT_DATA);
     bind(&s.stored().root, &s.open_at, false);
     for p in ["/usr", "/etc/alternatives", "/etc/pki", "/etc/ssl", "/etc/ca-certificates"].map(Path::new).iter().filter(|p| p.exists()) { bind(p, p, true); }
-    // Plugins are code: their installed copies are read where Claude Code installed them.
-    for p in [home.join(".local/bin"), home.join(".local/lib"), home.join(".claude/plugins/cache")].iter().chain(programs).filter(|p| p.exists()) { bind(p, p, true); }
+    // A home of the project's own, writable (tool caches, settings), where the person's is: nothing of theirs in it.
+    bind(&s.stored().root.join("home"), home, false);
+    // In its ~/.local/bin only links to the agents' programs, made by the host at each start (`programs_bin`).
+    bind(&s.stored().root.join("cache/bin"), &home.join(".local/bin"), true);
+    // Programs and plugins are code: read-only where they are installed. A rustup toolchain too, where there is one.
+    for p in [home.join(".claude/plugins/cache"), home.join(".rustup"), home.join(".cargo/bin")].iter().chain(programs).filter(|p| p.exists()) { bind(p, p, true); }
     a.extend(["--tmpfs".into(), format!("{}:ro,notmpcopyup,size=64k", path(&resting))]);
     for (k, v) in [
         ("HOME", path(home)),
-        ("PATH", format!("{}:/usr/bin:/bin", path(&home.join(".local/bin")))),
+        ("PATH", format!("{}:{}:/usr/bin:/bin", path(&home.join(".local/bin")), path(&home.join(".cargo/bin")))),
         ("WHAYBENCH_DATA_DIR", data.clone()),
         ("CLAUDE_CONFIG_DIR", format!("{data}/{CLAUDE_DIR}")),
         ("CLAUDE_CODE_TMPDIR", format!("{data}/cache/tmp")),
         // The programs are the host's, read-only: they are updated there, not from in here.
         ("DISABLE_AUTOUPDATER", "1".into()),
     ] { a.push("-e".into()); a.push(format!("{k}={v}")); }
+    // The person's language for the tools in there (the tab passes its own too).
+    for k in ["LANG", "LC_ALL"] { if let Ok(v) = std::env::var(k) { a.push("-e".into()); a.push(format!("{k}={v}")); } }
     a.extend(["-w".into(), path(&s.folder), image.into(), "sleep".into(), "infinity".into()]);
     a
 }
@@ -82,17 +90,38 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
 /// The project's own Claude Code folder, made once from the person's: their settings and plugin lists (not their
 /// sign-in, conversations or history), and the project folder already trusted, since Whaybench made it.
 pub fn prepare_claude(s: &Stub, home: &Path) -> Result<(), String> {
-    let own = s.stored().root.join(CLAUDE_DIR);
+    // Written where the project's data rests, which its agents can change: beneath it, never through their links.
+    let rest = s.stored().root;
+    let exists = |rel: &str| crate::beneath::read(&rest, Path::new(rel), crate::beneath::READ_LIMIT).is_ok();
+    let put = |rel: &str, bytes: &[u8]| crate::beneath::write(&rest, Path::new(rel), bytes).map_err(|e| format!("{rel}: {e}"));
     let them = home.join(".claude");
-    std::fs::create_dir_all(own.join("plugins")).map_err(|e| e.to_string())?;
-    for f in ["settings.json", "plugins/installed_plugins.json", "plugins/known_marketplaces.json"] {
-        if !own.join(f).exists() && them.join(f).is_file() { std::fs::copy(them.join(f), own.join(f)).map_err(|e| e.to_string())?; }
+    // Only what the agents need of the person's settings: not their environment, key helper or own hooks.
+    const KEEP: [&str; 8] = ["enabledPlugins", "extraKnownMarketplaces", "language", "model", "theme", "permissions", "autoMode", "outputStyle"];
+    if !exists("claude/settings.json") {
+        let all: serde_json::Value = std::fs::read_to_string(them.join("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let kept: serde_json::Map<String, serde_json::Value> = all.as_object().into_iter().flatten().filter(|(k, _)| KEEP.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
+        put("claude/settings.json", serde_json::Value::Object(kept).to_string().as_bytes())?;
     }
-    let state = own.join(".claude.json");
-    if !state.exists() {
+    for f in ["plugins/installed_plugins.json", "plugins/known_marketplaces.json"] {
+        let rel = format!("{CLAUDE_DIR}/{f}");
+        if !exists(&rel) && let Ok(bytes) = std::fs::read(them.join(f)) { put(&rel, &bytes)?; }
+    }
+    if !exists("claude/.claude.json") {
         let folder = s.folder.to_string_lossy().to_string();
-        let v = serde_json::json!({"hasCompletedOnboarding": true, "projects": {folder: {"hasTrustDialogAccepted": true}}});
-        crate::paths::write_atomic(&state, v.to_string()).map_err(|e| e.to_string())?;
+        put("claude/.claude.json", serde_json::json!({"hasCompletedOnboarding": true, "projects": {folder: {"hasTrustDialogAccepted": true}}}).to_string().as_bytes())?;
+    }
+    Ok(())
+}
+
+/// The agents' ~/.local/bin in the container: links to the real places of the person's agent programs (Whaybench's
+/// commands, Claude Code, Codex), nothing else of that folder. Made again at each start.
+pub fn programs_bin(s: &Stub, home: &Path) -> Result<(), String> {
+    let rest = s.stored().root;
+    crate::beneath::mkdir(&rest, Path::new("cache/bin")).map_err(|e| e.to_string())?;
+    for name in ["whaybench", "whaybench-view", "whaybench-project", "whaybench-files", "claude", "codex"] {
+        if let Ok(real) = std::fs::canonicalize(home.join(".local/bin").join(name)) {
+            crate::beneath::link(&rest, &Path::new("cache/bin").join(name), &real).map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -116,8 +145,9 @@ pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
         if !s.intact() { return Err(format!("{} does not hold project {}'s data", s.stored().root.display(), s.id)); }
         let image = host_image().ok_or("no container image for this distribution")?;
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("no home folder")?;
-        for dir in ["cache/tmp", CLAUDE_DIR] { std::fs::create_dir_all(s.stored().root.join(dir)).map_err(|e| e.to_string())?; }
+        for dir in ["cache/tmp", CLAUDE_DIR, "home"] { crate::beneath::mkdir(&s.stored().root, Path::new(dir)).map_err(|e| format!("{dir}: {e}"))?; }
         prepare_claude(s, &home)?;
+        programs_bin(s, &home)?;
         // The plugins' marketplaces, as the person's own list names them (the project's copy is its agents' to change).
         let mut read = programs.to_vec();
         read.extend(marketplaces(&home.join(".claude/plugins/known_marketplaces.json")));
@@ -173,12 +203,21 @@ fn which(program: &str) -> Option<PathBuf> {
 /// A program run in the project's container, as a tab runs it: with a terminal, in `cwd`. The variables named in
 /// `pass` go in with the values podman itself has, so none of them (a token) shows on a command line.
 pub fn exec_args(s: &Stub, cwd: &Path, pass: &[String], program: &str, args: &[String]) -> Vec<String> {
-    let mut a: Vec<String> = vec!["exec".into(), "-it".into(), "-w".into(), cwd.to_string_lossy().to_string()];
+    // No detach keys: Ctrl-P belongs to the agent. The program notes its process number in the container, so the tab
+    // can end it when it closes (podman exec does not pass the hang-up on).
+    let mut a: Vec<String> = vec!["exec".into(), "-it".into(), "--detach-keys=".into(), "-w".into(), cwd.to_string_lossy().to_string()];
     for k in pass { a.push("-e".into()); a.push(k.clone()); }
     a.push(name(s));
-    a.push(program.into());
+    a.extend(["sh".into(), "-c".into(), "echo $$ > \"/tmp/whaybench-tab-$WHAYBENCH_TAB.pid\"; exec \"$@\"".into(), "sh".into(), program.into()]);
     a.extend(args.iter().cloned());
     a
+}
+
+/// Ends a tab's agent in the project's container (the tab closed).
+pub fn hang_up(s: &Stub, tab: &str) {
+    if crate::map::safe_id(tab).is_err() { return; }
+    let script = format!("p=$(cat /tmp/whaybench-tab-{tab}.pid 2>/dev/null) && kill -HUP \"$p\" && rm -f /tmp/whaybench-tab-{tab}.pid");
+    let _ = Command::new("podman").args(["exec", &name(s), "sh", "-c", &script]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
 }
 
 /// Where a tab's agent runs (spec 3.22): a project's conversation only in the project's container. Without
@@ -221,8 +260,11 @@ mod tests {
         assert!(!a.contains("-v /h/.local/share/whaybench:"), "never the host's data");
         assert!(!a.contains(".claude:") && !a.contains(".codex:"), "never the host's agent settings");
         assert!(a.ends_with("img:1 sleep infinity"));
-        assert_eq!(exec_args(&s, Path::new("/w/up"), &["TERM".into(), "CLAUDE_CODE_OAUTH_TOKEN".into()], "claude", &["--resume".into(), "x".into()]).join(" "),
-            format!("exec -it -w /w/up -e TERM -e CLAUDE_CODE_OAUTH_TOKEN {} claude --resume x", name(&s)));
+        let e = exec_args(&s, Path::new("/w/up"), &["TERM".into(), "CLAUDE_CODE_OAUTH_TOKEN".into()], "claude", &["--resume".into(), "x".into()]);
+        assert!(e.join(" ").starts_with(&format!("exec -it --detach-keys= -w /w/up -e TERM -e CLAUDE_CODE_OAUTH_TOKEN {} sh -c", name(&s))));
+        assert_eq!(&e[e.len() - 4..], ["sh", "claude", "--resume", "x"]);
+        assert!(a.contains("--cap-drop=ALL") && a.contains("--security-opt=no-new-privileges"));
+        assert!(!a.contains("/h/.local/lib") && a.contains(":/h/.local/bin:ro"), "only the agents' program links");
         let other = Stub::new(&Data::new(PathBuf::from("/h2/whaybench")), "up", "Up", Path::new("/w/up"));
         assert_ne!(name(&s), name(&other), "another data folder's project of the same id");
     }
