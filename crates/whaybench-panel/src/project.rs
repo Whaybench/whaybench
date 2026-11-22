@@ -28,7 +28,9 @@ fn link(kind: &str, rest: &str, label: &str) -> String {
     format!("<a href='wb:{kind}:{}'>{label}</a>", glib::Uri::escape_string(&format!("{page}\u{1}{rest}"), None, false))
 }
 /// The project shown now, as links name it.
-fn shown_key(p: &P) -> String { p.bs.clone().or(p.pid.clone()).unwrap_or_default() }
+fn shown_key(p: &P) -> String { p.bs.as_ref().map(|b| bs_key(b)).or(p.pid.clone()).unwrap_or_default() }
+/// A Briefsafe project's page key: never equal to a host project's, even one of the same id.
+fn bs_key(id: &str) -> String { format!("bs:{id}") }
 
 fn when(ms: i64) -> String {
     if ms == 0 { return String::new(); }
@@ -281,7 +283,7 @@ struct P {
     /// A `whaybench-project` step running (log in, log out, snapshot), for one project.
     job: Option<Job>,
     /// A log out asked for while another step ran (a snapshot): done once it ends.
-    close_after: Option<String>,
+    close_after: Vec<String>,
     /// A dialog open over a project's page (a request): closed when that project locks.
     dialog: Option<gtk::glib::WeakRef<gtk::Window>>,
     /// What the last step of a project said when it did not work: its project, the kind of step and the reason.
@@ -378,7 +380,8 @@ fn poll_job(p: &mut P) -> bool {
     let said = std::fs::read_to_string(&job.err).unwrap_or_default().trim().trim_start_matches("error: ").to_string();
     let out: Value = std::fs::read_to_string(&job.out).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     let _ = (std::fs::remove_file(&job.out), std::fs::remove_file(&job.err));
-    let queued = p.close_after.take();
+    // The next log out waiting, of a project still open (the others go after it, one step at a time).
+    let queued = { let q = &mut p.close_after; while !q.is_empty() && !stub_of(&p.d, &q[0]).is_some_and(|st| st.open()) { q.remove(0); } (!q.is_empty()).then(|| q.remove(0)) };
     if late { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), wb_core::i18n::t("briefsafe-too-long").to_string())); }
     else if !ok { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), said)); }
     else if job.kind == "snapshot" {
@@ -398,7 +401,7 @@ fn opening(p: &P, id: &str) -> bool { p.job.as_ref().is_some_and(|j| j.id == id 
 
 /// The page of a Briefsafe project that is not open: locked, a step running, or why the last one did not work.
 fn closed_page(p: &P, st: &wb_core::roots::Stub) -> String {
-    PAGE_OF.with(|k| *k.borrow_mut() = st.id.clone());
+    PAGE_OF.with(|k| *k.borrow_mut() = bs_key(&st.id));
     let t = |k: &str| wb_core::i18n::t(k).to_string();
     let name = e(&st.name);
     let body = if let Some(j) = p.job.as_ref().filter(|j| j.id == st.id) {
@@ -430,7 +433,7 @@ fn project_sessions(d: &Data, id: &str) -> Vec<Value> {
 }
 
 fn open_bar(p: &P, st: &wb_core::roots::Stub) -> String {
-    PAGE_OF.with(|k| *k.borrow_mut() = st.id.clone());
+    PAGE_OF.with(|k| *k.borrow_mut() = bs_key(&st.id));
     let t = |k: &str| e(wb_core::i18n::t(k));
     let mine: Vec<Value> = project_sessions(&p.d, &st.id).into_iter().filter(|r| s(r, "movedTo").is_empty() && r["ended"] != true).collect();
     let rows: Vec<String> = mine.iter().take(12).map(|r| format!("<li>{}</li>", link("bs", &format!("{}:resume:{}", st.id, s(r, "id")), &e(&sessions::session_name(&p.d, s(r, "id")))))).collect();
@@ -983,7 +986,7 @@ fn briefsafe_clicked(s_: &Shared, what: &str) {
             let go = move || {
                 let mut p = s2.borrow_mut();
                 // Another step running (a snapshot): done once it ends, said now.
-                if p.job.is_some() { p.close_after = Some(id2.clone()); status::say(&p.d, wb_core::i18n::t("briefsafe-logout-queued"), 6); return; }
+                if p.job.is_some() { if !p.close_after.contains(&id2) { p.close_after.push(id2.clone()); } status::say(&p.d, wb_core::i18n::t("briefsafe-logout-queued"), 6); return; }
                 start_job(&mut p, &id2, "close", wb_core::i18n::t("briefsafe-closing"), &["close", &id2], None);
             };
             if tabs == 0 { go(); } else { crate::common::confirm(&win, &wb_core::i18n::f("briefsafe-logout-confirm", &[("n", tabs.to_string())]), &[], &t("briefsafe-logout"), go); }
@@ -1034,7 +1037,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let s_: Shared = Rc::new(RefCell::new(P {
         d: d.clone(), st, pid: None, rows: vec![(String::new(), String::new(), usize::MAX)], tab: MAP.to_string(), over: None,
         range: Some(7), stamp: String::new(), shown: String::new(), scroll: HashMap::new(), key_now: String::new(), failed: String::new(), web: web.clone(), pick: pick.clone(), path, tabs, tab_buttons: Vec::new(), anchors: HashMap::new(), tab_keys: Vec::new(), converting: Rc::default(), win: win.clone(),
-        host, bs: None, job: None, bs_msg: HashMap::new(), dialog: None, close_after: None,
+        host, bs: None, job: None, bs_msg: HashMap::new(), dialog: None, close_after: Vec::new(),
     }));
     // Links are handled here; only the page's own anchors and the drawn page itself pass.
     {

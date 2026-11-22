@@ -111,7 +111,8 @@ pub fn show(d: &Data, path: &Path, title: &str, node: Option<&str>) {
     let (p, id) = (path.to_string_lossy().to_string(), app_id(&path.to_string_lossy()));
     let open = fs::read_to_string(d.layout()).is_ok_and(|t| t.contains(&format!("\"{id}#")));
     if open { status::focus_app(d, &id); }
-    else { crate::common::open_panel(d, &["map", &format!("@{p}"), title]); }
+    // A project's map: its title is read from the file, not put on the command line (logged by the host).
+    else { crate::common::open_panel(d, &["map", &format!("@{p}"), if wb_core::beneath::split(path).is_some() { "" } else { title }]); }
     if let Some(n) = node { let (d2, key, n2) = (d.clone(), message_key(&p), n.to_string()); gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(if open { 100 } else { 1500 }), move || status::send(&d2, &key, json!({"do": "pick", "node": n2}))); }
 }
 

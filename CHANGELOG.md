@@ -231,7 +231,11 @@ names another step.
   on the host; `session wait` gives a project's answer only to that project's tabs. Every link of the Projects panel
   names the project its page was drawn for and does nothing on a page left from another; request dialogs close when
   their project locks, and a project's map panel drops its title then; an open project whose record cannot be read
-  still has Log out; Log out pressed during a snapshot runs once it ends (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
+  still has Log out; Log out pressed during a snapshot runs once it ends (en, ko).
+  From the fifth review: a project's map in the Map panel gives nothing to a host conversation or host project (checked
+  again when an item is pressed) and opens no branch panel; a project's imported map starts no host conversation, is
+  exported only while open, and its title is not put on the host's command line; `session wait` checks the project at
+  every read; a Briefsafe page's links never match a host project of the same id; every queued log out is kept. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -265,11 +265,11 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
         Some("wait") => {
             let id = words.get(1).ok_or("session wait needs an id")?;
             let limit = words.get(2).map(|s| s.parse::<u64>().map_err(|_| "session wait: SECONDS is a number")).transpose()?.unwrap_or(900);
-            // A project's answer goes only to a tab of that project (spec 3.22: project -> host is blocked).
-            if let Some(p) = wb_core::roots::Roots::new(data.clone()).project_of(id) {
-                let caller = std::env::var("WHAYBENCH_TAB").ok().and_then(|t| sessions::tab_project(data, &t));
-                if caller.as_deref() != Some(p.as_str()) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
-            }
+            // A project's answer goes only to a tab of that project (spec 3.22: project -> host is blocked), checked at
+            // every read: the project may be logged in to while this waits.
+            let caller = std::env::var("WHAYBENCH_TAB").ok().and_then(|t| sessions::tab_project(data, &t));
+            let outside = |sid: &str| wb_core::roots::Roots::new(data.clone()).project_of(sid).is_some_and(|p| caller.as_deref() != Some(p.as_str()));
+            if outside(id) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
             // From the last time something was typed into it, if that was in the last hour: the answer may have come
             // already between `type` and this wait.
             let now = now_ms();
@@ -281,6 +281,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             };
             for _ in 0..limit {
                 let now = sessions::current_id(data, id);
+                if outside(&now) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
                 // In the conversation's own root (a project's answers are in the project).
                 if let Some(v) = since_newer(wb_core::roots::for_session(data, &now).root.join("answers").join(format!("{now}.json"))) { println!("{}", v["text"].as_str().unwrap_or("")); return Ok(()); }
                 // Stopped on a question to the person (a permission, an input): the asker is told, not left waiting.

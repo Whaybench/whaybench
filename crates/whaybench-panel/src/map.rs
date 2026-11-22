@@ -202,6 +202,8 @@ fn import_menu(d: &Data, items: &Items) {
 
 /// The menu of an imported map: read only, by purpose.
 fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title: &str) -> Items {
+    // A project's map is opened without its title on the command line (it would stay in the host's logs).
+    let title = if title.is_empty() { s(data, "title") } else { title };
     let items = Items::new();
     let session = sessions::focus(d);
     let tree = tree_of(data);
@@ -262,7 +264,8 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
     let keep = items.sub();
     for (id, name) in wb_core::agents::list(&d.root) {
         let (d2, p2, t2) = (d.clone(), path.to_string(), title.to_string());
-        keep.add(&wb_core::i18n::f("new-conversation-from-this-map-with", &[("name", name)]), true, move || {
+        // A host conversation is not started from a project's map.
+        keep.add(&wb_core::i18n::f("new-conversation-from-this-map-with", &[("name", name)]), map_project.is_none(), move || {
             crate::common::ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "new".into(), "--agent".into(), id.clone(), p2.clone()]);
             status::say(&d2, &wb_core::i18n::f("new-session-from-imported-map", &[("title", cut(&t2, 24))]), 8);
         });
@@ -272,7 +275,9 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
     {
         let (d2, data2) = (d.clone(), data.clone());
         let (root, name) = node.map_or((None, title.to_string()), |n| (Some(s(n, "id").to_string()), s(n, "label").to_string()));
-        store.add(if root.is_some() { wb_core::i18n::t("export-branch") } else { wb_core::i18n::t("export-whole-map") }, true, move || match export(&d2, &data2, root.as_deref(), &name, "") {
+        // A project's map is exported only while it is open (into the project); locked, it has nothing to give.
+        let readable = map_project.is_none() || data.get("_file").is_some();
+        store.add(if root.is_some() { wb_core::i18n::t("export-branch") } else { wb_core::i18n::t("export-whole-map") }, readable, move || match export(&d2, &data2, root.as_deref(), &name, "") {
             Ok(p) => status::say(&d2, &wb_core::i18n::f("map-exported", &[("a1", p.display().to_string())]), 8),
             Err(e) => status::say(&d2, &wb_core::i18n::f("map-export-failed", &[("e", e.to_string())]), 8),
         });
@@ -281,11 +286,21 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
     items
 }
 
+/// A host map and a host conversation, as they are now.
+fn host_pair(d: &Data, map_session: &str, session: &str) -> bool {
+    let roots = wb_core::roots::Roots::new(d.clone());
+    roots.project_of(map_session).is_none() && roots.project_of(session).is_none()
+}
+
 fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(String, String)>) -> Items {
     if let Some(path) = imported_of(scope) { return imported_menu(d, data, node, path, scope.map_or("", |x| x.1.as_str())); }
     let items = Items::new();
     let session = sessions::focus(d);
     let tree = tree_of(data);
+    // A project's map: none of it goes to a host conversation, a host project or a branch panel of the host's.
+    let roots = wb_core::roots::Roots::new(d.clone());
+    let map_project = roots.project_of(s(data, "sessionId"));
+    let host_only = map_project.is_none() && session.as_deref().is_some_and(|x| roots.project_of(x).is_none());
     if let Some(n) = node {
         let (id, label) = (s(n, "id").to_string(), s(n, "label").to_string());
         // Where a node came from, if it came from an imported map.
@@ -305,7 +320,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
         }
         {
             let (d2, id2, label2) = (d.clone(), id.clone(), label.clone());
-            items.add(wb_core::i18n::t("open-branch-in-a-new-panel"), true, move || crate::common::open_panel(&d2, &["map", &id2, &label2]));
+            items.add(wb_core::i18n::t("open-branch-in-a-new-panel"), map_project.is_none(), move || crate::common::open_panel(&d2, &["map", &id2, &label2]));
         }
         // Related answers: dimmed when the node has no time.
         let at = records::node_time(n);
@@ -323,9 +338,10 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
             let (pid, name) = (s(&p, "id").to_string(), s(&p, "name").to_string());
             let (st, d2, s2, l2, f2, label2) = (store.clone(), d.clone(), session.clone().unwrap_or_default(), lines.clone(), flow.clone(), label.clone());
             // Neither a project's map nor a project's conversation writes into the host's projects (spec 3.22).
-            let roots = wb_core::roots::Roots::new(d.clone());
-            let host_only = roots.project_of(s(data, "sessionId")).is_none() && session.as_deref().is_some_and(|x| roots.project_of(x).is_none());
+            let owner = s(data, "sessionId").to_string();
             sub.add(&name, host_only, move || {
+                // Checked again when pressed: the map or the conversation in front may have changed since.
+                if !host_pair(&d2, &owner, &s2) { return; }
                 let Ok(q) = st.queue_add(&pid, "reflect", &label2, &s2) else { return };
                 if sessions::queue_prompt(&d2, &s2, &reflect_request(Some(&pid), Some(&q), &f2, &l2)) {
                     status::say(&d2, &wb_core::i18n::f("project-reflection-request-sent-session", &[("a1", (cut(&label2, 20)).to_string()), ("a2", (cut(&s2, 8)).to_string())]), 8);
@@ -336,8 +352,9 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
             });
         }
         {
-            let (d2, s2, l2, f2) = (d.clone(), session.clone().unwrap_or_default(), lines.clone(), flow.clone());
-            sub.add(wb_core::i18n::t("new-project"), session.is_some(), move || {
+            let (d2, s2, l2, f2, owner) = (d.clone(), session.clone().unwrap_or_default(), lines.clone(), flow.clone(), s(data, "sessionId").to_string());
+            sub.add(wb_core::i18n::t("new-project"), host_only, move || {
+                if !host_pair(&d2, &owner, &s2) { return; }
                 if sessions::queue_prompt(&d2, &s2, &reflect_request(None, None, &f2, &l2)) { status::say(&d2, wb_core::i18n::t("new-project-request-sent"), 8); }
             });
         }
