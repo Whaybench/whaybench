@@ -68,8 +68,9 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
     let mut a: Vec<String> = ["run", "-d", "--init", "--name", &name(s), "--userns=keep-id", "--security-opt", "label=disable",
         "--cap-drop=ALL", "--security-opt=no-new-privileges"].map(String::from).to_vec();
     // A vault (a FUSE mount) opens inside a folder of the person's own, bound in its place over `cache/open`: the
-    // container's runtime cannot look at the FUSE mount itself, and `rslave` shows the vault opened there.
-    if s.vault && let Some(open) = s.open_at.parent() { a.push("-v".into()); a.push(format!("{}:{}:rslave", path(&crate::vault::run_dir(s)), path(open))); }
+    // container's runtime cannot look at the FUSE mount itself, and `rslave` shows the vault opened there. Read-only:
+    // the agents write in the vault only (its own mount stays writable), not beside it or in the program links.
+    if s.vault && let Some(open) = s.open_at.parent() { a.push("-v".into()); a.push(format!("{}:{}:ro,rslave", path(&crate::vault::run_dir(s)), path(open))); }
     let mut bind = |from: &Path, to: &Path, ro: bool| { a.push("-v".into()); a.push(format!("{}:{}{}", path(from), path(to), if ro { ":ro" } else { "" })); };
     bind(&s.folder, &s.folder, false);
     // The data where it rests is not for the agents to touch: they see it at its open place only. An empty place
