@@ -235,7 +235,11 @@ names another step.
   From the fifth review: a project's map in the Map panel gives nothing to a host conversation or host project (checked
   again when an item is pressed) and opens no branch panel; a project's imported map starts no host conversation, is
   exported only while open, and its title is not put on the host's command line; `session wait` checks the project at
-  every read; a Briefsafe page's links never match a host project of the same id; every queued log out is kept. `snapshot`, `snapshots` and `restore` take, list and go back to
+  every read; a Briefsafe page's links never match a host project of the same id; every queued log out is kept.
+  From the sixth review: a map of a project that has just locked gives no menu, is not exported or marked into the
+  host's data, and nothing of a project's map goes to the conversation in front unless it is of the same project;
+  deleting a project's node logs no node id; an app started on a project's file logs only its program; `session wait`
+  reads and checks one root per poll. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -346,10 +346,13 @@ fn start_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) -> Op
         .spawn();
     match started {
         Ok(c) => {
-            record::decide("screen", "app started", "a requested app", &[("command", command.to_string()), ("process", c.id().to_string())]);
+            // A command naming a project's open place carries its file names: only the program is logged.
+            let open = data.cache().join("open");
+            let logged = if command.contains(&*open.to_string_lossy()) { command.split_whitespace().next().unwrap_or("").to_string() } else { command.to_string() };
+            record::decide("screen", "app started", "a requested app", &[("command", logged), ("process", c.id().to_string())]);
             Some(c)
         }
-        Err(e) => { record::error("screen", "app not started", &[("command", command.to_string()), ("error", e.to_string())]); None }
+        Err(e) => { record::error("screen", "app not started", &[("command", command.split_whitespace().next().unwrap_or("").to_string()), ("error", e.to_string())]); None }
     }
 }
 

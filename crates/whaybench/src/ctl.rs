@@ -281,12 +281,16 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             };
             for _ in 0..limit {
                 let now = sessions::current_id(data, id);
-                if outside(&now) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
+                // One root for the check and both reads: a log in between them changes nothing.
+                let root = wb_core::roots::for_session(data, &now);
+                // A root other than the caller's own is a project's: only that project's tab may read it.
+                let mine = caller.as_deref().map(|c| wb_core::roots::open_dir(data, c));
+                if root.root != data.root && mine.as_ref() != Some(&root.root) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
                 // In the conversation's own root (a project's answers are in the project).
-                if let Some(v) = since_newer(wb_core::roots::for_session(data, &now).root.join("answers").join(format!("{now}.json"))) { println!("{}", v["text"].as_str().unwrap_or("")); return Ok(()); }
+                if let Some(v) = since_newer(root.root.join("answers").join(format!("{now}.json"))) { println!("{}", v["text"].as_str().unwrap_or("")); return Ok(()); }
                 // Stopped on a question to the person (a permission, an input): the asker is told, not left waiting.
                 // Already waiting when the wait began counts too: it went on to ask between `type` and `wait`.
-                let state: Option<serde_json::Value> = wb_core::paths::read_text(&sessions::state_dir(&wb_core::roots::for_session(data, &now)).join(format!("{now}.json"))).ok().and_then(|b| serde_json::from_str(&b).ok());
+                let state: Option<serde_json::Value> = wb_core::paths::read_text(&sessions::state_dir(&root).join(format!("{now}.json"))).ok().and_then(|b| serde_json::from_str(&b).ok());
                 if let Some(v) = state.filter(|v| v["state"] == "waiting") {
                     return Err(format!("{id} waits for the person: {}", v["note"].as_str().unwrap_or("a permission or an input")));
                 }
