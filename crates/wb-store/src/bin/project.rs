@@ -123,7 +123,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 return Ok(0);
             };
             let (p, first) = st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new))?;
-            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name), "warning": first.and_then(|t| t.warning)}));
+            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning)}));
         }
         "open" => {
             let st2 = stub_of(st, arg(&rest, 0)?)?;
@@ -152,10 +152,17 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())?;
             out(json!({"closed": st2.id}));
         }
-        "snapshot" => { let t = folder::snapshot(&project_folder(st, arg(&rest, 0)?)?)?; out(json!({"snapshot": t.name, "warning": t.warning})); }
+        "snapshot" => {
+            // Its container held still meanwhile: one moment of every file, not files caught half written.
+            let stub = stub_of(st, arg(&rest, 0)?)?;
+            let t = wb_core::container::paused(&stub, || folder::snapshot(&stub.folder))?;
+            out(json!({"snapshot": t.name, "warning": t.warning}));
+        }
         "snapshots" => { let dir = project_folder(st, arg(&rest, 0)?)?; out(json!(folder::snapshots(&dir))); }
         "restore" => {
-            let r = folder::restore(&project_folder(st, arg(&rest, 0)?)?, arg(&rest, 1)?)?;
+            let stub = stub_of(st, arg(&rest, 0)?)?;
+            if wb_core::container::running(&stub) || stub.open() { return Err(format!("project {} is open: close it, then restore", stub.id)); }
+            let r = folder::restore(&stub.folder, arg(&rest, 1)?)?;
             out(json!({"restored": arg(&rest, 1)?, "before": r.before, "warning": r.warning}));
         }
         "move" => { let to = arg(&rest, 1)?; out(st.move_project(arg(&rest, 0)?, if to == "-" { "" } else { to })?); }

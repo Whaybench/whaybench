@@ -229,6 +229,15 @@ pub fn tidy(s: &Stub, isolated: bool) {
     let _ = c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
 }
 
+/// Runs `work` with the project's container paused, if it runs (a snapshot of one moment).
+pub fn paused<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let podman = |what: &str| Command::new("podman").args([what, &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|x| x.success());
+    let held = running(s) && podman("pause");
+    let out = work();
+    if held && !podman("unpause") { return Err(format!("the project's container stays paused: podman unpause {}", name(s))); }
+    out
+}
+
 /// Ends a tab's agent in the project's container (the tab closed).
 pub fn hang_up(s: &Stub, tab: &str) {
     if crate::map::safe_id(tab).is_err() { return; }

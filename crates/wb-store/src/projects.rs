@@ -68,7 +68,8 @@ impl Store {
             }
         };
         // The first state, before anything is changed in it.
-        let first = if subvolume { Some(crate::folder::snapshot(dir)?) } else { None };
+        // The project is made either way: a first snapshot that failed is said, not taken for a failed project.
+        let first = subvolume.then(|| crate::folder::snapshot(dir).unwrap_or_else(|e| crate::folder::Taken { name: String::new(), warning: Some(format!("no first snapshot: {e}")) }));
         Ok((p, first))
     }
 

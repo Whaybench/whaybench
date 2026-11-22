@@ -65,7 +65,13 @@ names another step.
   move it), the View panel moves its pages there (not through links), and Notifications lists every open root's
   permission questions. Keep Map from a project's conversation is refused outside it. Opening a project runs the
   old-conversation clean-up for its data (`whaybench tidy`, by the project's own keeping settings) inside its
-  container. `snapshot`, `snapshots` and `restore` take, list and go back to
+  container.
+  Snapshots: a project's container is paused while one is taken, so it holds one moment of every file. Only snapshots
+  of this project count (by the id in their data's marker), so those left beside a reused folder name are never
+  restored or pruned. Restoring refuses while the project is open, refuses when the folder cannot be fully checked
+  for inner subvolumes, and puts the restored folder in place by a rename that replaces nothing. A first snapshot that
+  fails is a warning, not a failed project, and a folder made by a failed creation (or set aside by a restore) is
+  removed even without `user_subvol_rm_allowed`. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

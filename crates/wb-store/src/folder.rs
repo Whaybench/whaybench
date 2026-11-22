@@ -59,7 +59,30 @@ pub fn copy_into(src: &Path, dst: &Path) -> Res<()> {
 
 /// Removes a project folder just made, when making the project failed after it.
 pub fn discard(dir: &Path, subvolume: bool) -> Res<()> {
-    if subvolume { btrfs(&["subvolume".as_ref(), "delete".as_ref(), dir.as_os_str()]) } else { fs::remove_dir_all(dir).map_err(|e| e.to_string()) }
+    // A user's own subvolume can also go by emptying it and removing its folder (Linux 4.18 on), without
+    // user_subvol_rm_allowed.
+    if subvolume && btrfs(&["subvolume".as_ref(), "delete".as_ref(), dir.as_os_str()]).is_ok() { return Ok(()); }
+    fs::remove_dir_all(dir).map_err(|e| e.to_string())
+}
+
+/// The project a folder (or a snapshot of it) belongs to: the id in its data root's marker.
+fn owner(dir: &Path) -> Option<String> {
+    let marker = dir.join(wb_core::roots::PROJECT_DATA).join(wb_core::roots::MARKER);
+    if !fs::symlink_metadata(&marker).is_ok_and(|m| m.is_file()) { return None; }
+    let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(marker).ok()?).ok()?;
+    v["id"].as_str().map(String::from)
+}
+
+/// Renames without replacing anything there (made again since it was checked).
+fn rename_new(from: &Path, to: &Path) -> Res<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = |p: &Path| std::ffi::CString::new(p.as_os_str().as_bytes()).map_err(|e| e.to_string());
+    let (f, t) = (c(from)?, c(to)?);
+    // Safety: two paths as C strings, valid for the call.
+    if unsafe { libc::renameat2(libc::AT_FDCWD, f.as_ptr(), libc::AT_FDCWD, t.as_ptr(), libc::RENAME_NOREPLACE) } != 0 {
+        return Err(format!("{}: {}", to.display(), std::io::Error::last_os_error()));
+    }
+    Ok(())
 }
 
 fn snapshot_dir(dir: &Path) -> PathBuf {
@@ -67,13 +90,15 @@ fn snapshot_dir(dir: &Path) -> PathBuf {
     dir.with_file_name(format!(".{name}.snapshots"))
 }
 
-/// The snapshots of a project folder, oldest first: subvolumes with a number for a name, never a link.
+/// The snapshots of a project folder, oldest first: subvolumes with a number for a name, never a link, of this
+/// project (one left beside a folder of the same name by an earlier project is not this one's to restore or prune).
 pub fn snapshots(dir: &Path) -> Vec<String> {
     let at = snapshot_dir(dir);
     if !fs::symlink_metadata(&at).is_ok_and(|m| m.is_dir()) { return Vec::new(); }
+    let mine = owner(dir);
     let mut names: Vec<String> = fs::read_dir(&at).into_iter().flatten().flatten()
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| n.parse::<u64>().is_ok() && is_subvolume(&at.join(n))).collect();
+        .filter(|n| n.parse::<u64>().is_ok() && is_subvolume(&at.join(n)) && owner(&at.join(n)) == mine).collect();
     names.sort_by_key(|n| n.parse::<u64>().unwrap_or(0));
     names
 }
@@ -143,9 +168,10 @@ fn busy(dir: &Path) -> Res<String> {
 }
 
 /// A subvolume inside the folder: a snapshot holds only an empty folder in its place, so restoring would lose it.
-fn nested_subvolume(dir: &Path) -> Option<String> {
+fn nested_subvolume(dir: &Path) -> Res<Option<String>> {
+    // A folder find could not read may hold one: that is not taken for none.
     output("find", &[dir.as_os_str(), "-mindepth".as_ref(), "1".as_ref(), "-xdev".as_ref(), "-type".as_ref(), "d".as_ref(), "-inum".as_ref(), "256".as_ref(), "-print".as_ref(), "-quit".as_ref()])
-        .ok().filter(|p| !p.is_empty())
+        .map(|p| (!p.is_empty()).then_some(p)).map_err(|e| format!("cannot check the folder for subvolumes: {e}"))
 }
 
 /// A restore done, the snapshot of the state before it, and what could not be cleaned up after it.
@@ -162,24 +188,24 @@ fn restore_keeping(dir: &Path, name: &str, limit: usize) -> Res<Restored> {
     if !using.is_empty() {
         return Err(format!("programs work in the project folder (process ids {using}): stop them, then restore from outside the folder"));
     }
-    if let Some(inner) = nested_subvolume(dir) { return Err(format!("a subvolume is inside the project folder ({inner}): a snapshot does not hold its contents, so it is not restored")); }
+    if let Some(inner) = nested_subvolume(dir)? { return Err(format!("a subvolume is inside the project folder ({inner}): a snapshot does not hold its contents, so it is not restored")); }
     // Pruned only after: at the limit, the snapshot to go back to can be the oldest.
     let before = take(dir)?;
     let folder = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let aside = dir.with_file_name(format!(".{folder}.restoring-{}", now_ms()));
-    fs::rename(dir, &aside).map_err(|e| e.to_string())?;
-    // A snapshot into a folder that exists goes inside it: something made the path again since the rename.
-    let made = if fs::symlink_metadata(dir).is_ok() { Err(format!("{} was made again during the restore", dir.display())) }
-        else { btrfs(&["subvolume".as_ref(), "snapshot".as_ref(), snap.as_os_str(), dir.as_os_str()]) };
-    if let Err(e) = made {
-        if fs::symlink_metadata(dir).is_ok() { return Err(format!("{e}; the folder as it was is at {}", aside.display())); }
-        fs::rename(&aside, dir).map_err(|e2| format!("{e}; and the folder could not be put back from {}: {e2}", aside.display()))?;
-        return Err(e);
+    let stamp = now_ms();
+    let (aside, fresh) = (dir.with_file_name(format!(".{folder}.restoring-{stamp}")), dir.with_file_name(format!(".{folder}.restored-{stamp}")));
+    // Made beside first, then put in place by a rename that replaces nothing: a path made again meanwhile is not
+    // filled with it.
+    btrfs(&["subvolume".as_ref(), "snapshot".as_ref(), snap.as_os_str(), fresh.as_os_str()])?;
+    if let Err(e) = rename_new(dir, &aside) { let _ = discard(&fresh, true); return Err(e); }
+    if let Err(e) = rename_new(&fresh, dir) {
+        let back = rename_new(&aside, dir);
+        let _ = discard(&fresh, true);
+        return Err(match back { Ok(()) => e, Err(e2) => format!("{e}; and the folder could not be put back from {}: {e2}", aside.display()) });
     }
     // The state before is in snapshot `before`, so the copy set aside can go.
     let mut warnings = Vec::new();
-    if !may_delete(&aside) { warnings.push(format!("the old folder is left at {}: deleting it needs user_subvol_rm_allowed", aside.display())); }
-    else if let Err(e) = discard(&aside, true) { warnings.push(format!("the old folder is left at {}: {e}", aside.display())); }
+    if let Err(e) = discard(&aside, true) { warnings.push(format!("the old folder is left at {}: {e}", aside.display())); }
     if let Err(e) = prune(dir, limit) { warnings.push(e); }
     Ok(Restored { before, warning: (!warnings.is_empty()).then(|| warnings.join("; ")) })
 }
@@ -230,6 +256,11 @@ mod tests {
         assert_eq!(fs::read_to_string(snapshot_dir(&dir).join(&before).join("src/main.rs")).unwrap(), "changed", "the state before is kept");
         fs::write(dir.join("new"), "x").unwrap();
         assert!(restore(&dir, "1").is_err(), "a link is not a snapshot");
+        // Snapshots of another project (here: of none) left beside a folder of the same name are not this one's.
+        fs::create_dir_all(dir.join(".whaybench")).unwrap();
+        fs::write(dir.join(".whaybench/briefsafe.json"), r#"{"id":"up"}"#).unwrap();
+        assert!(snapshots(&dir).is_empty() && restore(&dir, &first).is_err());
+        fs::remove_dir_all(dir.join(".whaybench")).unwrap();
         // At the limit, going back to the oldest still works: it is pruned only after.
         let r = restore_keeping(&dir, &first, 3).unwrap();
         assert!(!dir.join("new").exists());
@@ -241,7 +272,7 @@ mod tests {
             prune(&dir, 0).unwrap();
             discard(&dir, true).unwrap();
         } else {
-            assert!(r.warning.is_some() && prune(&dir, 1).is_err(), "kept, and said so");
+            assert!(prune(&dir, 1).is_err(), "kept, and said so");
         }
         assert!(src.join("src/main.rs").exists(), "the linked folder is untouched");
         let _ = fs::remove_dir_all(&root);
