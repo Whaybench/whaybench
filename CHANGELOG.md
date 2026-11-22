@@ -120,7 +120,9 @@ names another step.
   Snapshots are taken in turn with opening, closing and restoring, and not at all when the running container cannot be
   paused or a subvolume is inside the folder. Only read-only snapshots whose marker names this project count (a folder
   with no marker has none), and the snapshot commands refuse a folder that no longer holds the project. Projects are
-  created one at a time. `snapshot`, `snapshots` and `restore` take, list and go back to
+  created one at a time.
+  The WSL setup fetches the Claude Code and Codex installers to files before running them and stops when a program is
+  not there after (a failed download no longer ends in "done"). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

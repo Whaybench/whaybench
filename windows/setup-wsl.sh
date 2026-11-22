@@ -172,15 +172,19 @@ EOF
 chmod 0700 /usr/local/sbin/whaybench-work-disk
 
 say "Claude Code, Codex CLI and Whaybench"
-su - "$user" -c 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
+# Each installer is fetched to a file first: a pipe from curl would run whatever part came, and a failed fetch would
+# still count as done. Each program is looked for after.
+su - "$user" -c 'command -v claude >/dev/null || { f=$(mktemp) && curl -fsSL -o "$f" https://claude.ai/install.sh && bash "$f"; }'
+su - "$user" -c 'PATH="$HOME/.local/bin:$PATH" command -v claude >/dev/null' || { say "Claude Code was not installed"; exit 1; }
 # Codex CLI for "New conversation → Codex"; it asks to sign in the first time a Codex tab opens. Codex is a package
 # of programs (codex-code-mode-host beside codex): a codex copied alone fails to start, so it is put aside and the
 # official installer installs the whole package. Outside any Whaybench folder: CODEX_HOME is the person's own.
 su - "$user" -c 'c=$(command -v codex || true); r=${c:+$(readlink -f "$c")}
 if [ -z "$r" ] || [ ! -x "$(dirname "$r")/codex-code-mode-host" ]; then
     if [ -f "$HOME/.local/bin/codex" ] && [ ! -L "$HOME/.local/bin/codex" ]; then mv "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.single-$(date +%s)"; fi
-    curl -fsSL https://chatgpt.com/codex/install.sh | env -u CODEX_HOME sh
+    f=$(mktemp) && curl -fsSL -o "$f" https://chatgpt.com/codex/install.sh && env -u CODEX_HOME sh "$f"
 fi'
+su - "$user" -c 'PATH="$HOME/.local/bin:$PATH" command -v codex >/dev/null' || { say "Codex CLI was not installed"; exit 1; }
 # Not piped from the network: install.sh is checked against the release key first (minisign, installed above), and
 # with minisign it checks the package too.
 key=RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia
