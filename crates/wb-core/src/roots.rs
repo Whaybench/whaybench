@@ -198,6 +198,13 @@ mod tests {
         write_marker(&stub.stored(), "up").unwrap();
         open_plain(&stub).unwrap();
         assert!(crate::db::open(&stub.root().root).is_ok(), "through the host's own link");
+        // As in the container: the open place is the folder itself, not a link; and a host path with a link on the way.
+        let inside = dir.path().join("c/cache/open/up");
+        fs::create_dir_all(&inside).unwrap();
+        assert!(crate::db::open(&inside).is_ok(), "an open place that is a folder, as in the container");
+        let linked = dir.path().join("linked");
+        std::os::unix::fs::symlink(dir.path(), &linked).unwrap();
+        assert!(crate::db::open(&linked.join("host/cache/open/up")).is_ok(), "a link above the host's data folder");
         assert!(stub.stored().root.join("memory/memory.db").is_file(), "made where it rests");
         let other = dir.path().join("elsewhere");
         fs::create_dir_all(&other).unwrap();

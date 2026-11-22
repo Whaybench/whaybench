@@ -91,7 +91,9 @@ fn open_once(data: &Path) -> Result<Connection> {
     let (dir, flags) = match crate::beneath::split(&dir) {
         Some((root, rel)) => {
             crate::beneath::mkdir(&root, &rel)?;
-            (std::fs::read_link(&root)?.join(rel), rusqlite::OpenFlags::default() | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW)
+            // The root's real place, links on the way to it resolved (the host's own link to the project, a `~/work`
+            // that is a link; in the container it is a plain folder): no link is left for SQLite to refuse there.
+            (std::fs::canonicalize(&root)?.join(rel), rusqlite::OpenFlags::default() | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW)
         }
         None => { std::fs::create_dir_all(&dir)?; (dir, rusqlite::OpenFlags::default()) }
     };

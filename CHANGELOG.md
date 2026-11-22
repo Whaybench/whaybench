@@ -126,7 +126,9 @@ names another step.
   A project's tab closes when its project closes, and a project's tab follows no move its records name (such as to a
   host session in the background). A project's node file patterns count only in its folder, a few hundred files at
   most. The agents' program links are made again before each tab in a running container (an update moves them), and
-  a project folder's path may not hold ':'. `snapshot`, `snapshots` and `restore` take, list and go back to
+  a project folder's path may not hold ':'.
+  A project's memory database opens again for its own agents in the container, and on the host when a folder above
+  the data folder is a link (it is opened at its real path; the previous change asked for the open place to be a link). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with
