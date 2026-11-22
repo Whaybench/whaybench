@@ -78,7 +78,9 @@ pub fn write_stub(host: &Data, s: &Stub) -> std::io::Result<()> {
 
 /// Marks a data folder as a project's own (written where the project's data rests).
 pub fn write_marker(stored: &Data, id: &str) -> std::io::Result<()> {
-    write_atomic(&stored.root.join(MARKER), json!({"id": id}).to_string())
+    // `made` tells this making of the project from an earlier one with the same id (its snapshots are not this one's).
+    let made = format!("{}-{}", crate::clock::now_ms(), std::process::id());
+    write_atomic(&stored.root.join(MARKER), json!({"id": id, "made": made}).to_string())
 }
 
 pub fn remove_stub(host: &Data, id: &str) { let _ = fs::remove_file(stub_path(host, id)); }

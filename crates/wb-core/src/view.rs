@@ -229,9 +229,11 @@ pub fn session_moved(d: &Data, old: &str, new: &str) {
         if crate::paths::write_atomic(&to.join("index.json"), json!(joined).to_string()).is_ok() { let _ = std::fs::remove_file(from.join("index.json")); }
     }
     let (from, to) = (requests_dir(d, &for_session(old)), requests_dir(d, &for_session(new)));
-    if from.is_dir() {
-        let _ = std::fs::create_dir_all(&to);
-        for e in std::fs::read_dir(&from).into_iter().flatten().flatten() { let _ = std::fs::rename(e.path(), to.join(e.file_name())); }
+    // In a project, both folders without links on the way (the names in them are moved as they are, links too).
+    let plain = |p: &Path| crate::beneath::split(p).is_none_or(|(r, rel)| crate::beneath::list(&r, &rel).is_ok());
+    if std::fs::symlink_metadata(&from).is_ok_and(|m| m.is_dir()) && plain(&from) {
+        let made = match crate::beneath::split(&to) { Some((r, rel)) => crate::beneath::mkdir(&r, &rel).is_ok(), None => std::fs::create_dir_all(&to).is_ok() };
+        if made { for e in std::fs::read_dir(&from).into_iter().flatten().flatten() { let _ = std::fs::rename(e.path(), to.join(e.file_name())); } }
     }
 }
 

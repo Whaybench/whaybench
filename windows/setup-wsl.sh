@@ -24,7 +24,8 @@ id "$user" >/dev/null 2>&1 || useradd -m "$user"
 gpasswd -d "$user" wheel >/dev/null 2>&1 || true
 # Briefsafe projects run in rootless podman containers, which need the account's own range of user ids. useradd gives
 # one; an account made otherwise gets it here.
-grep -q "^$user:" /etc/subuid || usermod --add-subuids 524288-589823 --add-subgids 524288-589823 "$user"
+grep -q "^$user:" /etc/subuid || usermod --add-subuids 524288-589823 "$user"
+grep -q "^$user:" /etc/subgid || usermod --add-subgids 524288-589823 "$user"
 # No sudo without a password: an agent running as this user could take root with it. Root work goes through
 # `wsl -d Whaybench -u root` from Windows. Earlier versions wrote the rule; a new run takes it away.
 rm -f /etc/sudoers.d/whaybench

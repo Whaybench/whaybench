@@ -130,8 +130,9 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         }
         "open" => {
             let st2 = stub_of(st, arg(&rest, 0)?)?;
-            // Isolated where a container can run: the container first, the open place only once it runs (spec 3.22).
             let isolated = wb_core::container::isolation();
+            wb_core::container::life(&st2, || {
+            // Isolated where a container can run: the container first, the open place only once it runs (spec 3.22).
             if isolated {
                 let own = wb_core::paths::own_exe().map_err(|e| e.to_string())?;
                 wb_core::container::start(&st2, &wb_core::container::programs(&own))?;
@@ -146,13 +147,17 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 return Err(e.to_string());
             }
             wb_core::container::tidy(&st2, isolated);
+            Ok(())
+            })?;
             out(json!({"open": st2.id, "data": st2.open_at, "isolated": isolated}));
         }
         "close" => {
             let st2 = stub_of(st, arg(&rest, 0)?)?;
             // The open place goes only once the container is gone: a project is never taken for closed while it runs.
-            if wb_core::container::podman_found() { wb_core::container::stop(&st2)?; }
-            wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())?;
+            wb_core::container::life(&st2, || {
+                if wb_core::container::podman_found() { wb_core::container::stop(&st2)?; }
+                wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())
+            })?;
             out(json!({"closed": st2.id}));
         }
         "snapshot" => {
@@ -164,8 +169,10 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         "snapshots" => { let dir = project_folder(st, arg(&rest, 0)?)?; out(json!(folder::snapshots(&dir))); }
         "restore" => {
             let stub = stub_of(st, arg(&rest, 0)?)?;
-            if wb_core::container::running(&stub) || stub.open() { return Err(format!("project {} is open: close it, then restore", stub.id)); }
-            let r = folder::restore(&stub.folder, arg(&rest, 1)?)?;
+            let r = wb_core::container::life(&stub, || {
+                if wb_core::container::running(&stub) || stub.open() { return Err(format!("project {} is open: close it, then restore", stub.id)); }
+                folder::restore(&stub.folder, arg(&rest, 1)?)
+            })?;
             out(json!({"restored": arg(&rest, 1)?, "before": r.before, "warning": r.warning}));
         }
         "forget" => {

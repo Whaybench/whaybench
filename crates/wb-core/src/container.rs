@@ -129,11 +129,16 @@ pub fn programs_bin(s: &Stub, home: &Path) -> Result<(), String> {
 }
 
 /// One at a time per project: two starts (two tabs, a tab and `open`) must not remove each other's container.
-fn locked<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+fn locked<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> { flocked(&s.open_at.with_extension("lock"), work) }
+
+/// One of opening, closing and restoring a project at a time: a restore must not run while an open starts its agents.
+/// (A lock of its own: `start` takes the container's lock inside an open.)
+pub fn life<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> { flocked(&s.open_at.with_extension("life"), work) }
+
+fn flocked<T>(file: &Path, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     use std::os::fd::AsRawFd;
-    let file = s.open_at.with_extension("lock");
     if let Some(dir) = file.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
-    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&file).map_err(|e| e.to_string())?;
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(file).map_err(|e| e.to_string())?;
     // Safety: flock on a descriptor this function owns; the lock goes with it.
     if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 { return Err(std::io::Error::last_os_error().to_string()); }
     work()

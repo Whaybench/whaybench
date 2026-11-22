@@ -82,7 +82,11 @@ names another step.
   folders mounted inside the project's home are made by the person before the container starts, so podman does not
   leave them owned by another user. The WSL setup installs podman and gnome-keyring, gives the account its user id
   range and mounts the btrfs work disk with `user_subvol_rm_allowed`.
-  The list of Briefsafe projects, read many times a second, is read again only when its folder changes. `snapshot`, `snapshots` and `restore` take, list and go back to
+  The list of Briefsafe projects, read many times a second, is read again only when its folder changes.
+  A project's marker also notes when it was made, so a project made again with the same id never takes an earlier
+  one's snapshots. Opening, closing and restoring a project take turns (a restore cannot run while an open starts its
+  agents). In a git repository around the folder its snapshot folder is excluded too; the WSL setup checks the user
+  and group id ranges each; moving a conversation's view requests goes through no links. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

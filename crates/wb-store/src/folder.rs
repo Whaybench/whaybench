@@ -65,12 +65,12 @@ pub fn discard(dir: &Path, subvolume: bool) -> Res<()> {
     fs::remove_dir_all(dir).map_err(|e| e.to_string())
 }
 
-/// The project a folder (or a snapshot of it) belongs to: the id in its data root's marker.
-fn owner(dir: &Path) -> Option<String> {
+/// The project a folder (or a snapshot of it) belongs to: its data root's marker (the id and when it was made).
+fn owner(dir: &Path) -> Option<serde_json::Value> {
     let marker = dir.join(wb_core::roots::PROJECT_DATA).join(wb_core::roots::MARKER);
     if !fs::symlink_metadata(&marker).is_ok_and(|m| m.is_file()) { return None; }
     let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(marker).ok()?).ok()?;
-    v["id"].as_str().map(String::from)
+    v["id"].is_string().then(|| serde_json::json!({"id": v["id"], "made": v["made"]}))
 }
 
 /// Renames without replacing anything there (made again since it was checked).

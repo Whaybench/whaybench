@@ -146,11 +146,18 @@ fn exclude_from_git(dir: &Path) -> Res<()> {
     let file = git.join("info/exclude");
     let now = fs::read_to_string(&file).unwrap_or_default();
     let rel = dir.strip_prefix(top).map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
-    let line = if rel.is_empty() { format!("/{}/", wb_core::roots::PROJECT_DATA) } else { format!("/{rel}/{}/", wb_core::roots::PROJECT_DATA) };
-    if now.lines().any(|l| l.trim() == line) { return Ok(()); }
+    let mut lines = vec![if rel.is_empty() { format!("/{}/", wb_core::roots::PROJECT_DATA) } else { format!("/{rel}/{}/", wb_core::roots::PROJECT_DATA) }];
+    // In a repository around the folder its snapshots are inside too, each with a copy of the data.
+    if !rel.is_empty() {
+        let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let parent = Path::new(&rel).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        lines.push(if parent.is_empty() { format!("/.{name}.snapshots/") } else { format!("/{parent}/.{name}.snapshots/") });
+    }
+    lines.retain(|l| !now.lines().any(|x| x.trim() == l));
+    if lines.is_empty() { return Ok(()); }
     fs::create_dir_all(git.join("info")).map_err(|e| e.to_string())?;
     let sep = if now.is_empty() || now.ends_with('\n') { "" } else { "\n" };
-    fs::write(&file, format!("{now}{sep}{line}\n")).map_err(|e| e.to_string())
+    fs::write(&file, format!("{now}{sep}{}\n", lines.join("\n"))).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
