@@ -154,6 +154,8 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     record::open(&data, "whaybench", &run_id, if std::env::var_os(ENV_AGAIN).is_some() { "again" } else { "first" });
     record::install_panic_hook();
     replace_running(&data);
+    // Marks of views that showed a project's page: no view is on screen yet (each sets its own again when it shows one).
+    for f in wb_core::paths::list_dir(&data.cache()) { if f.file_name().is_some_and(|n| n.to_string_lossy().starts_with("view-protected-")) { let _ = std::fs::remove_file(f); } }
     if wb_core::update::install_ready(&data) { start_again(&data, std::env::args().skip(1).collect()); }
     wb_core::sessions::save_lost_maps(&data);
     wb_core::sessions::prune(&data);

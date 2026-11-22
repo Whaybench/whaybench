@@ -271,7 +271,15 @@ names another step.
   there and is cleared when the project locks; a project's request is logged as "project" only (en, ko).
   Pictures of the screen are never refused (they are how the screen is tested): one taken while a Briefsafe project
   is open, or while a view shows a project's page, is removed ten minutes later, also after a restart, unless the
-  file was written over since. Copying a project page's text to the desktop clipboard stays the person's choice. `snapshot`, `snapshots` and `restore` take, list and go back to
+  file was written over since. Copying a project page's text to the desktop clipboard stays the person's choice.
+  From the functional review: a project's conversations get the answer language and the usage status line again
+  (a project's own settings are read beneath its folders); a project's map starts a new conversation in that
+  project (Carry as shown, New conversation from this map); a host map written before its session's record keeps its
+  menu; a host file asked for while the view follows a project is shown; a web link in a project's document shows
+  its address as text; `session type` and `wait` work between a project's own conversations; in a project the view
+  tool says which commands are the host's instead of timing out; a failed vault log in shows the real reason; links
+  of an older project whose id has a colon work; a detached view keeps its own name; a view's mark left by a crash
+  is cleared at start; a project's file pattern with a wildcard in a folder part is refused when attached (en, ko). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

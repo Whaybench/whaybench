@@ -202,7 +202,11 @@ pub fn return_file(data: &Data) -> std::path::PathBuf { data.cache().join("focus
 /// `whaybench ctl session ...`: decided here, not in the compositor, because asking Claude Code what runs
 /// can take seconds and the window must not wait.
 fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
-    if !running(data) { return Err(format!("not running with data directory {}", data.root.display())); }
+    // In a Briefsafe project's container its data folder is the project's: `type` and `wait` work there through the
+    // project's own folder (the host delivers what it leaves in ask/); the rest needs the host's Whaybench.
+    let in_project = wb_core::roots::is_project_root(data);
+    let here = matches!(words.first().map(String::as_str), Some("type" | "wait"));
+    if !(in_project && here) && !running(data) { return Err(format!("not running with data directory {}", data.root.display())); }
     match words.first().map(String::as_str) {
         Some("new") => {
             // `--project ID`: a new conversation in that Briefsafe project (it must be open; the tab refuses otherwise).
@@ -216,19 +220,18 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 [flag, id, rest @ ..] if flag == "--agent" => (Some(id.clone()), rest.first().cloned()),
                 rest => (None, rest.first().cloned()),
             };
-            if let Some(m) = map_from.as_deref().filter(|m| !m.starts_with('/'))
-                && wb_core::roots::Roots::new(data.clone()).project_of(m).is_some() { return Err(wb_core::i18n::t("briefsafe-map-stays").into()); }
+            // A project's map (its session's, or a file in its data) starts a conversation in that project only, a host
+            // map a host one or a project's (host -> project is allowed; spec 3.22).
+            let map_project = map_from.as_deref().and_then(|m| if m.starts_with('/') {
+                let real = std::fs::canonicalize(m).unwrap_or_else(|_| m.into());
+                wb_core::beneath::split(std::path::Path::new(m)).and_then(|(r, _)| r.file_name().map(|n| n.to_string_lossy().to_string()))
+                    .or_else(|| wb_core::roots::stubs(data).into_iter().find(|s| std::fs::canonicalize(s.stored().root).is_ok_and(|r| real.starts_with(r))).map(|s| s.id))
+            } else { wb_core::roots::Roots::new(data.clone()).project_of(m) });
+            if map_project.is_some() && map_project != project { return Err(wb_core::i18n::t("briefsafe-map-stays").into()); }
             if let Some(m) = &map_from
-                && !m.starts_with('/') && !data.root.join(format!("{m}.json")).exists() {
+                && !m.starts_with('/') && !wb_core::roots::for_session(data, m).root.join(format!("{m}.json")).exists() {
                     return Err(wb_core::i18n::t("new-tab-keep-map-not-opened-2").into());
                 }
-            // A project's map (a file in its data) does not start a conversation outside the project (spec 3.22).
-            if let Some(m) = map_from.as_deref().filter(|m| m.starts_with('/')) {
-                let real = std::fs::canonicalize(m).unwrap_or_else(|_| m.into());
-                let in_project = wb_core::beneath::split(std::path::Path::new(m)).is_some()
-                    || wb_core::roots::stubs(data).iter().any(|s| std::fs::canonicalize(s.stored().root).is_ok_and(|r| real.starts_with(r)));
-                if in_project { return Err(wb_core::i18n::t("briefsafe-map-stays").into()); }
-            }
             post(data, &Request::OpenTerm { open: TermOpen { map_from, agent, project, ..Default::default() } })
         }
         Some("show") => match (words.get(1).map(String::as_str), words.get(2), words.get(3)) {
@@ -249,10 +252,12 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             let id = words.get(1).ok_or("session type needs an id")?;
             let text = words.get(2).ok_or("session type needs text")?;
             let from = std::env::var("WHAYBENCH_TAB").ok();
-            match deliver(data, id, text, from.as_deref(), false) {
+            // From a project's conversation: always through ask/ (the host checks it is this project's own).
+            let tried = if in_project { Err(Refused::Write(String::new())) } else { deliver(data, id, text, from.as_deref(), false) };
+            match tried {
                 // An agent in a sandbox (Codex) may not write other tabs' input: it leaves a request in ask/, which
                 // Whaybench, outside the sandbox, checks the same way and delivers. A refusal stays a refusal.
-                Err(Refused::Write(_)) if from.is_some() => {
+                Err(Refused::Write(_)) if from.is_some() || in_project => {
                     let name = format!("{}-{}.json", SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0), std::process::id());
                     write_atomic(&ask_dir(data).join(name), serde_json::json!({"to": id, "text": text, "from": from}).to_string().as_bytes())
                         .map_err(|e| format!("not sent: {e}"))
@@ -451,7 +456,14 @@ pub fn send(data: &Data, words: &[String]) -> Result<(), String> {
     let Some(out) = wait else { return Ok(()) };
     let end = Instant::now() + Duration::from_secs(5);
     while Instant::now() < end {
-        if out.exists() { println!("{}", out.display()); return Ok(()); }
+        if out.exists() {
+            println!("{}", out.display());
+            // Said to whoever asked, not only in the log: a picture taken while a project is open goes after a while.
+            if matches!(request, Request::Shot { .. }) && !wb_core::roots::Roots::new(data.clone()).projects().is_empty() {
+                eprintln!("{}", wb_core::i18n::t("shot-removed-later"));
+            }
+            return Ok(());
+        }
         if let Ok(e) = fs::read_to_string(error_file(&out)) { let _ = fs::remove_file(error_file(&out)); return Err(e); }
         std::thread::sleep(Duration::from_millis(30));
     }

@@ -34,6 +34,11 @@ fn run(mut args: Vec<String>, data: &Data) -> Result<(), String> {
     // The session's own root: a project's attachments and memory are the project's (spec 3.22).
     let at = wb_core::roots::for_session(data, &session);
     let data = &at;
+    // In a project, wildcards only in a pattern's last part (the Files panel lists one folder of the project, no more).
+    if wb_core::roots::is_project_root(data) && args.first().is_some_and(|a| a == "attach")
+        && args.iter().skip(2).any(|p| std::path::Path::new(p).parent().is_some_and(|d| d.to_string_lossy().contains(['*', '?', '[']))) {
+        return Err(wb_core::i18n::t("briefsafe-pattern-last-part").into());
+    }
     let path = data.root.join("node-files").join(format!("{session}.json"));
     let mut table: Map<String, Value> = paths::read_kept(&path);
     let listed = |v: Option<&Value>| -> Vec<String> { v.and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() };

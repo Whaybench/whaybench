@@ -134,7 +134,7 @@ fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str)
         (Some(r), _) => r,
         // A file of the host's (opened with Open map): the host's, whatever session it names.
         (None, _) if data.get("_file").is_some() => d.clone(),
-        (None, Some(sid)) => wb_core::roots::known_session(d, sid).ok_or_else(|| std::io::Error::other(wb_core::i18n::t("briefsafe-locked")))?,
+        (None, Some(sid)) => root_of_map(d, sid).ok_or_else(|| std::io::Error::other(wb_core::i18n::t("briefsafe-locked")))?,
         (None, None) => wb_core::roots::for_session(d, data.get("from").and_then(Value::as_str).unwrap_or("")),
     };
     if wb_core::beneath::split(&maps_dir(d)).is_none() { std::fs::create_dir_all(maps_dir(d))?; }
@@ -272,9 +272,13 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
     let keep = items.sub();
     for (id, name) in wb_core::agents::list(&d.root) {
         let (d2, p2, t2) = (d.clone(), path.to_string(), title.to_string());
-        // A host conversation is not started from a project's map.
-        keep.add(&wb_core::i18n::f("new-conversation-from-this-map-with", &[("name", name)]), map_project.is_none(), move || {
-            crate::common::ctl(&d2, vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "new".into(), "--agent".into(), id.clone(), p2.clone()]);
+        // A project's map starts a conversation in that project (open), never on the host.
+        let (open, mp) = (map_project.as_ref().is_none_or(|p| wb_core::roots::stubs(d).iter().any(|s| &s.id == p && s.open())), map_project.clone());
+        keep.add(&wb_core::i18n::f("new-conversation-from-this-map-with", &[("name", name)]), open, move || {
+            let mut a: Vec<String> = vec!["--data-dir".into(), d2.root.to_string_lossy().to_string(), "session".into(), "new".into()];
+            if let Some(p) = &mp { a.extend(["--project".into(), p.clone()]); }
+            a.extend(["--agent".into(), id.clone(), p2.clone()]);
+            crate::common::ctl(&d2, a);
             status::say(&d2, &wb_core::i18n::f("new-session-from-imported-map", &[("title", cut(&t2, 24))]), 8);
         });
     }
@@ -294,6 +298,12 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
     items
 }
 
+/// Where a session's map is now: the root that knows the session, or the host's when the map is there (a map written
+/// before its session's record). None: a project's that locked.
+fn root_of_map(d: &Data, sid: &str) -> Option<Data> {
+    wb_core::roots::known_session(d, sid).or_else(|| (wb_core::map::safe_id(sid).is_ok() && d.root.join(format!("{sid}.json")).exists()).then(|| d.clone()))
+}
+
 /// A host map and a host conversation, as they are now.
 fn host_pair(d: &Data, map_session: &str, session: &str) -> bool {
     let roots = wb_core::roots::Roots::new(d.clone());
@@ -304,7 +314,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
     if let Some(path) = imported_of(scope) { return imported_menu(d, data, node, path, scope.map_or("", |x| x.1.as_str())); }
     let items = Items::new();
     // A map still drawn of a session no root knows now (its project locked a moment ago): no menu at all.
-    if !s(data, "sessionId").is_empty() && wb_core::roots::known_session(d, s(data, "sessionId")).is_none() { return items; }
+    if !s(data, "sessionId").is_empty() && root_of_map(d, s(data, "sessionId")).is_none() { return items; }
     let session = sessions::focus(d);
     let tree = tree_of(data);
     // A project's map: none of it goes to a host conversation, a host project or a branch panel of the host's.
@@ -325,7 +335,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
             let marked = n.get("mark").is_some();
             let (d2, id2, t2) = (d.clone(), s(n, "nid").to_string(), owner.to_string());
             items.add(wb_core::i18n::t(if marked { "notify-unmark" } else { "notify-mark" }), true, move || {
-                let Some(root) = wb_core::roots::known_session(&d2, &t2) else { return };
+                let Some(root) = root_of_map(&d2, &t2) else { return };
                 if let Err(e) = wb_core::map::person(&root.root, json!([{"id": id2, "mark": if marked { Value::Null } else { json!("important") }}])) {
                     status::say(&d2, &wb_core::i18n::f("notify-not-written", &[("e", e.to_string())]), 8);
                 }
@@ -395,7 +405,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
         let act = |branch: bool, what: String| {
             let (d2, t2, label2, id2, nid2) = (d.clone(), target.clone(), label.clone(), id.clone(), nid.clone());
             let n = if branch { below + 1 } else { 1 };
-            move || { let Some(root) = wb_core::roots::known_session(&d2, &t2) else { return }; match wb_core::map::trash(&root.root, &nid2, branch) {
+            move || { let Some(root) = root_of_map(&d2, &t2) else { return }; match wb_core::map::trash(&root.root, &nid2, branch) {
                 Ok(_) => {
                     // A project's node id is its agents' text: not in the host's log.
                     let node = if root.root != d2.root { String::new() } else { id2.clone() };
@@ -583,10 +593,14 @@ fn carry_shown(d: &Data, agent: &str, data: &Value, style: &str, shown: &[String
     // A project's map goes on only in the project's own conversations.
     let roots = wb_core::roots::Roots::new(d.clone());
     let owner = s(data, "sessionId");
-    if roots.project_of(&session).is_some() || roots.project_of(owner).is_some() || (!owner.is_empty() && wb_core::roots::known_session(d, owner).is_none()) { return status::say(d, wb_core::i18n::t("briefsafe-map-stays"), 8); }
+    // Within one place: a host map to a host conversation, a project's to that project's own.
+    let project = roots.project_of(owner);
+    if roots.project_of(&session) != project || (!owner.is_empty() && root_of_map(d, owner).is_none()) { return status::say(d, wb_core::i18n::t("briefsafe-map-stays"), 8); }
     let Some(path) = mapstyles::carry_file(d, &session, data, style, shown, screen) else { return status::say(d, wb_core::i18n::t("carry-shown-failed"), 6) };
     record::decide("map", "carried as shown", "the person chose", &[("style", style.to_string()), ("nodes", shown.len().to_string())]);
-    crate::common::ctl(d, crate::menu::session_args(d, &["new", "--agent", agent, &path.to_string_lossy()]));
+    let mut args = crate::menu::session_args(d, &["new", "--agent", agent, &path.to_string_lossy()]);
+    if let (Some(p), Some(i)) = (&project, args.iter().position(|a| a == "new")) { args.splice(i + 1..i + 1, ["--project".to_string(), p.clone()]); }
+    crate::common::ctl(d, args);
 }
 
 fn escape(t: &str) -> String { glib::markup_escape_text(t).to_string() }

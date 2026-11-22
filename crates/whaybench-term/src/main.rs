@@ -136,8 +136,17 @@ impl Relay {
             // Answers in the interface language, as Claude Code's own `language` setting does: once in the system
             // prompt, not a note every turn. A language the person set themselves is left alone.
             let mut settings = serde_json::Map::new();
-            // A project's folder is its agents' to write: its settings are not read here (its own Claude folder has the person's).
-            let set_here = |key: &str| project.is_some() || sessions::claude_setting_set(key, std::path::Path::new(&cwd));
+            // A project's settings are its own Claude folder's and its folder's, read beneath them (never through a link).
+            let set_here = |key: &str| match &project {
+                None => sessions::claude_setting_set(key, std::path::Path::new(&cwd)),
+                Some(p) => {
+                    let has = |root: &std::path::Path, rel: &std::path::Path| wb_core::beneath::read(root, rel, 1 << 20).ok()
+                        .and_then(|t| serde_json::from_slice::<serde_json::Value>(&t).ok()).is_some_and(|v| match &v[key] { serde_json::Value::Null => false, serde_json::Value::String(s) => !s.is_empty(), _ => true });
+                    let inside = std::path::Path::new(&cwd).strip_prefix(&p.folder).ok().map(std::path::Path::to_path_buf);
+                    has(&p.stored().root, std::path::Path::new("claude/settings.json"))
+                        || inside.is_some_and(|r| ["settings.json", "settings.local.json"].iter().any(|f| has(&p.folder, &r.join(".claude").join(f))))
+                }
+            };
             if let Some(l) = wb_core::i18n::agent_language(&self.data).filter(|_| !set_here("language")) {
                 settings.insert("language".into(), l.into());
             }

@@ -36,6 +36,8 @@ struct V {
     followed: Option<String>,
     /// The followed session is a project's: its pages leave the panel when the project closes.
     of_project: bool,
+    /// Files the host itself asked this view to show: shown whatever the view follows.
+    own: std::collections::HashSet<String>,
     hist: History,
     /// The page a PDF was asked to open at, for the next display.
     page: Option<u32>,
@@ -209,7 +211,7 @@ fn display(v: &V) {
     v.web.set_background_color(&gtk::gdk::RGBA::TRANSPARENT);
     match v.hist.current() {
         // Checked again when shown: a file of the project may have become a link to a host file since.
-        Some((path, _)) if !wb_core::vault::is_recovery_page(path) && project_followed(v).is_some_and(|s| !in_project(&s, path)) => {
+        Some((path, _)) if !wb_core::vault::is_recovery_page(path) && !v.own.contains(path) && project_followed(v).is_some_and(|s| !in_project(&s, path)) => {
             v.web.load_html(&format!("<!doctype html><meta charset='utf-8'><style>{}</style>", page_style(&v.d)), None);
             v.place.set_text("");
         }
@@ -415,6 +417,8 @@ fn tick(s: &Shared) {
                     retitle(&v);
                 } else {
                     let Some(kept) = lasting(&v, p, true) else { continue };
+                    // The host's own choice: shown whatever the view follows (host -> project is allowed).
+                    v.own.insert(kept.clone());
                     v.hist.push(&kept, &title_for(p));
                 }
                 v.page = page_of(&r);
@@ -516,7 +520,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
     win.set_child(Some(&body));
 
     let link = view::views(&d).into_iter().find(|(n, _)| *n == name).map(|(_, l)| l).unwrap_or_default();
-    let s: Shared = Rc::new(RefCell::new(V { d: d.clone(), name: name.clone(), link, followed: None, of_project: false, hist: History::default(), page: None, style: String::new(), seen: HashMap::new(), web, place, tie: tie.clone(), back: back.clone(), forward: forward.clone(), drop_it: drop_it.clone(), win: win.clone() }));
+    let s: Shared = Rc::new(RefCell::new(V { d: d.clone(), name: name.clone(), link, followed: None, of_project: false, own: Default::default(), hist: History::default(), page: None, style: String::new(), seen: HashMap::new(), web, place, tie: tie.clone(), back: back.clone(), forward: forward.clone(), drop_it: drop_it.clone(), win: win.clone() }));
     {
         // A project's page goes to no file outside the project: a link, a refresh, a frame (spec 3.22). The panel's
         // own loads are checked before they are made (it holds its state then).

@@ -12,11 +12,21 @@ pub enum RawHtml { Kept, AsText, Untrusted }
 
 pub fn markdown(md: &str, raw: RawHtml) -> String {
     let md = crate::common::table_pipes(md);
-    let events = Parser::new_ext(&md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS).filter_map(|ev| Some(match ev {
+    // The address of the link being read (Untrusted): written after its words, as text.
+    let mut dest = String::new();
+    let events = Parser::new_ext(&md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS).filter_map(move |ev| Some(match ev {
         Event::Html(t) | Event::InlineHtml(t) if raw != RawHtml::Kept => Event::Text(t),
         // Text someone else wrote (a Briefsafe project's): its links and images are their words only. Nothing it names
-        // is followed, fetched or handed to another program from here (a web address would reach the host's views).
-        Event::Start(Tag::Link { .. }) | Event::End(TagEnd::Link) | Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) if raw == RawHtml::Untrusted => return None,
+        // is followed, fetched or handed to another program from here (a web address would reach the host's views);
+        // a link's address is shown as text after it, so the reader still sees where it points.
+        Event::Start(Tag::Link { dest_url, .. }) if raw == RawHtml::Untrusted => { dest = dest_url.to_string(); return None; }
+        Event::End(TagEnd::Link) if raw == RawHtml::Untrusted => {
+            let d = std::mem::take(&mut dest);
+            // Only a web address: others (javascript:, file:, the panel's own) say nothing a reader needs.
+            if !(d.to_lowercase().starts_with("http://") || d.to_lowercase().starts_with("https://")) { return None; }
+            Event::Text(format!(" ({d})").into())
+        }
+        Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) if raw == RawHtml::Untrusted => return None,
         other => other,
     }));
     let mut out = String::new();
@@ -68,6 +78,7 @@ mod tests {
         assert!(!h.to_lowercase().contains("javascript:") && !h.to_lowercase().contains("wb:") && !h.contains("file:"), "{h}");
         assert!(!h.contains("<a ") && !h.contains("<img"), "no link, no image: {h}");
         assert!(h.contains("&lt;b&gt;") && h.contains('d') && h.contains('e'), "their words stay: {h}");
+        assert!(h.contains("d (HTTPS://example.org)"), "a web address is shown as text: {h}");
     }
 
     #[test]

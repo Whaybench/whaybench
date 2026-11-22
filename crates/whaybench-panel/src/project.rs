@@ -411,7 +411,8 @@ fn closed_page(p: &P, st: &wb_core::roots::Stub) -> String {
         match msg_for(p, &st.id) {
             // No key: said in the person's words, with the way on (and still there after a recovery key that did not fit).
             Some((kind, why)) if st.vault && (why.contains(wb_core::vault::NO_KEY) || kind == "recover" || (kind == "open" && why.contains("gocryptfs"))) => {
-                if kind == "recover" { b += &format!("<p class='warn'>{}</p>", e(&wb_core::i18n::f("briefsafe-failed", &[("why", why.to_string())]))); }
+                // What went wrong, unless it was only the missing key (a gocryptfs that would not start is not that).
+                if kind == "recover" || !why.contains(wb_core::vault::NO_KEY) { b += &format!("<p class='warn'>{}</p>", e(&wb_core::i18n::f("briefsafe-failed", &[("why", why.to_string())]))); }
                 b += &format!("<p>{}</p><p>{}</p>", e(&t("briefsafe-no-key-page")), link("bs", &format!("{}:recover", st.id), &e(&t("briefsafe-enter-recovery"))));
             }
             Some((_, why)) => b += &format!("<p class='warn'>{}</p>", e(&wb_core::i18n::f("briefsafe-failed", &[("why", why.to_string())]))),
@@ -965,8 +966,7 @@ fn briefsafe_clicked(s_: &Shared, what: &str) {
     let (d, win, id) = { let p = s_.borrow(); (p.d.clone(), p.win.clone(), p.bs.clone()) };
     let Some(id) = id else { return };
     // A link names the project its page was drawn for: pressed on a page left from another project, it does nothing.
-    let Some((for_id, what)) = what.split_once(':') else { return };
-    if for_id != id { return; }
+    let Some(what) = what.strip_prefix(&format!("{id}:")) else { return };
     let t = |k: &str| wb_core::i18n::t(k).to_string();
     match what {
         "open" => start_job(&mut s_.borrow_mut(), &id, "open", &t("briefsafe-opening"), &["open", &id], None),

@@ -88,6 +88,11 @@ fn print_read(v: &Value) {
 }
 
 fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
+    // In a Briefsafe project's conversation only showing a page or file in the project's view works (its requests
+    // reach the view through the project's own folder); the rest is the host's, and is said so, not left to time out.
+    if wb_core::roots::is_project_root(d) && !matches!(args.first().map(String::as_str), Some("open" | "--help" | "-h") | None) {
+        return Err(wb_core::i18n::t("briefsafe-view-host-only").into());
+    }
     match args.first().map(String::as_str) {
         Some("open") => {
             let firefox = flag(&args, "--firefox");
@@ -106,6 +111,7 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
             } else { resolve_target(target)? };
             // A web address opens in the browser tab, where the person's sign-ins are; the view keeps pages and files.
             if firefox || what.starts_with("http://") || what.starts_with("https://") {
+                if wb_core::roots::is_project_root(d) { return Err(wb_core::i18n::t("briefsafe-view-host-only").into()); }
                 view::open_in_firefox(d, &what, page).map_err(|e| e.to_string())?;
                 println!("{}", wb_core::i18n::f("open-requested-in-firefox", &[("what", (what).to_string())]));
                 return Ok(());
