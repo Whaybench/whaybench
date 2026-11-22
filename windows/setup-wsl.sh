@@ -11,6 +11,8 @@ lang="${2:-en}"
 # The Windows display language's locale (ko_KR): made here, so the input method speaks that language.
 locale="${3:-}"
 say() { printf 'whaybench-setup: %s\n' "$*"; }
+# Whaybench is built for x86_64 only: on another machine (ARM64 Windows) nothing is changed here first.
+[ "$(uname -m)" = x86_64 ] || { say "Whaybench runs on x86_64 only, not $(uname -m): nothing was set up"; exit 1; }
 
 # The name comes from the Windows account: one that is a system account here (root, adm, games...) is not taken over,
 # or Whaybench and its agents would run as it.

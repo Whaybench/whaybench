@@ -141,7 +141,10 @@ names another step.
   View panel: a project's page cannot go, frame or refresh to a file outside the project, its Markdown's own HTML is
   shown as text, and a file of its folder is read beneath the folder (no link swapped in after the check). When the
   project closes, the view goes back to its session's own list instead of an empty one. A host view's saved list keeps
-  nothing of a project, and the log names a held page's kind, not its path. `snapshot`, `snapshots` and `restore` take, list and go back to
+  nothing of a project, and the log names a held page's kind, not its path.
+  A restore whose staging name is taken stops before changing anything and checks that what it made is the snapshot;
+  a git exclude file that cannot be read is not overwritten. The Windows installer and the WSL setup stop at once on a
+  machine that is not x86-64. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

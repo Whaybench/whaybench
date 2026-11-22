@@ -10,6 +10,10 @@ param(
     [string]$Icon = "https://github.com/Whaybench/whaybench/releases/latest/download/whaybench.ico"
 )
 $ErrorActionPreference = "Stop"
+# Whaybench is built for x86_64 only: on ARM64 Windows nothing is installed.
+# The machine's own, not this process's (an x64 PowerShell emulated on ARM64 says AMD64 for itself).
+$arch = try { [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } catch { $env:PROCESSOR_ARCHITECTURE }
+if ($arch -notin @("X64", "AMD64")) { Write-Host "Whaybench runs on x86-64 Windows only, not $arch."; exit 1 }
 # What this window says is kept in a log, which Whaybench Setup points to when this stops.
 # shortcut: Windows PowerShell 5.1 may leave the output of wsl.exe and setup-wsl.sh out of the transcript; the window
 # still shows it while it waits. Upgrade if a log without the Linux part proves not enough.

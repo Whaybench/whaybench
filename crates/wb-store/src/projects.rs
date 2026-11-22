@@ -146,7 +146,8 @@ fn exclude_from_git(dir: &Path) -> Res<()> {
     let Some(top) = dir.ancestors().find(|a| a.join(".git").is_dir()) else { return Ok(()) };
     let git = top.join(".git");
     let file = git.join("info/exclude");
-    let now = fs::read_to_string(&file).unwrap_or_default();
+    // Missing is empty; one that cannot be read is not overwritten as if it were.
+    let now = match fs::read_to_string(&file) { Ok(t) => t, Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(), Err(e) => return Err(format!("{}: {e}", file.display())) };
     let rel = dir.strip_prefix(top).map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
     let mut lines = vec![if rel.is_empty() { format!("/{}/", wb_core::roots::PROJECT_DATA) } else { format!("/{rel}/{}/", wb_core::roots::PROJECT_DATA) }];
     // In a repository around the folder its snapshots are inside too, each with a copy of the data.

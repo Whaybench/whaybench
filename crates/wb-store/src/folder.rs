@@ -206,7 +206,10 @@ fn restore_keeping(dir: &Path, name: &str, limit: usize) -> Res<Restored> {
     let (aside, fresh) = (dir.with_file_name(format!(".{folder}.restoring-{stamp}")), dir.with_file_name(format!(".{folder}.restored-{stamp}")));
     // Made beside first, then put in place by a rename that replaces nothing: a path made again meanwhile is not
     // filled with it.
+    // btrfs puts a snapshot inside a folder already there: that name must be free, and what is made the subvolume.
+    if fs::symlink_metadata(&fresh).is_ok() { return Err(format!("{} is in the way: restore again", fresh.display())); }
     btrfs(&["subvolume".as_ref(), "snapshot".as_ref(), snap.as_os_str(), fresh.as_os_str()])?;
+    if !is_subvolume(&fresh) { return Err(format!("{} is not the restored snapshot; nothing was changed", fresh.display())); }
     if let Err(e) = rename_new(dir, &aside) { let _ = discard(&fresh, true); return Err(e); }
     if let Err(e) = rename_new(&fresh, dir) {
         let back = rename_new(&aside, dir);
