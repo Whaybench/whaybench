@@ -216,8 +216,13 @@ fn restore_keeping(dir: &Path, name: &str, limit: usize) -> Res<Restored> {
         let _ = discard(&fresh, true);
         return Err(match back { Ok(()) => e, Err(e2) => format!("{e}; and the folder could not be put back from {}: {e2}", aside.display()) });
     }
-    // The state before is in snapshot `before`, so the copy set aside can go.
+    // A vault keeps the key file it has now: its key (in the keyring) may have been changed since the snapshot, and the
+    // data's own key, the recovery key, never changes, so today's file opens the restored data.
+    let conf = Path::new(wb_core::roots::PROJECT_DATA).join("gocryptfs.conf");
     let mut warnings = Vec::new();
+    // (It is read-only, as gocryptfs leaves it: replaced, not written over.)
+    if aside.join(&conf).is_file() && let Err(e) = fs::remove_file(dir.join(&conf)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }).and_then(|_| fs::copy(aside.join(&conf), dir.join(&conf))) { warnings.push(format!("the vault's key file was not kept: {e}; open it with its recovery key")); }
+    // The state before is in snapshot `before`, so the copy set aside can go.
     if let Err(e) = discard(&aside, true) { warnings.push(format!("the old folder is left at {}: {e}", aside.display())); }
     if let Err(e) = prune(dir, limit) { warnings.push(e); }
     Ok(Restored { before, warning: (!warnings.is_empty()).then(|| warnings.join("; ")) })
@@ -267,7 +272,10 @@ mod tests {
         assert_eq!(snapshots(&dir), vec![first.clone(), second.clone()]);
         assert_eq!(fs::read_to_string(snapshot_dir(&dir).join(&first).join("src/main.rs")).unwrap(), "fn main() {}");
 
+        // A vault's key file as it is now stays (its key may have changed since the snapshot).
+        fs::write(dir.join(".whaybench/gocryptfs.conf"), "now").unwrap();
         let before = restore(&dir, &first).unwrap().before;
+        assert_eq!(fs::read_to_string(dir.join(".whaybench/gocryptfs.conf")).unwrap(), "now");
         assert_eq!(fs::read_to_string(dir.join("src/main.rs")).unwrap(), "fn main() {}");
         assert_eq!(fs::read_to_string(snapshot_dir(&dir).join(&before).join("src/main.rs")).unwrap(), "changed", "the state before is kept");
         fs::write(dir.join("new"), "x").unwrap();

@@ -8,12 +8,12 @@ use wb_store::{Res, Store, folder, markdown::headings, s};
 const HELP: &str = r#"Project store command. Only the AI writes projects, and only through this; the person asks.
 
   whaybench-project list | tree                    projects (tree: parent by id)
-  whaybench-project new ID NAME [--parent P] [--path DIR] [--always] [--desc D] [--folder DIR [--from SRC]]
+  whaybench-project new ID NAME [--parent P] [--path DIR] [--always] [--desc D] [--folder DIR [--from SRC] [--encrypt]]
                                                    --folder makes a Briefsafe project: its folder (a btrfs subvolume
                                                    where it can; --from copies a folder in), its data inside it
                                                    (<folder>/.whaybench), and the first snapshot. Its documents and map
                                                    are worked on with WHAYBENCH_DATA_DIR=<folder>/.whaybench
-  whaybench-project open ID | close ID             let the host's programs see a Briefsafe project's data, or stop
+  whaybench-project open ID [--recovery] | close ID             let the host's programs see a Briefsafe project's data, or stop
   whaybench-project snapshot ID | snapshots ID     take a snapshot of the project folder (30 kept) / list them
   whaybench-project restore ID SNAPSHOT            put the folder back as it was; the state now is kept as a snapshot.
                                                    Run it from outside the project folder, with nothing working in it
@@ -122,6 +122,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let always = flag(&mut rest, "--always");
             let folder = opt(&mut rest, "--folder").map(|f| absolute(&f));
             let from = opt(&mut rest, "--from").map(|f| absolute(&f));
+            let encrypt = flag(&mut rest, "--encrypt");
             let (pid, name) = (arg(&rest, 0)?, arg(&rest, 1)?);
             let Some(folder) = folder else {
                 if from.is_some() { return Err("--from needs --folder".into()); }
@@ -131,14 +132,32 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 return Ok(0);
             };
             // One creation at a time: two with the same id must not both pass the check, nor one undo the other's.
-            let (p, first) = wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new)))?;
-            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning)}));
+            // A vault only where the project runs in a container: its key must never reach a host-run agent (spec 3.22).
+            if encrypt && !wb_core::container::isolation() { return Err("--encrypt needs podman and a container image for this system".into()); }
+            let (p, first, recovery) = wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new), encrypt))?;
+            // The recovery key, once: it opens the vault when the keyring has lost its key. Kept by the person, nowhere here.
+            let note = recovery.as_ref().map(|_| "Keep this recovery key somewhere safe, apart from this computer: it is shown only now.");
+            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning),
+                "recovery_key": recovery, "note": note}));
         }
         "open" => {
+            let recovery = flag(&mut rest, "--recovery");
             let st2 = stub_of(st, arg(&rest, 0)?)?;
             // Opened in its container before: there again, or not at all.
             let isolated = wb_core::container::opened_isolated(&st2) || wb_core::container::isolation();
+            if st2.vault && !isolated { return Err("this project's vault opens only in its container: podman and an image are needed".into()); }
             wb_core::container::life(&st2, || {
+            // The vault first: with the keyring's key, or with the recovery key on standard input.
+            if st2.vault {
+                if recovery {
+                    let mut key = String::new();
+                    std::io::Read::read_to_string(&mut std::io::stdin(), &mut key).map_err(|e| e.to_string())?;
+                    wb_core::vault::mount_with_recovery(&st2, &key)?;
+                } else {
+                    wb_core::vault::mount(&st2).map_err(|e| if e == wb_core::vault::NO_KEY { format!("{e}: open it with its recovery key, `whaybench-project open {} --recovery` (the key on standard input)", st2.id) } else { e })?;
+                }
+            }
+            let opened = (|| -> Res<()> {
             // Isolated where a container can run: the container first, the open place only once it runs (spec 3.22).
             if isolated {
                 let own = wb_core::paths::own_exe().map_err(|e| e.to_string())?;
@@ -160,6 +179,10 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             }
             wb_core::container::tidy(&st2, isolated);
             Ok(())
+            })();
+            // Not opened: the vault closes again.
+            if opened.is_err() && st2.vault { let _ = wb_core::vault::unmount(&st2); }
+            opened
             })?;
             out(json!({"open": st2.id, "data": st2.open_at, "isolated": isolated}));
         }
@@ -169,7 +192,10 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             wb_core::container::life(&st2, || {
                 if wb_core::container::podman_found() { wb_core::container::stop(&st2)?; }
                 wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())?;
-                wb_core::container::note_isolated(&st2, false).map_err(|e| e.to_string())
+                wb_core::container::note_isolated(&st2, false).map_err(|e| e.to_string())?;
+                // Last: nothing of the project is to be read in the clear once it is closed.
+                if st2.vault { wb_core::vault::unmount(&st2)?; }
+                Ok(())
             })?;
             out(json!({"closed": st2.id}));
         }

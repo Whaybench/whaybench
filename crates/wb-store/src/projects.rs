@@ -30,7 +30,8 @@ impl Store {
     /// template, the host's stub, and the first snapshot. Everything that can refuse is asked before the folder is
     /// made; a failure after it removes what was made. Answers the project and the first snapshot.
     #[allow(clippy::too_many_arguments)]
-    pub fn create_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, mut paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>) -> Res<(Value, Option<crate::folder::Taken>)> {
+    /// With `vault`, its data is encrypted (spec 3.22): the answer also holds the recovery key, shown once.
+    pub fn create_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, mut paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
         use wb_core::roots::{self, Stub};
         if self.get_project(pid).is_some() || roots::stubs(&self.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
         if !parent.is_empty() && self.get_project(parent).is_none() { return Err(format!("no parent project: {parent}")); }
@@ -46,7 +47,8 @@ impl Store {
         if folder.contains(':') { return Err(format!("a project folder's path cannot hold ':' ({folder})")); }
         let dir = Path::new(folder);
         let subvolume = crate::folder::make(dir, from)?;
-        let stub = Stub::new(&self.data, pid, name, dir);
+        let stub = Stub { vault, ..Stub::new(&self.data, pid, name, dir) };
+        let mut recovery = None;
         let made = (|| -> Res<Value> {
             // A copied folder's own Whaybench data (another project's, or a link to one) is not this project's.
             let data = dir.join(roots::PROJECT_DATA);
@@ -54,6 +56,13 @@ impl Store {
                 Ok(m) if m.is_dir() => fs::remove_dir_all(&data).map_err(|e| e.to_string())?,
                 Ok(_) => fs::remove_file(&data).map_err(|e| e.to_string())?,
                 Err(_) => {}
+            }
+            if vault {
+                recovery = Some(wb_core::vault::create(&stub)?);
+                // Whose the vault is, readable without its key (the snapshots are told apart by it); the agents never
+                // see where it rests.
+                roots::write_marker(&wb_core::paths::Data::new(wb_core::vault::cipher_dir(&stub)), pid).map_err(|e| e.to_string())?;
+                wb_core::vault::mount(&stub)?;
             }
             let inner = Store::new(stub.stored());
             roots::write_marker(&inner.data, pid).map_err(|e| e.to_string())?;
@@ -69,19 +78,22 @@ impl Store {
             }
             exclude_from_git(dir)?;
             roots::write_stub(&self.data, &stub).map_err(|e| e.to_string())?;
+            // Made closed: the vault is opened by `open`.
+            if vault { wb_core::vault::unmount(&stub)?; }
             Ok(p)
         })();
         let p = match made {
             Ok(p) => p,
             Err(e) => {
                 roots::remove_stub(&self.data, pid);
+                if vault { let _ = wb_core::vault::unmount(&stub); let _ = wb_core::secret::delete(&wb_core::vault::key_name(&stub)); }
                 return Err(match crate::folder::discard(dir, subvolume) { Ok(()) => e, Err(e2) => format!("{e}; the folder made is left at {folder}: {e2}") });
             }
         };
         // The first state, before anything is changed in it.
         // The project is made either way: a first snapshot that failed is said, not taken for a failed project.
         let first = subvolume.then(|| crate::folder::snapshot(dir).unwrap_or_else(|e| crate::folder::Taken { name: String::new(), warning: Some(format!("no first snapshot: {e}")) }));
-        Ok((p, first))
+        Ok((p, first, recovery))
     }
 
     pub fn project_for_cwd(&self, cwd: &str) -> Option<Value> {
@@ -203,12 +215,12 @@ mod tests {
         fs::create_dir_all(&elsewhere).unwrap();
         std::os::unix::fs::symlink(&elsewhere, src.join(".whaybench")).unwrap();
         let folder = work.join("up").to_string_lossy().to_string();
-        assert!(host.create_in_folder("up", "Up", "", "nosuch", vec![], false, &folder, Some(&src)).is_err());
+        assert!(host.create_in_folder("up", "Up", "", "nosuch", vec![], false, &folder, Some(&src), false).is_err());
         assert!(!Path::new(&folder).exists(), "a refusal makes nothing");
         host.create_project("top", "Top", "", "", vec![], false).unwrap();
-        assert!(host.create_in_folder("up", "Up", "", "top", vec![], false, &folder, Some(&src)).is_err(), "no parent for a Briefsafe project");
+        assert!(host.create_in_folder("up", "Up", "", "top", vec![], false, &folder, Some(&src), false).is_err(), "no parent for a Briefsafe project");
         assert!(!Path::new(&folder).exists());
-        let (p, _) = host.create_in_folder("up", "Up", "", "", vec![], false, &folder, Some(&src)).unwrap();
+        let (p, _, _) = host.create_in_folder("up", "Up", "", "", vec![], false, &folder, Some(&src), false).unwrap();
         assert_eq!(s(&p, "kind"), "briefsafe");
         assert!(host.get_project("up").is_none(), "the project is not in the host's store");
         let stubs = wb_core::roots::stubs(&host.data);
@@ -220,8 +232,8 @@ mod tests {
         assert_eq!(fs::read_to_string(inner.data.root.join("addons/project-docs/wbs/WBS.md")).unwrap(), "# WBS\n");
         assert_eq!(fs::read_to_string(Path::new(&folder).join(".git/info/exclude")).unwrap(), "/.whaybench/\n");
         assert!(fs::symlink_metadata(Path::new(&folder).join(".whaybench")).unwrap().is_dir() && fs::read_dir(&elsewhere).unwrap().count() == 0, "its own data, nothing written through the link");
-        assert!(host.create_in_folder("up", "Up", "", "", vec![], false, &format!("{folder}2"), None).is_err(), "the id is taken");
-        assert!(host.create_in_folder("in", "In", "", "", vec![], false, &format!("{folder}/in"), None).is_err(), "not inside another");
+        assert!(host.create_in_folder("up", "Up", "", "", vec![], false, &format!("{folder}2"), None, false).is_err(), "the id is taken");
+        assert!(host.create_in_folder("in", "In", "", "", vec![], false, &format!("{folder}/in"), None, false).is_err(), "not inside another");
         // Snapshots of a test folder on btrfs are read-only: clean up the way the program prunes.
         let dir = Path::new(&folder);
         // Once each: a snapshot that cannot be deleted must not keep the test going round.

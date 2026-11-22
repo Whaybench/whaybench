@@ -22,14 +22,17 @@ pub const MARKER: &str = "briefsafe.json";
 
 /// A host stub: what the host knows of a Briefsafe project, open or not.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Stub { pub id: String, pub name: String, pub folder: PathBuf, pub open_at: PathBuf }
+pub struct Stub { pub id: String, pub name: String, pub folder: PathBuf, pub open_at: PathBuf,
+    /// Its data is encrypted (a gocryptfs vault in `<folder>/.whaybench`), open only while the project is.
+    pub vault: bool }
 
 impl Stub {
     pub fn new(host: &Data, id: &str, name: &str, folder: &Path) -> Self {
-        Stub { id: id.into(), name: name.into(), folder: folder.to_path_buf(), open_at: open_dir(host, id) }
+        Stub { id: id.into(), name: name.into(), folder: folder.to_path_buf(), open_at: open_dir(host, id), vault: false }
     }
     /// Where the project's data rests.
-    pub fn stored(&self) -> Data { Data::new(self.folder.join(PROJECT_DATA)) }
+    /// Where the project's data is as files: in its folder, or for a vault where the vault opens.
+    pub fn stored(&self) -> Data { if self.vault { Data::new(crate::vault::mountpoint(self)) } else { Data::new(self.folder.join(PROJECT_DATA)) } }
     /// The project's data root as programs see it while it is open.
     pub fn root(&self) -> Data { Data::new(self.open_at.clone()) }
     /// Open: the host's own link at its open place points to where its data rests. Nothing the project's agents can
@@ -41,7 +44,9 @@ impl Stub {
     /// Where its data rests is this project's (its marker names it).
     pub fn intact(&self) -> bool {
         // Beneath where the data rests, as any file its agents can change: no link, no pipe, a few bytes.
-        crate::beneath::read(&self.stored().root, Path::new(MARKER), 4096).ok().and_then(|t| serde_json::from_slice::<Value>(&t).ok())
+        // A vault's is beside its encrypted data (readable closed, and out of its agents' reach).
+        let at = if self.vault { crate::vault::cipher_dir(self) } else { self.stored().root };
+        crate::beneath::read(&at, Path::new(MARKER), 4096).ok().and_then(|t| serde_json::from_slice::<Value>(&t).ok())
             .is_some_and(|v| v["id"] == self.id.as_str())
     }
 }
@@ -74,7 +79,7 @@ pub fn close_plain(s: &Stub) -> std::io::Result<()> {
 fn stub_path(host: &Data, id: &str) -> PathBuf { host.root.join("projects").join(format!("{id}.json")) }
 
 pub fn write_stub(host: &Data, s: &Stub) -> std::io::Result<()> {
-    write_atomic(&stub_path(host, &s.id), serde_json::to_string_pretty(&json!({"id": s.id, "name": s.name, "kind": "briefsafe", "folder": s.folder})).unwrap_or_default())
+    write_atomic(&stub_path(host, &s.id), serde_json::to_string_pretty(&json!({"id": s.id, "name": s.name, "kind": "briefsafe", "folder": s.folder, "vault": s.vault})).unwrap_or_default())
 }
 
 /// Marks a data folder as a project's own (written where the project's data rests).
@@ -115,7 +120,7 @@ fn read_stubs(host: &Data) -> Vec<Stub> {
         .filter(|e| e.path().extension().is_some_and(|x| x == "json") && e.path().is_file())
         .filter_map(|e| serde_json::from_str::<Value>(&fs::read_to_string(e.path()).ok()?).ok())
         .filter(|v| v["kind"] == "briefsafe")
-        .filter_map(|v| Some(Stub::new(host, v["id"].as_str()?, v["name"].as_str().unwrap_or_default(), Path::new(v["folder"].as_str()?))))
+        .filter_map(|v| Some(Stub { vault: v["vault"] == true, ..Stub::new(host, v["id"].as_str()?, v["name"].as_str().unwrap_or_default(), Path::new(v["folder"].as_str()?)) }))
         .collect();
     all.sort_by(|a, b| a.id.cmp(&b.id));
     all

@@ -67,24 +67,30 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
     // No capabilities and no gaining of privileges: the agents work as the person, in their project.
     let mut a: Vec<String> = ["run", "-d", "--init", "--name", &name(s), "--userns=keep-id", "--security-opt", "label=disable",
         "--cap-drop=ALL", "--security-opt=no-new-privileges"].map(String::from).to_vec();
+    // A vault (a FUSE mount) opens inside a folder of the person's own, bound in its place over `cache/open`: the
+    // container's runtime cannot look at the FUSE mount itself, and `rslave` shows the vault opened there.
+    if s.vault && let Some(open) = s.open_at.parent() { a.push("-v".into()); a.push(format!("{}:{}:rslave", path(&crate::vault::run_dir(s)), path(open))); }
     let mut bind = |from: &Path, to: &Path, ro: bool| { a.push("-v".into()); a.push(format!("{}:{}{}", path(from), path(to), if ro { ":ro" } else { "" })); };
     bind(&s.folder, &s.folder, false);
     // The data where it rests is not for the agents to touch: they see it at its open place only. An empty place
     // (notmpcopyup: podman would otherwise copy what is under it into the tmpfs).
     let resting = s.folder.join(PROJECT_DATA);
-    bind(&s.stored().root, &s.open_at, false);
+    if !s.vault { bind(&s.stored().root, &s.open_at, false); }
     // The host's agent add-ons, read-only where the project's data names them: a project's agents are set up from them.
-    if let Some(host) = s.open_at.ancestors().nth(3) && host.join("addons/agents").is_dir() { bind(&host.join("addons/agents"), &s.open_at.join("addons/agents"), true); }
+    // Apart from the project's data (a vault's FUSE folder cannot take a mount): found there by WHAYBENCH_AGENT_ADDONS.
+    if let Some(host) = s.open_at.ancestors().nth(3) && host.join("addons/agents").is_dir() { bind(&host.join("addons/agents"), Path::new(crate::agents::ADDONS_IN_CONTAINER), true); }
     for p in ["/usr", "/etc/alternatives", "/etc/pki", "/etc/ssl", "/etc/ca-certificates"].map(Path::new).iter().filter(|p| p.exists()) { bind(p, p, true); }
     // A home of the project's own, writable (tool caches, settings), where the person's is: nothing of theirs in it.
-    bind(&s.stored().root.join("home"), home, false);
+    // A vault's is in the vault, named by HOME only (a FUSE folder cannot be mounted).
+    if !s.vault { bind(&s.stored().root.join("home"), home, false); }
     // In its ~/.local/bin only links to the agents' programs, made by the host at each start (`programs_bin`).
-    bind(&s.stored().root.join("cache/bin"), &home.join(".local/bin"), true);
+    bind(&bin_dir(s), &home.join(".local/bin"), true);
     // Programs and plugins are code: read-only where they are installed. A rustup toolchain too, where there is one.
     for p in [home.join(".claude/plugins/cache"), home.join(".rustup"), home.join(".cargo/bin")].iter().chain(programs).filter(|p| p.exists()) { bind(p, p, true); }
     a.extend(["--tmpfs".into(), format!("{}:ro,notmpcopyup,size=64k", path(&resting))]);
     for (k, v) in [
-        ("HOME", path(home)),
+        ("HOME", if s.vault { format!("{data}/home") } else { path(home) }),
+        (crate::agents::ENV_ADDONS, crate::agents::ADDONS_IN_CONTAINER.into()),
         ("PATH", format!("{}:{}:/usr/bin:/bin", path(&home.join(".local/bin")), path(&home.join(".cargo/bin")))),
         ("WHAYBENCH_DATA_DIR", data.clone()),
         ("CLAUDE_CONFIG_DIR", format!("{data}/{CLAUDE_DIR}")),
@@ -126,18 +132,36 @@ pub fn prepare_claude(s: &Stub, home: &Path) -> Result<(), String> {
 
 /// The agents' ~/.local/bin in the container: links to the real places of the person's agent programs (Whaybench's
 /// commands, Claude Code, Codex), nothing else of that folder. Made again at each start.
+/// The program links' folder: in the project's data, or for a vault in its run folder (a FUSE folder cannot be mounted).
+fn bin_dir(s: &Stub) -> PathBuf { if s.vault { crate::vault::run_dir(s).join("bin") } else { s.stored().root.join("cache/bin") } }
+
 pub fn programs_bin(s: &Stub, home: &Path) -> Result<(), String> {
+    if s.vault {
+        // The person's own folder, not the agents': made again whole.
+        let dir = bin_dir(s);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        for (name, real) in agent_programs(home) { std::os::unix::fs::symlink(&real, dir.join(name)).map_err(|e| e.to_string())?; }
+        // Its home is in the vault: `$HOME/.local/bin` (the plugins' hooks name it) leads to the same links.
+        crate::beneath::link(&s.stored().root, Path::new("home/.local/bin"), &home.join(".local/bin")).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
     let rest = s.stored().root;
     crate::beneath::mkdir(&rest, Path::new("cache/bin")).map_err(|e| e.to_string())?;
+    for (name, real) in agent_programs(home) { crate::beneath::link(&rest, &Path::new("cache/bin").join(name), &real).map_err(|e| e.to_string())?; }
+    Ok(())
+}
+
+/// The agents' programs and where they really are.
+fn agent_programs(home: &Path) -> Vec<(&'static str, PathBuf)> {
+    let mut out = Vec::new();
     for name in ["whaybench", "whaybench-view", "whaybench-project", "whaybench-files", "claude", "codex"] {
         // Where the host finds it: ~/.local/bin first, else on PATH (an npm prefix); a program that is a file in
         // ~/.local/bin itself is not mounted (that folder is this one in there).
         let found = std::fs::canonicalize(home.join(".local/bin").join(name)).ok().or_else(|| which(name).and_then(|p| std::fs::canonicalize(p).ok()));
-        if let Some(real) = found.filter(|r| r.parent() != Some(&home.join(".local/bin"))) {
-            crate::beneath::link(&rest, &Path::new("cache/bin").join(name), &real).map_err(|e| e.to_string())?;
-        }
+        if let Some(real) = found.filter(|r| r.parent() != Some(&home.join(".local/bin"))) { out.push((name, real)); }
     }
-    Ok(())
+    out
 }
 
 /// One at a time per project: two starts (two tabs, a tab and `open`) must not remove each other's container.
@@ -163,6 +187,7 @@ fn flock_with<T>(file: &Path, how: i32, work: impl FnOnce() -> Result<T, String>
 pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
     locked(s, || {
         if running(s) { return Ok(()); }
+        if s.vault && !crate::vault::mounted(s) { return Err(format!("project {}'s vault is not open", s.id)); }
         if !s.intact() { return Err(format!("{} does not hold project {}'s data", s.stored().root.display(), s.id)); }
         let image = host_image().ok_or("no container image for this distribution")?;
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("no home folder")?;
@@ -182,7 +207,8 @@ pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
         let _ = Command::new("podman").args(["rm", "-f", "--ignore", &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status();
         // What is mounted inside the project's home is made there first, by the person: podman would make the folders
         // on the way as another user, and the agents could not write their own settings there (~/.codex).
-        for p in read.iter().chain([home.join(".claude/plugins/cache"), home.join(".rustup"), home.join(".cargo/bin"), home.join(".local/bin"), s.folder.clone(), s.open_at.clone()].iter()) {
+        // (A vault's home is not mounted: nothing to make there.)
+        for p in read.iter().chain([home.join(".claude/plugins/cache"), home.join(".rustup"), home.join(".cargo/bin"), home.join(".local/bin"), s.folder.clone(), s.open_at.clone()].iter()).filter(|_| !s.vault) {
             if let Ok(rel) = p.strip_prefix(&home) && (p.exists() || p == &s.open_at) { crate::beneath::mkdir(&s.stored().root, &Path::new("home").join(rel)).map_err(|e| format!("{}: {e}", rel.display()))?; }
         }
         let out = Command::new("podman").args(run_args(s, &image, &home, &read)).output().map_err(|e| format!("podman: {e}"))?;
@@ -233,6 +259,8 @@ pub fn reconcile(host: &Data) {
             crate::log::decide("session", "project closed", "left open without its container", &[("project", s.id.clone())]);
         }
         if !open { let _ = note_isolated(&s, false); }
+        // A vault left open by a crash, its project not open (or just closed above): closed.
+        if s.vault && !s.open() { let _ = crate::vault::unmount(&s); }
         if runs && !open { let _ = stop(&s); crate::log::decide("session", "project container stopped", "left running without its open project", &[("project", s.id.clone())]); }
         Ok(())
       });

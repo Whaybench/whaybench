@@ -152,8 +152,9 @@ pub fn link(root: &Path, rel: &Path, target: &Path) -> io::Result<()> {
     if !parent.as_os_str().is_empty() { mkdir(root, parent)?; }
     let dir = dir_of(root, parent)?;
     let n = c(Path::new(name))?;
-    // Safety: unlinkat and symlinkat on a descriptor this function owns; a name without a slash.
-    unsafe { libc::unlinkat(dir.as_raw_fd(), n.as_ptr(), 0) };
+    // Safety: unlinkat and symlinkat on a descriptor this function owns; a name without a slash. An empty folder there
+    // goes too (one with something in it stays, and the link is not made).
+    if unsafe { libc::unlinkat(dir.as_raw_fd(), n.as_ptr(), 0) } != 0 { unsafe { libc::unlinkat(dir.as_raw_fd(), n.as_ptr(), libc::AT_REMOVEDIR) }; }
     if unsafe { libc::symlinkat(c(target)?.as_ptr(), dir.as_raw_fd(), n.as_ptr()) } != 0 { return Err(Error::last_os_error()); }
     Ok(())
 }

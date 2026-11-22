@@ -155,7 +155,14 @@ names another step.
   only (en, ko: briefsafe-outside-project).
   Last plain steps on project data made safe (heartbeat and answer-log folders, the view's taken list); a project's
   node file patterns take no `**` (a folder link could lead the walk anywhere); a listing of a project's folder stops
-  at 10,000 names; the projects list is read again when a stub is edited in place. `snapshot`, `snapshots` and `restore` take, list and go back to
+  at 10,000 names; the projects list is read again when a stub is edited in place.
+- Briefsafe vaults: `whaybench-project new ID NAME --folder DIR --encrypt` keeps the project's data encrypted with
+  gocryptfs in `<folder>/.whaybench` (only where the project runs in a container). Its random key is kept in the
+  keyring and goes to gocryptfs on standard input only; the recovery key is shown once when the project is made.
+  `open` opens the vault in the person's runtime folder and the container sees it there (no key, no FUSE in the
+  container); `close` closes it last. A lost key: `whaybench-project open ID --recovery` with the recovery key on
+  standard input opens it and keeps a new key. Snapshots hold the encrypted data; a restore keeps the vault's current
+  key file, so the keyring's key still opens it. The WSL setup installs gocryptfs. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with
