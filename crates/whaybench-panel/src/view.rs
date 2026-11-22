@@ -334,7 +334,8 @@ fn link_menu(s: &Shared) {
         add(&others, &session_label(&v.d, &id, 30), Link::Session(id));
     }
     menu.append_submenu(Some(wb_core::i18n::t("other-session")), &others);
-    if let Some((p, t)) = v.hist.current() {
+    // A project's page is not pinned: a pin is kept on the host and outlives the project's log out.
+    if let Some((p, t)) = v.hist.current().filter(|_| !v.of_project && !protected(&v)) {
         add(&menu, &wb_core::i18n::f("pinned-view-3", &[("a1", (t.chars().take(24).collect::<String>()).to_string())]), Link::Target(p.clone(), t.clone()));
     }
     let pop = gtk::PopoverMenu::from_model_full(&menu, gtk::PopoverMenuFlags::NESTED);
@@ -546,6 +547,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
         let (d, name) = (d.clone(), name.clone());
         win.connect_close_request(move |_| {
             if name == view::FIRST_VIEW { return glib::Propagation::Stop; }
+            // What it showed is gone from the screen.
+            let _ = std::fs::remove_file(view::protected_mark(&d, &name));
             view::drop_view(&d, &name);
             glib::Propagation::Proceed
         });

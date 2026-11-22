@@ -41,9 +41,8 @@ pub(super) fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: 
             (None, false) => { let e = window_elements(state, renderer); let c = premultiplied(state.theme.surface_top); save(renderer, &e, surface.w, surface.h, c, &shot.out) }
             (None, true) => Err(wb_core::i18n::t("no-such-panel").to_string()),
             // The view showing a project's page or a recovery key: no picture of it (spec 3.22).
-            (Some(p), _) if p.tabs.get(p.active).is_some_and(|t| t.key.starts_with(&format!("{}#", wb_core::view::VIEW_APP)))
-                && std::env::var_os(wb_core::paths::ENV_DATA_DIR).is_some_and(|r| { let d = wb_core::paths::Data::new(std::path::PathBuf::from(r));
-                    wb_core::paths::list_dir(&d.cache()).iter().any(|f| f.file_name().is_some_and(|n| n.to_string_lossy().starts_with("view-protected-"))) }) =>
+            (Some(p), _) if p.tabs.get(p.active).is_some_and(|t| std::env::var_os(wb_core::paths::ENV_DATA_DIR)
+                .is_some_and(|r| wb_core::view::tab_protected(&wb_core::paths::Data::new(std::path::PathBuf::from(r)), &t.key))) =>
                 Err(wb_core::i18n::t("briefsafe-view-not-read").to_string()),
             (Some(p), _) => {
                 let a = state.surface.app_of(p.rect);

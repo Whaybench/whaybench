@@ -69,8 +69,10 @@ fn attached(d: &Data, pattern: &str) -> Vec<std::path::PathBuf> {
     // Wildcards in the last part only, in a folder that really is the project's: one folder is listed, no more.
     let wild = |s: &str| s.contains(['*', '?', '[']);
     let Some(parent) = p.parent() else { return Vec::new() };
-    if wild(&parent.to_string_lossy()) || !fs::canonicalize(parent).is_ok_and(|r| r.starts_with(&folder)) { return Vec::new(); }
-    hits(pattern).filter(|h| fs::canonicalize(h).is_ok_and(|r| r.starts_with(&folder))).take(MOST).collect()
+    // Not where its data rests (that is read through its open place only).
+    let resting = fs::canonicalize(folder.join(crate::roots::PROJECT_DATA)).unwrap_or_else(|_| folder.join(crate::roots::PROJECT_DATA));
+    if wild(&parent.to_string_lossy()) || !fs::canonicalize(parent).is_ok_and(|r| r.starts_with(&folder) && !r.starts_with(&resting)) { return Vec::new(); }
+    hits(pattern).filter(|h| fs::canonicalize(h).is_ok_and(|r| r.starts_with(&folder) && !r.starts_with(&resting))).take(MOST).collect()
 }
 
 /// Every recorded read and change of the conversation, and the files attached to its nodes as `attached` touches.

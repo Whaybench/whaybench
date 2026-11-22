@@ -86,7 +86,9 @@ fn write_views(d: &Data, list: &[(String, Link)]) {
 /// address as it is.
 pub fn local_path(p: &str) -> PathBuf {
     let Some(rest) = p.strip_prefix("file://") else { return PathBuf::from(p) };
+    // `file://localhost/x` is `/x`, as the engine reads it.
     let rest = rest.split(['#', '?']).next().unwrap_or("");
+    let rest = rest.strip_prefix("localhost").filter(|r| r.starts_with('/')).unwrap_or(rest);
     let b = rest.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -167,7 +169,7 @@ impl History {
         // A host list keeps nothing of a project (a file of its folder or its data shown here while it was open).
         let host = crate::beneath::split(&self.dir).is_none();
         let data = self.dir.ancestors().find(|a| a.file_name().is_some_and(|n| n == "view")).and_then(Path::parent).map(|r| Data::new(r.to_path_buf()));
-        let of_project = |p: &str| crate::beneath::split(Path::new(p)).is_some() || data.as_ref().is_some_and(|d| crate::roots::project_root_of(d, Path::new(p)).is_some());
+        let of_project = |p: &str| { let f = local_path(p); crate::beneath::split(&f).is_some() || data.as_ref().is_some_and(|d| crate::roots::project_root_of(d, &f).is_some()) };
         let items: Vec<&(String, String)> = self.items.iter().filter(|(p, _)| !host || !of_project(p)).collect();
         let _ = crate::paths::create_dir_all(&self.dir);
         let _ = crate::paths::write_atomic(&self.dir.join("index.json"), json!(items).to_string());
@@ -204,6 +206,11 @@ pub fn for_view(name: &str) -> String { format!("v-{name}") }
 
 /// Present while the view shows a page no tool of the host gets (a project's, a recovery key): its picture is refused.
 pub fn protected_mark(d: &Data, name: &str) -> PathBuf { d.cache().join(format!("view-protected-{name}")) }
+
+/// Whether the panel tab of this key is a view showing such a page now (each view by its own mark).
+pub fn tab_protected(d: &Data, key: &str) -> bool {
+    views(d).iter().any(|(name, _)| key.starts_with(&format!("{}#", app_of(name))) && protected_mark(d, name).exists())
+}
 
 pub fn ask(d: &Data, to: &str, request: &Value) -> std::io::Result<()> {
     let dir = requests_dir(d, to);
@@ -467,6 +474,7 @@ mod tests {
         assert_eq!(local_path("file:///a%20b/c.html#x"), std::path::PathBuf::from("/a b/c.html"));
         assert_eq!(local_path("/plain/p%20q"), std::path::PathBuf::from("/plain/p%20q"));
         assert_eq!(local_path("file:///bad%2"), std::path::PathBuf::from("/bad%2"));
+        assert_eq!(local_path("file://localhost/a/b"), std::path::PathBuf::from("/a/b"));
     }
     use super::*;
     #[test]
