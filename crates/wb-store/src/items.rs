@@ -26,6 +26,8 @@ impl Store {
         // change. Released when the file closes, at the end of this call.
         let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.pdir(pid).join("map.lock")).map_err(|e| e.to_string())?;
         lock.lock().map_err(|e| e.to_string())?;
+        // Moved while this waited (a convert): not written where it no longer is.
+        if self.get_project(pid).is_none() { return Err(format!("no project: {pid}")); }
         let m = self.project_map(pid);
         let (old_items, old_areas) = (by_id(arr(&m, "items")), by_id(arr(&m, "areas")));
         let mut areas = old_areas.clone();

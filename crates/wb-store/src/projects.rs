@@ -44,6 +44,9 @@ impl Store {
         if !s(&p, "parent").is_empty() { return Err(format!("{pid} is under project {}: move it to the top first (whaybench-project move {pid} -)", s(&p, "parent"))); }
         if let Some(c) = self.list_projects().into_iter().find(|c| s(c, "parent") == pid) { return Err(format!("project {} is under {pid}: move it out first", s(&c, "id"))); }
         let paths: Vec<String> = arr(&p, "paths").iter().filter_map(Value::as_str).map(String::from).collect();
+        // Map edits wait while its records are copied and the old copy goes (they take this lock): none is lost.
+        let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.pdir(pid).join("map.lock")).map_err(|e| e.to_string())?;
+        lock.lock().map_err(|e| e.to_string())?;
         self.make_in_folder(pid, s(&p, "name"), s(&p, "desc"), "", paths, p["always"].as_bool().unwrap_or(false), folder, from, vault, true)
     }
 
@@ -92,6 +95,11 @@ impl Store {
                 crate::folder::copy_into(&self.pdir(pid), &inner.pdir(pid))?;
                 let mut p = inner.get_project(pid).ok_or_else(|| format!("{pid}: its record did not come along"))?;
                 p["paths"] = serde_json::json!(paths);
+                // A document's template original was a file of the host's add-ons; its copy is in the project's now.
+                let (old, new) = (self.data.root.join("addons/project-docs"), stub.open_at.join("addons/project-docs"));
+                for d in p["docs"].as_array_mut().into_iter().flatten() {
+                    if let Some(rest) = d["original"].as_str().and_then(|o| Path::new(o).strip_prefix(&old).ok()) { d["original"] = serde_json::json!(new.join(rest)); }
+                }
                 write_json(&inner.pdir(pid).join("project.json"), &p)?;
             } else {
                 inner.create_project(pid, name, desc, parent, paths, always)?;
