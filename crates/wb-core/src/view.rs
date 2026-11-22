@@ -140,7 +140,7 @@ impl History {
     pub fn current(&self) -> Option<&(String, String)> { self.items.get(self.pos) }
     fn save(&self) {
         if self.dir.as_os_str().is_empty() { return; }
-        let _ = std::fs::create_dir_all(&self.dir);
+        let _ = crate::paths::create_dir_all(&self.dir);
         let _ = crate::paths::write_atomic(&self.dir.join("index.json"), json!(self.items).to_string());
     }
     /// Shows this now. The thing on screen again is not a new entry.
@@ -198,42 +198,36 @@ pub fn take_requests(d: &Data, to: &str) -> Vec<Value> {
 /// A session goes on under a new number (/background, a restart): its views and what waits for them go with it, older
 /// entries first when it already has some.
 pub fn session_moved(d: &Data, old: &str, new: &str) {
+    // Every step through `paths`: in a project each one is beneath its root and follows no link the agents left.
+    use crate::paths::{create_dir_all, exists, list_dir, meta, read_kept, remove_file, rename, write_atomic};
     let d = &crate::roots::for_session(d, new);
     let root = d.root.join("view/history");
-    // In a project: only when no part of the way is a link (the agents can put links there).
-    if let Some((r, rel)) = crate::beneath::split(&root) && crate::beneath::mkdir(&r, &rel).is_err() { return; }
+    let is_dir = |p: &Path| meta(p).is_ok_and(|m| m.is_dir()) && crate::beneath::split(p).is_none_or(|_| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()));
     let mut dirs = vec![(root.join(format!("s-{old}")), root.join(format!("s-{new}")))];
-    if let Ok(rd) = std::fs::read_dir(&root) {
-        for e in rd.flatten() {
-            if e.file_type().is_ok_and(|t| t.is_dir()) { dirs.push((e.path().join(format!("s-{old}")), e.path().join(format!("s-{new}")))); }
-        }
-    }
+    for p in list_dir(&root).into_iter().filter(|p| is_dir(p)) { dirs.push((p.join(format!("s-{old}")), p.join(format!("s-{new}")))); }
     for (from, to) in dirs {
-        if !std::fs::symlink_metadata(&from).is_ok_and(|m| m.is_dir()) { continue; }
-        if !to.exists() {
-            if let Some(parent) = to.parent() { let _ = std::fs::create_dir_all(parent); }
-            if std::fs::rename(&from, &to).is_ok() {
+        if !is_dir(&from) { continue; }
+        if !exists(&to) {
+            if let Some(parent) = to.parent() { let _ = create_dir_all(parent); }
+            if rename(&from, &to).is_ok() {
                 // The list names its copies by full path, and they have just moved.
                 let list = to.join("index.json");
                 let (old_dir, new_dir) = (format!("{}/", from.display()), format!("{}/", to.display()));
-                let items: Vec<(String, String)> = crate::paths::read_kept(&list);
+                let items: Vec<(String, String)> = read_kept(&list);
                 let moved: Vec<(String, String)> = items.into_iter().map(|(p, t)| (p.strip_prefix(&old_dir).map_or_else(|| p.clone(), |rest| format!("{new_dir}{rest}")), t)).collect();
-                let _ = crate::paths::write_atomic(&list, json!(moved).to_string());
+                let _ = write_atomic(&list, json!(moved).to_string());
             }
             continue;
         }
-        let read = |dir: &Path| -> Vec<(String, String)> { crate::paths::read_kept(&dir.join("index.json")) };
+        let read = |dir: &Path| -> Vec<(String, String)> { read_kept(&dir.join("index.json")) };
         let mut joined = read(&from);
         for item in read(&to) { if !joined.contains(&item) { joined.push(item); } }
         if joined.len() > HISTORY_KEEP { joined.drain(..joined.len() - HISTORY_KEEP); }
-        if crate::paths::write_atomic(&to.join("index.json"), json!(joined).to_string()).is_ok() { let _ = std::fs::remove_file(from.join("index.json")); }
+        if write_atomic(&to.join("index.json"), json!(joined).to_string()).is_ok() { let _ = remove_file(&from.join("index.json")); }
     }
     let (from, to) = (requests_dir(d, &for_session(old)), requests_dir(d, &for_session(new)));
-    // In a project, both folders without links on the way (the names in them are moved as they are, links too).
-    let plain = |p: &Path| crate::beneath::split(p).is_none_or(|(r, rel)| crate::beneath::list(&r, &rel).is_ok());
-    if std::fs::symlink_metadata(&from).is_ok_and(|m| m.is_dir()) && plain(&from) {
-        let made = match crate::beneath::split(&to) { Some((r, rel)) => crate::beneath::mkdir(&r, &rel).is_ok(), None => std::fs::create_dir_all(&to).is_ok() };
-        if made { for e in std::fs::read_dir(&from).into_iter().flatten().flatten() { let _ = std::fs::rename(e.path(), to.join(e.file_name())); } }
+    if is_dir(&from) && create_dir_all(&to).is_ok() {
+        for p in list_dir(&from) { if let Some(n) = p.file_name() { let _ = rename(&p, &to.join(n)); } }
     }
 }
 
@@ -391,8 +385,9 @@ pub fn system_viewer(path: &Path) -> Option<Vec<String>> {
     if AS_IS.iter().any(|e| low.ends_with(e)) || !path.is_file() { return None; }
     if PACKED.iter().any(|e| low.ends_with(e)) { return Some(vec![word("env"), word("LESSOPEN=||/usr/bin/lesspipe.sh %s"), word("less"), text]); }
     if low.ends_with(".log") || text.starts_with("/var/log/") { return Some(vec![word("less"), word("+G"), text]); }
-    let head = std::fs::read(path).ok()?;
-    let head = &head[..head.len().min(8192)];
+    // The start only, without waiting on a pipe: the file can be a project's.
+    let head = crate::paths::read_untrusted(path, 8192).ok()?;
+    let head = &head[..];
     let binary = match std::str::from_utf8(head) {
         Ok(t) => t.contains('\0'),
         Err(e) => e.valid_up_to() + 4 < head.len(), // a cut through the last character is still text

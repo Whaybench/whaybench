@@ -340,7 +340,7 @@ impl Relay {
                 && let Some(s) = &self.session {
                     // In the session's own root: a project's conversation is the project's.
                     let at = wb_core::roots::for_session(&self.data, s);
-                    let _ = fs::create_dir_all(sessions::alive_dir(&at));
+                    let _ = paths::create_dir_all(&sessions::alive_dir(&at));
                     let _ = paths::write_atomic(&sessions::alive_dir(&at).join(s), self.child.to_string());
                 }
         } else {
@@ -417,7 +417,7 @@ impl Relay {
         let commands_only = {
             let mut waiting = false;
             if let Some(s) = &self.session {
-                let ready = fs::read_to_string(sessions::state_dir(&wb_core::roots::for_session(&self.data, s)).join(format!("{s}.json"))).ok()
+                let ready = paths::read_text(&sessions::state_dir(&wb_core::roots::for_session(&self.data, s)).join(format!("{s}.json"))).ok()
                     .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
                     .is_some_and(|v| v["state"] == "done");
                 waiting = !ready;

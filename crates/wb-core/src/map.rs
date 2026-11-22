@@ -386,10 +386,23 @@ pub fn person(data: &Path, upsert: Value) -> Result<Value> {
 /// The session and the person write the same map file: one at a time, or a change is lost. Held until dropped.
 pub(crate) fn lock(data: &Path, sid: &str) -> Result<fs::File> {
     let locks = data.join("cache").join("map-locks");
+    let file = locks.join(format!("{}.lock", safe_id(sid)?));
+    let fd = |f: &fs::File| std::os::fd::AsRawFd::as_raw_fd(f);
+    if let Some((root, rel)) = crate::beneath::split(&file) {
+        // A project's agents hold this lock too: waited for five seconds at most, never for good.
+        let lock = crate::beneath::open_lock(&root, &rel)?;
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // SAFETY: flock on a file this function owns; released when the file closes.
+        while unsafe { libc::flock(fd(&lock), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            if std::time::Instant::now() > until { return Err("the project's map is held by another program".into()); }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        return Ok(lock);
+    }
     fs::create_dir_all(&locks)?;
-    let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(locks.join(format!("{}.lock", safe_id(sid)?)))?;
+    let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(file)?;
     // SAFETY: flock on a file this function owns; released when the file closes.
-    unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) };
+    unsafe { libc::flock(fd(&lock), libc::LOCK_EX) };
     Ok(lock)
 }
 

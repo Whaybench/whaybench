@@ -122,7 +122,7 @@ pub fn resumed_elsewhere(d: &Data, me: &str) -> Option<(String, Option<String>)>
     // The last 90 seconds are at the end of the file; 2 MB leaves room for large tool results in them.
     let text = crate::paths::read_tail(&transcript_of(d, me)?, 2 * 1024 * 1024).ok()?;
     let short = opened_short(&text, crate::clock::now_ms())?;
-    let target = fs::read_dir(sessions_dir(&at(d, me))).ok()?.flatten().filter_map(|f| f.file_name().to_string_lossy().strip_suffix(".json").map(String::from))
+    let target = crate::paths::list_dir(&sessions_dir(&at(d, me))).into_iter().filter_map(|f| f.file_name()?.to_string_lossy().strip_suffix(".json").map(String::from))
         .find(|n| n.starts_with(&short))?;
     if target == me { return None; }
     let carried = continued_in_text(&text).filter(|c| c != &target && !has_conversation(d, c));
@@ -182,7 +182,7 @@ pub fn saved(d: &Data, id: &str) -> bool {
 /// is read.
 fn holds_conversation(path: &Path) -> bool {
     use std::io::{BufRead, Read};
-    let Ok(f) = fs::File::open(path) else { return false };
+    let Ok(f) = crate::paths::open_read(path) else { return false };
     std::io::BufReader::new(f.take(256 * 1024)).split(b'\n').map_while(Result::ok)
         .any(|line| String::from_utf8_lossy(&line).contains("\"type\":\"user\""))
 }
@@ -225,9 +225,10 @@ pub fn adopt(d: &Data, old: &str, new: &str) {
     let _ = write_atomic(&sessions_dir(d).join(format!("{new}.json")), to.to_string());
     let (map_old, map_new) = (d.root.join(format!("{old}.json")), d.root.join(format!("{new}.json")));
     // The new number's start hook may have made it an empty map first; one with nodes of its own is kept.
-    let empty = |p: &Path| fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    let empty = |p: &Path| crate::paths::read_text(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .is_none_or(|m| m["nodes"].as_array().is_none_or(Vec::is_empty));
-    if map_old.exists() && empty(&map_new) { let _ = fs::copy(map_old, map_new); }
+    // Copied as text, the safe way in a project: never written through a link the new number's file may be.
+    if empty(&map_new) && let Ok(t) = crate::paths::read_text(&map_old) { let _ = write_atomic(&map_new, t); }
     schedules::carry(&d.root, old, new);
     from["movedTo"] = Value::String(new.to_string());
     let _ = write_atomic(&sessions_dir(d).join(format!("{old}.json")), from.to_string());
@@ -273,8 +274,8 @@ pub fn claude_setting_set(key: &str, cwd: &Path) -> bool {
 }
 
 fn setting_in(file: &Path, key: &str) -> bool {
-    std::fs::read_to_string(file).ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    crate::paths::read_untrusted(file, 1 << 20).ok()
+        .and_then(|t| serde_json::from_slice::<serde_json::Value>(&t).ok())
         .is_some_and(|v| match &v[key] { Value::Null => false, Value::String(s) => !s.is_empty(), _ => true })
 }
 
@@ -335,9 +336,7 @@ pub fn has_conversation(d: &Data, id: &str) -> bool {
     // The record can miss a prompt; Claude Code's own record cannot. Ending a session is not to be undone on a guess.
     let Some(claude) = at(d, id).claude_dir() else { return true };
     let name = format!("{id}.jsonl");
-    fs::read_dir(claude.join("projects")).into_iter().flatten().flatten().any(|e| {
-        holds_conversation(&e.path().join(&name))
-    })
+    crate::paths::list_dir(&claude.join("projects")).into_iter().any(|dir| holds_conversation(&dir.join(&name)))
 }
 
 pub fn agent(id: &str) -> Option<Value> { agents().into_iter().find(|a| a.get("sessionId").and_then(Value::as_str) == Some(id)) }
@@ -388,8 +387,8 @@ pub fn alive(d: &Data, id: &str) -> bool {
 }
 
 fn heartbeat(p: &Path) -> bool {
-    if fs::read_to_string(p).is_ok_and(|t| t.trim() == "0") { return false; }
-    fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|a| a < Duration::from_secs(30))
+    if crate::paths::read_text(p).is_ok_and(|t| t.trim() == "0") { return false; }
+    crate::paths::meta(p).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|a| a < Duration::from_secs(30))
 }
 
 pub fn mark_off(d: &Data, id: &str) {
@@ -453,7 +452,7 @@ pub fn latest(d: &Data) -> Option<String> { Some(current_id(d, &latest_id(d)?)) 
 fn latest_id(d: &Data) -> Option<String> {
     crate::roots::all_of(d).iter().filter_map(|r| {
         let p = latest_map(r);
-        let when = fs::metadata(&p).and_then(|m| m.modified()).ok()?;
+        let when = crate::paths::meta(&p).and_then(|m| m.modified()).ok()?;
         Some((when, read_json(&p)?.get("sessionId")?.as_str()?.to_string()))
     }).max_by_key(|x| x.0).map(|x| x.1)
 }

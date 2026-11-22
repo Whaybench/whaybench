@@ -66,9 +66,9 @@ pub fn latest(data: &Path, sid: Option<&str>) -> Option<Value> {
     // A project session's context is noted in its project's root.
     let own = sid.map(|s| crate::roots::for_session(&crate::paths::Data::new(data.to_path_buf()), s).root);
     let data = own.as_deref().unwrap_or(data);
-    let mut all: Vec<(String, Value)> = fs::read_dir(dir(data)).ok()?.flatten().filter_map(|f| {
-        let v: Value = serde_json::from_str(&fs::read_to_string(f.path()).ok()?).ok()?;
-        Some((f.path().file_stem()?.to_string_lossy().to_string(), v))
+    let mut all: Vec<(String, Value)> = crate::paths::list_dir(&dir(data)).into_iter().filter_map(|f| {
+        let v: Value = serde_json::from_str(&crate::paths::read_text(&f).ok()?).ok()?;
+        Some((f.file_stem()?.to_string_lossy().to_string(), v))
     }).collect();
     all.sort_by_key(|(_, v)| std::cmp::Reverse(v["at"].as_i64().unwrap_or(0)));
     let agent_of_session = |s: &str| crate::map::read_json(&data.join("sessions").join(format!("{s}.json")), Value::Null).ok().map(|r| r["agent"].clone());

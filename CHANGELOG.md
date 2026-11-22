@@ -100,7 +100,13 @@ names another step.
   goes empty when it closes, is not noted in the host's panel list, and exports into the project. A map that could not
   be read this once stays drawn (only an unknown session's map goes empty). A project's memory database is opened by
   SQLite without following links, and a host conversation's number or a link in a project's records is never taken as
-  the project's. `snapshot`, `snapshots` and `restore` take, list and go back to
+  the project's.
+  Every host program's step on a project's data now goes the safe way: removing a permission question, carrying a
+  map and schedules to a new session number, status, usage, heartbeats, transcripts, the terminal's state and alive
+  files, map locks (waited for five seconds at most), the session list's search, the view panel's files and history,
+  and moving a conversation's pages. Files a project's agents can make elsewhere (its folder's `.claude/settings.json`,
+  files a panel shows) are read only as regular files, without waiting on a pipe and up to a limit. A project's
+  memory database opens again on the host (the previous change refused the host's own link to it). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

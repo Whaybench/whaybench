@@ -70,6 +70,37 @@ pub fn read(root: &Path, rel: &Path, max: u64) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// A regular file beneath the root, opened to read (not through a link, without blocking on a pipe).
+pub fn open_file(root: &Path, rel: &Path) -> io::Result<std::fs::File> {
+    let file = std::fs::File::from(at(&root_fd(root)?, rel, libc::O_RDONLY | libc::O_NONBLOCK, 0)?);
+    if !file.metadata()?.is_file() { return Err(Error::new(ErrorKind::InvalidData, "not a regular file")); }
+    Ok(file)
+}
+
+/// A lock file beneath the root, made if missing (a regular file, no link; a pipe is refused, not waited on).
+pub fn open_lock(root: &Path, rel: &Path) -> io::Result<std::fs::File> {
+    let (parent, name) = (rel.parent().unwrap_or(Path::new("")), rel.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?);
+    let dir = made_dirs(root_fd(root)?, parent)?;
+    let file = std::fs::File::from(at(&dir, Path::new(name), libc::O_WRONLY | libc::O_CREAT | libc::O_NONBLOCK, 0o600)?);
+    if !file.metadata()?.is_file() { return Err(Error::new(ErrorKind::InvalidData, "not a regular file")); }
+    Ok(file)
+}
+
+/// What is at `rel` beneath the root, itself (a link is not followed, and none on the way).
+pub fn meta(root: &Path, rel: &Path) -> io::Result<std::fs::Metadata> {
+    std::fs::File::from(at(&root_fd(root)?, rel, libc::O_PATH, 0)?).metadata()
+}
+
+/// Renames one entry to another place beneath the root (the entry itself moves, a link as a link).
+pub fn rename(root: &Path, from: &Path, to: &Path) -> io::Result<()> {
+    let name = |p: &Path| p.file_name().map(Path::new).ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name")).and_then(c);
+    let (fd, td) = (dir_of(root, from.parent().unwrap_or(Path::new("")))?, dir_of(root, to.parent().unwrap_or(Path::new("")))?);
+    let (f, t) = (name(from)?, name(to)?);
+    // Safety: renameat between two folder descriptors this function owns, with names that have no slash.
+    if unsafe { libc::renameat(fd.as_raw_fd(), f.as_ptr(), td.as_raw_fd(), t.as_ptr()) } != 0 { return Err(Error::last_os_error()); }
+    Ok(())
+}
+
 /// The names in a folder beneath the root (the folder itself not a link).
 pub fn list(root: &Path, rel: &Path) -> io::Result<Vec<String>> {
     let fd = dir_of(root, rel)?;

@@ -70,7 +70,8 @@ fn text_page(d: &Data, path: &str) -> Option<String> {
     let low = path.to_lowercase();
     let shown_as_is = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".html", ".htm", ".mp4", ".webm", ".pdf"];
     if view::is_web(path) || shown_as_is.iter().any(|e| low.ends_with(e)) { return None; }
-    let bytes = match std::fs::read(path) { Ok(b) => b, Err(e) => return Some(wrapped(d, path, &wb_core::i18n::f("read-failed-3", &[("a1", (escape(&e.to_string())).to_string())]))) };
+    // Regular files only, without waiting on a pipe, the first 2 MB (a project's files are its agents' to make).
+    let bytes = match wb_core::paths::read_untrusted(Path::new(path), 2_000_000) { Ok(b) => b, Err(e) => return Some(wrapped(d, path, &wb_core::i18n::f("read-failed-3", &[("a1", (escape(&e.to_string())).to_string())]))) };
     let text = String::from_utf8_lossy(&bytes[..bytes.len().min(2_000_000)]).to_string();
     if low.ends_with(".md") || low.ends_with(".markdown") {
         return Some(wrapped(d, path, &web::markdown(&text, web::RawHtml::Kept)));

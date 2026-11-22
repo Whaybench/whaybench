@@ -168,7 +168,8 @@ pub fn known_session(d: &Data, session: &str) -> Option<Data> {
     if is_project_root(d) { has_session(d, session).then(|| d.clone()) } else { Roots::new(d.clone()).known(session) }
 }
 
-fn has_session(d: &Data, session: &str) -> bool { fs::symlink_metadata(d.root.join("sessions").join(format!("{session}.json"))).is_ok_and(|m| m.is_file()) }
+// In a project's root by `beneath`: no link at the record, nor on the way to it (a `sessions` that is a link).
+fn has_session(d: &Data, session: &str) -> bool { crate::paths::meta(&d.root.join("sessions").join(format!("{session}.json"))).is_ok_and(|m| m.is_file()) && (is_project_root(d) || fs::symlink_metadata(d.root.join("sessions").join(format!("{session}.json"))).is_ok_and(|m| m.is_file())) }
 
 /// The project data root a folder is in, if it is inside a Briefsafe project folder.
 pub fn project_root_of(host: &Data, dir: &Path) -> Option<Stub> {
@@ -186,6 +187,42 @@ mod tests {
         let d = std::env::temp_dir().join(format!("wb-roots-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn the_host_opens_an_open_projects_memory_but_not_through_its_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Data::new(dir.path().join("host"));
+        let stub = Stub::new(&host, "up", "Up", &dir.path().join("up"));
+        write_stub(&host, &stub).unwrap();
+        write_marker(&stub.stored(), "up").unwrap();
+        open_plain(&stub).unwrap();
+        assert!(crate::db::open(&stub.root().root).is_ok(), "through the host's own link");
+        assert!(stub.stored().root.join("memory/memory.db").is_file(), "made where it rests");
+        let other = dir.path().join("elsewhere");
+        fs::create_dir_all(&other).unwrap();
+        fs::remove_dir_all(stub.stored().root.join("memory")).unwrap();
+        std::os::unix::fs::symlink(&other, stub.stored().root.join("memory")).unwrap();
+        assert!(crate::db::open(&stub.root().root).is_err());
+        assert_eq!(fs::read_dir(&other).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn clearing_a_projects_question_never_removes_a_host_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Data::new(dir.path().join("host"));
+        let stub = Stub::new(&host, "up", "Up", &dir.path().join("up"));
+        write_stub(&host, &stub).unwrap();
+        write_marker(&stub.stored(), "up").unwrap();
+        open_plain(&stub).unwrap();
+        fs::write(host.root.join("settings.json"), "{}").unwrap();
+        // The project's question folder made a link to the host's data folder.
+        let asks = crate::ask::request_file(&stub.root().root, "settings").parent().unwrap().to_path_buf();
+        fs::create_dir_all(asks.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&host.root, &asks).unwrap();
+        crate::ask::clear(&stub.root().root, "settings");
+        assert!(host.root.join("settings.json").exists(), "the host's file stays");
+        assert!(crate::ask::answer(&stub.root().root, "settings", "allow", &serde_json::Value::Null).is_err());
     }
 
     #[test]

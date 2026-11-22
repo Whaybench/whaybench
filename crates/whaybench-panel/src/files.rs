@@ -197,7 +197,8 @@ fn draw(d: &Data, list: &gtk::ListBox, panel: &RefCell<Panel>, unit: i32, force:
             label.set_xalign(0.0);
             label.set_margin_start(unit);
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            let readable = std::fs::File::open(path).is_ok();
+            // Without waiting: a listed path can be a pipe.
+            let readable = wb_core::paths::read_untrusted(std::path::Path::new(path), 1).is_ok();
             if !readable { label.add_css_class("dim"); }
             let mut tip = wb_core::i18n::f("read-edited", &[("path", (path).to_string()), ("a1", (e.read).to_string()), ("a2", (e.edit).to_string()), ("a3", (if e.attached > 0 { wb_core::i18n::t("linked-to-node") } else { "" }).to_string())]);
             match state.get(path) { Some(&"vim") => tip += wb_core::i18n::t("being-edited-in-vim"), Some(&"changed") => tip += wb_core::i18n::t("changed-after-ai-work-saved-by"), _ => {} }

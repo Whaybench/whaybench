@@ -12,7 +12,7 @@ use crate::{clock::now_ms, i18n, map::{Result, read_json, safe_id, write_json}};
 pub const WAIT_MS: i64 = 590_000;
 
 fn dir(data: &Path) -> PathBuf { data.join("cache").join("ask") }
-fn request_file(data: &Path, id: &str) -> PathBuf { dir(data).join(format!("{id}.json")) }
+pub(crate) fn request_file(data: &Path, id: &str) -> PathBuf { dir(data).join(format!("{id}.json")) }
 fn answer_file(data: &Path, id: &str) -> PathBuf { dir(data).join(format!("{id}.answer.json")) }
 fn panel_file(data: &Path) -> PathBuf { dir(data).join("panel") }
 
@@ -64,7 +64,7 @@ pub fn pending_all(d: &crate::paths::Data) -> Vec<Value> {
 /// The data root an ask was written in, where its answer goes. None: it is gone (answered, or its project closed),
 /// and the answer goes nowhere.
 pub fn root_of(d: &crate::paths::Data, id: &str) -> Option<std::path::PathBuf> {
-    crate::roots::all_of(d).into_iter().map(|r| r.root).find(|r| request_file(r, id).exists())
+    crate::roots::all_of(d).into_iter().map(|r| r.root).find(|r| crate::paths::is_file(&request_file(r, id)))
 }
 
 /// `answer` in the root the ask is in; an ask gone meanwhile (its project closed) takes no answer.
@@ -79,15 +79,16 @@ pub fn clear_in(d: &crate::paths::Data, id: &str) { if let Some(r) = root_of(d, 
 /// An ask that ended meanwhile (the hook timed out, the agent stopped) takes no answer.
 pub fn answer(data: &Path, id: &str, decision: &str, answers: &Value) -> Result<()> {
     let id = valid_id(id)?;
-    if !request_file(data, id).exists() { return Err(i18n::t("ask-gone").into()); }
+    if !crate::paths::is_file(&request_file(data, id)) { return Err(i18n::t("ask-gone").into()); }
     write_json(&answer_file(data, id), &json!({"decision": decision, "answers": answers}))
 }
 
 /// Takes one ask away, answered or not.
 pub fn clear(data: &Path, id: &str) {
     let Ok(id) = valid_id(id) else { return };
-    let _ = fs::remove_file(request_file(data, id));
-    let _ = fs::remove_file(answer_file(data, id));
+    // In a project, the entries themselves: never what a link left there points to.
+    let _ = crate::paths::remove_file(&request_file(data, id));
+    let _ = crate::paths::remove_file(&answer_file(data, id));
 }
 
 /// Which of a session's asks a moment takes away. Claude Code shows its own dialog beside the card and does not tell

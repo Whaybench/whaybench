@@ -18,7 +18,7 @@ pub fn say(d: &Data, text: &str, seconds: u64) {
 /// The message to show now, if any: the newest of the host's and the open projects' (each says in its own root).
 pub fn current(d: &Data) -> Option<String> {
     crate::roots::all_of(d).iter().filter_map(|r| {
-        let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(status_file(r)).ok()?).ok()?;
+        let v: serde_json::Value = serde_json::from_str(&crate::paths::read_text(&status_file(r)).ok()?).ok()?;
         let until = v.get("until")?.as_u64()? as u128;
         (until > now_ms()).then(|| Some((until, v.get("text")?.as_str()?.to_string()))).flatten()
     }).max_by_key(|m| m.0).map(|m| m.1)

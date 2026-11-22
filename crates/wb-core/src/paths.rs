@@ -143,10 +143,63 @@ pub fn list_dir(dir: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// A file opened to read; in a project's open place the safe way (a regular file, no link, no blocking).
+pub fn open_read(path: &Path) -> std::io::Result<std::fs::File> {
+    match crate::beneath::split(path) { Some((root, rel)) => crate::beneath::open_file(&root, &rel), None => std::fs::File::open(path) }
+}
+
+/// Whether a regular file is there (in a project's open place: itself, not through a link).
+pub fn is_file(path: &Path) -> bool {
+    match crate::beneath::split(path) { Some((root, rel)) => crate::beneath::meta(&root, &rel).is_ok_and(|m| m.is_file()), None => path.is_file() }
+}
+
+/// Whether anything is there (in a project's open place: not through a link on the way).
+pub fn exists(path: &Path) -> bool {
+    match crate::beneath::split(path) { Some((root, rel)) => crate::beneath::meta(&root, &rel).is_ok(), None => path.exists() }
+}
+
+/// What is at a path (in a project's open place: itself, not through a link).
+pub fn meta(path: &Path) -> std::io::Result<std::fs::Metadata> {
+    match crate::beneath::split(path) { Some((root, rel)) => crate::beneath::meta(&root, &rel), None => std::fs::metadata(path) }
+}
+
+/// A file a project's agents may have written, in its data or its folder (`.claude/settings.json`, a file a view
+/// shows): read only if it is a regular file, without blocking on a pipe, up to `max` bytes (cut there).
+pub fn read_untrusted(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
+    use std::{io::Read, os::unix::fs::OpenOptionsExt};
+    let f = match crate::beneath::split(path) {
+        Some((root, rel)) => crate::beneath::open_file(&root, &rel)?,
+        None => std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path)?,
+    };
+    if !f.metadata()?.is_file() { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not a regular file")); }
+    let mut bytes = Vec::new();
+    f.take(max).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// Renames (in a project's open place: both beneath the same root, the entry itself moved, nothing followed).
+pub fn rename(from: &Path, to: &Path) -> std::io::Result<()> {
+    match (crate::beneath::split(from), crate::beneath::split(to)) {
+        (Some((r, f)), Some((r2, t))) if r == r2 => crate::beneath::rename(&r, &f, &t),
+        (None, None) => std::fs::rename(from, to),
+        _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not within one root")),
+    }
+}
+
+/// Removes a file (in a project's open place: the entry itself, never what a link points to).
+pub fn remove_file(path: &Path) -> std::io::Result<()> {
+    match crate::beneath::split(path) { Some((root, rel)) => crate::beneath::remove(&root, &rel), None => std::fs::remove_file(path) }
+}
+
+/// Makes a folder and those above it (in a project's open place: none through a link).
+pub fn create_dir_all(path: &Path) -> std::io::Result<()> {
+    match crate::beneath::split(path) { Some((root, rel)) => crate::beneath::mkdir(&root, &rel), None => std::fs::create_dir_all(path) }
+}
+
 /// The last `max` bytes of a file, from its first whole line: a long log's end without reading all of it.
 pub fn read_tail(path: &Path, max: u64) -> std::io::Result<String> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::File::open(path)?;
+    let mut f = open_read(path)?;
     let from = f.metadata()?.len().saturating_sub(max);
     f.seek(SeekFrom::Start(from))?;
     let mut bytes = Vec::new();

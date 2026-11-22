@@ -18,12 +18,12 @@ pub fn dir(root: &Path) -> PathBuf { root.join("cache").join("schedules") }
 fn path(root: &Path, sid: &str) -> PathBuf { dir(root).join(format!("{sid}.json")) }
 
 pub fn read(root: &Path, sid: &str) -> Vec<Value> {
-    fs::read_to_string(path(root, sid)).ok().and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok()).unwrap_or_default()
+    crate::paths::read_text(&path(root, sid)).ok().and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok()).unwrap_or_default()
 }
 
 fn write(root: &Path, sid: &str, jobs: &[Value]) -> std::io::Result<()> {
-    if jobs.is_empty() { return fs::remove_file(path(root, sid)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }); }
-    fs::create_dir_all(dir(root))?;
+    if jobs.is_empty() { return crate::paths::remove_file(&path(root, sid)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }); }
+    crate::paths::create_dir_all(&dir(root))?;
     crate::paths::write_atomic(&path(root, sid), Value::from(jobs.to_vec()).to_string())
 }
 
@@ -108,8 +108,8 @@ pub fn live(root: &Path, sid: &str) -> Vec<Value> {
 
 /// Every session that has a schedule file.
 pub fn sessions(root: &Path) -> Vec<String> {
-    fs::read_dir(dir(root)).into_iter().flatten().flatten()
-        .filter_map(|e| e.file_name().to_string_lossy().strip_suffix(".json").map(String::from)).collect()
+    crate::paths::list_dir(&dir(root)).into_iter()
+        .filter_map(|p| p.file_name()?.to_string_lossy().strip_suffix(".json").map(String::from)).collect()
 }
 
 /// A conversation moved to a new number takes its schedule along, as Claude Code carries the jobs over; what the new
@@ -119,7 +119,7 @@ pub fn carry(root: &Path, old: &str, new: &str) {
     let Ok(_lock) = crate::map::lock(root, &format!("schedules-{new}")) else { return };
     let mut jobs = read(root, new);
     for j in read(root, old) { if !jobs.iter().any(|k| k["id"] == j["id"]) { jobs.push(j); } }
-    if write(root, new, &jobs).is_ok() { let _ = fs::remove_file(path(root, old)); }
+    if write(root, new, &jobs).is_ok() { let _ = crate::paths::remove_file(&path(root, old)); }
 }
 
 /// Files with nothing left standing go (a session that ended long ago, never resumed).

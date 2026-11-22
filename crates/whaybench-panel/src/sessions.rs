@@ -33,7 +33,7 @@ fn pairs(d: &Data, info: &Value) -> Vec<(&'static str, String)> {
     if let Some(m) = sessions::map_of(d, id) {
         for n in m.get("nodes").and_then(Value::as_array).into_iter().flatten() { out.push((wb_core::i18n::t("map"), text(n, "label").to_string())); }
     }
-    let read = |p: std::path::PathBuf| std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let read = |p: std::path::PathBuf| wb_core::paths::read_text(&p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
     if let Some(a) = read(wb_core::roots::for_session(d, id).root.join("answers").join(format!("{id}.json"))) { out.push((wb_core::i18n::t("answer"), text(&a, "text").to_string())); }
     out
 }

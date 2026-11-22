@@ -86,9 +86,15 @@ fn open_once(data: &Path) -> Result<Connection> {
             if std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) { return Err(format!("{} is a link", p.display()).into()); }
         }
     }
-    std::fs::create_dir_all(&dir)?;
-    // And SQLite itself refuses a link there, should one be put in place after the look above.
-    let flags = if crate::beneath::split(&dir).is_some() { rusqlite::OpenFlags::default() | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW } else { rusqlite::OpenFlags::default() };
+    // In a project: opened where it rests (the host's own link followed by hand), and SQLite refuses a link on the
+    // way there, should one be put in place after the look above.
+    let (dir, flags) = match crate::beneath::split(&dir) {
+        Some((root, rel)) => {
+            crate::beneath::mkdir(&root, &rel)?;
+            (std::fs::read_link(&root)?.join(rel), rusqlite::OpenFlags::default() | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW)
+        }
+        None => { std::fs::create_dir_all(&dir)?; (dir, rusqlite::OpenFlags::default()) }
+    };
     let mut conn = Connection::open_with_flags(dir.join("memory.db"), flags)?;
     // Nothing a file could carry (views, triggers calling functions) runs here, whoever wrote the file.
     conn.set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
