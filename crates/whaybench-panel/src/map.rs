@@ -132,6 +132,8 @@ fn export(d: &Data, data: &Value, root: Option<&str>, title: &str, prefix: &str)
     let owner = data.get("sessionId").and_then(Value::as_str);
     let d = &match (file_root, owner) {
         (Some(r), _) => r,
+        // A file of the host's (opened with Open map): the host's, whatever session it names.
+        (None, _) if data.get("_file").is_some() => d.clone(),
         (None, Some(sid)) => wb_core::roots::known_session(d, sid).ok_or_else(|| std::io::Error::other(wb_core::i18n::t("briefsafe-locked")))?,
         (None, None) => wb_core::roots::for_session(d, data.get("from").and_then(Value::as_str).unwrap_or("")),
     };
@@ -393,15 +395,15 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
         let act = |branch: bool, what: String| {
             let (d2, t2, label2, id2, nid2) = (d.clone(), target.clone(), label.clone(), id.clone(), nid.clone());
             let n = if branch { below + 1 } else { 1 };
-            move || match wb_core::map::trash(&wb_core::roots::for_session(&d2, &t2).root, &nid2, branch) {
+            move || { let Some(root) = wb_core::roots::known_session(&d2, &t2) else { return }; match wb_core::map::trash(&root.root, &nid2, branch) {
                 Ok(_) => {
                     // A project's node id is its agents' text: not in the host's log.
-                    let node = if wb_core::roots::Roots::new(d2.clone()).project_of(&t2).is_some() { String::new() } else { id2.clone() };
+                    let node = if root.root != d2.root { String::new() } else { id2.clone() };
                     record::decide("map", "delete", &what, &[("session", t2.clone()), ("node", node)]);
                     status::say(&d2, &wb_core::i18n::f("moved-to-trash", &[("a1", cut(&label2, 24)), ("n", n.to_string())]), 8);
                 }
                 Err(e) => status::say(&d2, &wb_core::i18n::f("delete-failed", &[("e", e.to_string())]), 8),
-            }
+            } }
         };
         if below > 0 {
             drop.add(&wb_core::i18n::f("delete-whole-branch-including-below", &[("below", (below).to_string())]), true, act(true, "whole branch".into()));
@@ -580,7 +582,8 @@ fn carry_shown(d: &Data, agent: &str, data: &Value, style: &str, shown: &[String
     let Some(session) = sessions::target(d) else { return status::say(d, wb_core::i18n::t("new-tab-keep-map-not-opened"), 6) };
     // A project's map goes on only in the project's own conversations.
     let roots = wb_core::roots::Roots::new(d.clone());
-    if roots.project_of(&session).is_some() || roots.project_of(s(data, "sessionId")).is_some() { return status::say(d, wb_core::i18n::t("briefsafe-map-stays"), 8); }
+    let owner = s(data, "sessionId");
+    if roots.project_of(&session).is_some() || roots.project_of(owner).is_some() || (!owner.is_empty() && wb_core::roots::known_session(d, owner).is_none()) { return status::say(d, wb_core::i18n::t("briefsafe-map-stays"), 8); }
     let Some(path) = mapstyles::carry_file(d, &session, data, style, shown, screen) else { return status::say(d, wb_core::i18n::t("carry-shown-failed"), 6) };
     record::decide("map", "carried as shown", "the person chose", &[("style", style.to_string()), ("nodes", shown.len().to_string())]);
     crate::common::ctl(d, crate::menu::session_args(d, &["new", "--agent", agent, &path.to_string_lossy()]));

@@ -239,7 +239,9 @@ names another step.
   From the sixth review: a map of a project that has just locked gives no menu, is not exported or marked into the
   host's data, and nothing of a project's map goes to the conversation in front unless it is of the same project;
   deleting a project's node logs no node id; an app started on a project's file logs only its program; `session wait`
-  reads and checks one root per poll. `snapshot`, `snapshots` and `restore` take, list and go back to
+  reads and checks one root per poll.
+  From the seventh review: a host map file naming a session exports to the host again; deleting a node or carrying a
+  map as shown does nothing for a project that has just locked; a new host project never takes a Briefsafe project's id. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

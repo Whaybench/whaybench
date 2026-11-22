@@ -505,8 +505,11 @@ fn ask_text(win: &gtk::ApplicationWindow, title: &str, label: &str, done: impl F
 fn new_project_id(st: &Store, name: &str) -> String {
     let slug: String = name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>().split('-').filter(|x| !x.is_empty()).collect::<Vec<_>>().join("-");
     let base = if slug.is_empty() { format!("p-{}", (wb_core::clock::now_ms() / 1000)) } else { slug };
-    if st.get_project(&base).is_none() { return base; }
-    (2..).map(|n| format!("{base}-{n}")).find(|x| st.get_project(x).is_none()).unwrap()
+    // One id for one project: a Briefsafe project's is taken too.
+    let stubs: Vec<String> = wb_core::roots::stubs(&st.data).into_iter().map(|s| s.id).collect();
+    let free = |x: &str| st.get_project(x).is_none() && !stubs.iter().any(|s| s == x);
+    if free(&base) { return base; }
+    (2..).map(|n| format!("{base}-{n}")).find(|x| free(x)).unwrap()
 }
 
 /// The documents to show: those added as add-ons. Older ones without a template stay on file, out of sight.
