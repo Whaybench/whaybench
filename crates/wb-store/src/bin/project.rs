@@ -127,17 +127,27 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         }
         "open" => {
             let st2 = stub_of(st, arg(&rest, 0)?)?;
-            wb_core::roots::open_plain(&st2).map_err(|e| e.to_string())?;
-            // Isolated where a container can run; else open as before (spec 3.22).
-            let own = wb_core::paths::own_exe().map_err(|e| e.to_string())?;
-            let isolated = if wb_core::container::podman_found() && wb_core::container::host_image().is_some() {
-                wb_core::container::start(&st2, &wb_core::container::programs(&own)).map(|_| true)
-            } else { Ok(false) };
-            out(json!({"open": st2.id, "data": st2.open_at, "container": isolated.as_ref().ok(), "error": isolated.err()}));
+            // Isolated where a container can run: the container first, the open place only once it runs (spec 3.22).
+            let isolated = wb_core::container::isolation();
+            if isolated {
+                let own = wb_core::paths::own_exe().map_err(|e| e.to_string())?;
+                wb_core::container::start(&st2, &wb_core::container::programs(&own))?;
+            }
+            if !isolated {
+                // Without isolation its agents still keep their own Claude Code folder (spec 3.22).
+                let home = std::env::var_os("HOME").map(std::path::PathBuf::from).ok_or("no home folder")?;
+                wb_core::container::prepare_claude(&st2, &home)?;
+            }
+            if let Err(e) = wb_core::roots::open_plain(&st2) {
+                if isolated { let _ = wb_core::container::stop(&st2); }
+                return Err(e.to_string());
+            }
+            out(json!({"open": st2.id, "data": st2.open_at, "isolated": isolated}));
         }
         "close" => {
             let st2 = stub_of(st, arg(&rest, 0)?)?;
-            wb_core::container::stop(&st2.id);
+            // The open place goes only once the container is gone: a project is never taken for closed while it runs.
+            if wb_core::container::podman_found() { wb_core::container::stop(&st2)?; }
             wb_core::roots::close_plain(&st2).map_err(|e| e.to_string())?;
             out(json!({"closed": st2.id}));
         }

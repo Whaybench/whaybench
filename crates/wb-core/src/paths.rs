@@ -115,6 +115,11 @@ pub fn work_dir(data: &Data, home: &Path) -> PathBuf {
 /// Writes a whole file or none of it: readers poll these files, and several programs write the same ones.
 /// The temporary name has the process number, so two writers do not share it.
 pub fn write_atomic(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+    // A closed project's open place (`cache/open/<id>`) is not made again by a late write: it stays gone.
+    if let Some(place) = path.ancestors().find(|a| a.parent().is_some_and(|p| p.ends_with("cache/open")))
+        && std::fs::symlink_metadata(place).is_err() {
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{} is closed", place.display())));
+    }
     if let Some(dir) = path.parent() { std::fs::create_dir_all(dir)?; }
     let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
     std::fs::write(&tmp, content)?;

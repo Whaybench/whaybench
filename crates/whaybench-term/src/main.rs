@@ -98,6 +98,24 @@ impl Relay {
         let _ = fs::create_dir_all(&work);
         let earlier = self.session.as_deref().and_then(|s| sessions::record_of(&self.data, s)).and_then(|r| r.get("cwd").and_then(|c| c.as_str()).map(String::from));
         let cwd = earlier.filter(|c| std::path::Path::new(c).is_dir()).unwrap_or_else(|| work.to_string_lossy().to_string());
+        // A Briefsafe project's conversation (by its record, else by its folder) runs in the project's folder and only
+        // in its container (spec 3.22): a record cannot send it elsewhere, and no project conversation falls to the host.
+        let project = self.session.as_deref().and_then(|s| wb_core::roots::Roots::new(self.data.clone()).project_of(s))
+            .and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|st| st.id == id))
+            .or_else(|| wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd)));
+        let cwd = match &project {
+            Some(p) if wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd)).is_none_or(|at| at.id != p.id) => p.folder.to_string_lossy().to_string(),
+            _ => cwd,
+        };
+        let place = match &project {
+            None => wb_core::container::Place::Host,
+            Some(p) => {
+                let own = paths::own_exe().map_err(|e| e.to_string())?;
+                wb_core::container::place_for(Some(p), wb_core::container::isolation(), p.open(), wb_core::container::running(p),
+                    || wb_core::container::start(p, &wb_core::container::programs(&own)))
+            }
+        };
+        if let wb_core::container::Place::Refused(why) = &place { return Err(why.clone()); }
         // The map is kept every turn: its tool (the plugin's MCP server) runs without asking. Attaching to a session
         // in the background takes no options; that session was started with them.
         if !addon && args.first().is_none_or(|a| a != "attach") {
@@ -132,13 +150,16 @@ impl Relay {
         }
         // A Briefsafe project's conversation runs in the project's container (spec 3.22), with its data folder and
         // the Claude Code token from the keyring; every value goes through podman's own environment.
-        if let Some(s) = wb_core::container::project_at(&self.data, std::path::Path::new(&cwd)).filter(|s| s.open() && wb_core::container::running(&s.id)) {
+        if let Some(s) = &project {
             env.retain(|(k, _)| k != paths::ENV_DATA_DIR);
             env.push((paths::ENV_DATA_DIR.into(), s.open_at.to_string_lossy().to_string()));
+            env.push(("CLAUDE_CONFIG_DIR".into(), s.open_at.join(wb_core::roots::CLAUDE_DIR).to_string_lossy().to_string()));
             if !addon && let Ok(Some(t)) = wb_core::secret::get(wb_core::secret::CLAUDE_TOKEN) { env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t)); }
+        }
+        if let (Some(s), wb_core::container::Place::Container) = (&project, &place) {
             let podman = wb_core::versions::find_program("podman", &std::env::var("PATH").unwrap_or_default(), None).ok_or("podman is not installed")?;
             let names: Vec<String> = env.iter().map(|(k, _)| k.clone()).collect();
-            let inner = wb_core::container::exec_args(&s.id, std::path::Path::new(&cwd), &names, &program.to_string_lossy(), &args);
+            let inner = wb_core::container::exec_args(s, std::path::Path::new(&cwd), &names, &program.to_string_lossy(), &args);
             c_program = CString::new(podman.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
             argv = std::iter::once(Ok(c_program.clone())).chain(inner.iter().map(|a| CString::new(a.as_bytes()).map_err(|e| e.to_string()))).collect::<Result<_, String>>()?;
             record::decide("session", "in the project's container", "the conversation's folder is an open Briefsafe project's", &[("project", s.id.clone())]);

@@ -174,10 +174,10 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
                 if answers.iter().any(|(_, a)| a.is_empty()) { return; }
                 if by_prompt {
                     if !sessions::queue_prompt(&d, &sid, &wb_core::ask::reply_prompt(&answers)) { status::say(&d, wb_core::i18n::t("ask-not-sent"), 8); return; }
-                    wb_core::ask::clear(&wb_core::ask::root_of(&d, &id), &id);
+                    wb_core::ask::clear_in(&d, &id);
                 } else {
                     let map: serde_json::Map<String, Value> = answers.into_iter().map(|(q, a)| (q, json!(a))).collect();
-                    if !saved(&d, wb_core::ask::answer(&wb_core::ask::root_of(&d, &id), &id, "allow", &Value::Object(map))) { return; }
+                    if !saved(&d, wb_core::ask::answer_in(&d, &id, "allow", &Value::Object(map))) { return; }
                 }
                 done();
             });
@@ -216,7 +216,7 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
         for (key, decision) in [("ask-allow", "allow"), ("ask-deny", "deny")] {
             let b = gtk::Button::with_label(wb_core::i18n::t(key));
             let (d, id, done) = (d.clone(), id.clone(), done.clone());
-            b.connect_clicked(move |_| { if saved(&d, wb_core::ask::answer(&wb_core::ask::root_of(&d, &id), &id, decision, &json!({}))) { done(); } });
+            b.connect_clicked(move |_| { if saved(&d, wb_core::ask::answer_in(&d, &id, decision, &json!({}))) { done(); } });
             buttons.append(&b);
         }
     }
@@ -226,7 +226,7 @@ fn fill_card(outer: &gtk::Box, d: &Data, ask: &Value) {
     {
         let d = d.clone();
         last.connect_clicked(move |_| {
-            if by_prompt { wb_core::ask::clear(&wb_core::ask::root_of(&d, &id), &id); } else if !saved(&d, wb_core::ask::answer(&wb_core::ask::root_of(&d, &id), &id, "terminal", &json!({}))) { return; }
+            if by_prompt { wb_core::ask::clear_in(&d, &id); } else if !saved(&d, wb_core::ask::answer_in(&d, &id, "terminal", &json!({}))) { return; }
             done();
         });
     }

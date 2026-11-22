@@ -16,7 +16,8 @@ pub const PROJECT_DATA: &str = ".whaybench";
 /// Claude Code's folder of a project's agents, in its data root: their settings and transcripts.
 pub const CLAUDE_DIR: &str = "claude";
 
-/// The file that marks a data folder as a project's own.
+/// The file that names, where a project's data rests, the project it belongs to. Checked before opening, so a moved
+/// or replaced folder is not opened as the project. Whether a data folder is a project's is told by its path.
 pub const MARKER: &str = "briefsafe.json";
 
 /// A host stub: what the host knows of a Briefsafe project, open or not.
@@ -31,8 +32,17 @@ impl Stub {
     pub fn stored(&self) -> Data { Data::new(self.folder.join(PROJECT_DATA)) }
     /// The project's data root as programs see it while it is open.
     pub fn root(&self) -> Data { Data::new(self.open_at.clone()) }
-    /// Open: its data can be read at its open place.
-    pub fn open(&self) -> bool { self.open_at.join("projects").join(&self.id).join("project.json").is_file() }
+    /// Open: the host's own link at its open place points to where its data rests. Nothing the project's agents can
+    /// write decides it.
+    pub fn open(&self) -> bool {
+        fs::symlink_metadata(&self.open_at).is_ok_and(|m| m.file_type().is_symlink())
+            && fs::read_link(&self.open_at).is_ok_and(|t| t == self.stored().root)
+    }
+    /// Where its data rests is this project's (its marker names it).
+    pub fn intact(&self) -> bool {
+        fs::read_to_string(self.stored().root.join(MARKER)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .is_some_and(|v| v["id"] == self.id.as_str())
+    }
 }
 
 /// Where an open project's data is seen: the same path on the host and in its container.
@@ -40,9 +50,17 @@ pub fn open_dir(host: &Data, id: &str) -> PathBuf { host.cache().join("open").jo
 
 /// Opens a project whose data is not sealed: its data is seen at its open place (a link to where it rests).
 pub fn open_plain(s: &Stub) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
     if s.open() { return Ok(()); }
+    if !s.intact() { return Err(Error::new(ErrorKind::NotFound, format!("{} does not hold project {}'s data (moved or deleted?)", s.stored().root.display(), s.id))); }
     if let Some(parent) = s.open_at.parent() { fs::create_dir_all(parent)?; }
-    if fs::symlink_metadata(&s.open_at).is_ok_and(|m| m.file_type().is_symlink()) { fs::remove_file(&s.open_at)?; }
+    match fs::symlink_metadata(&s.open_at) {
+        Ok(m) if m.file_type().is_symlink() => fs::remove_file(&s.open_at)?,
+        // A folder left at the open place (written to after a close) goes only if empty; anything in it is shown.
+        Ok(m) if m.is_dir() => fs::remove_dir(&s.open_at).map_err(|e| Error::new(e.kind(), format!("{} is in the way: {e}", s.open_at.display())))?,
+        Ok(_) => return Err(Error::new(ErrorKind::AlreadyExists, format!("{} is in the way", s.open_at.display()))),
+        Err(_) => {}
+    }
     std::os::unix::fs::symlink(&s.stored().root, &s.open_at)
 }
 
@@ -99,14 +117,21 @@ impl Roots {
 
     /// The root of a session: the project's that has its record, else the host's (a session not written yet is
     /// the host's until its record appears).
-    pub fn of_session(&self, session: &str) -> Data {
-        if session.is_empty() || has_session(&self.host, session) { return self.host.clone(); }
-        self.projects().into_iter().find(|(_, d)| has_session(d, session)).map(|p| p.1).unwrap_or_else(|| self.host.clone())
+    pub fn of_session(&self, session: &str) -> Data { self.known(session).unwrap_or_else(|| self.host.clone()) }
+
+    /// The root that holds a session's record, if any does. Writers go by this: a closed project's session is in no
+    /// root, and its writes are not sent to the host's.
+    pub fn known(&self, session: &str) -> Option<Data> {
+        if has_session(&self.host, session) { return Some(self.host.clone()); }
+        self.projects().into_iter().find(|(_, d)| has_session(d, session)).map(|p| p.1)
     }
 }
 
 /// Whether this data folder is a project's own (its agents' and the project's, not the host's).
-pub fn is_project_root(d: &Data) -> bool { d.root.join(MARKER).is_file() }
+/// Told by its path (`.../cache/open/<id>`), the same on the host and in the container: nothing inside it decides.
+pub fn is_project_root(d: &Data) -> bool {
+    d.root.parent().is_some_and(|p| p.file_name().is_some_and(|n| n == "open") && p.parent().is_some_and(|c| c.file_name().is_some_and(|n| n == "cache")))
+}
 
 /// The root a session's files are in, for a caller holding `d`: a project's programs hold their own root, the
 /// host's hold the host's and find a project session in its project.
@@ -115,11 +140,19 @@ pub fn for_session(d: &Data, session: &str) -> Data { if is_project_root(d) { d.
 /// The roots to list sessions from, for a caller holding `d`.
 pub fn all_of(d: &Data) -> Vec<Data> { if is_project_root(d) { vec![d.clone()] } else { Roots::new(d.clone()).all() } }
 
+/// The root holding a session's record for a caller holding `d`, if any: for writes about an existing session.
+pub fn known_session(d: &Data, session: &str) -> Option<Data> {
+    if is_project_root(d) { has_session(d, session).then(|| d.clone()) } else { Roots::new(d.clone()).known(session) }
+}
+
 fn has_session(d: &Data, session: &str) -> bool { d.root.join("sessions").join(format!("{session}.json")).is_file() }
 
 /// The project data root a folder is in, if it is inside a Briefsafe project folder.
 pub fn project_root_of(host: &Data, dir: &Path) -> Option<Stub> {
-    stubs(host).into_iter().find(|s| dir.starts_with(&s.folder))
+    // Compared as real paths, so a folder reached through a link is still found; the deepest project wins.
+    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let dir = real(dir);
+    stubs(host).into_iter().filter(|s| dir.starts_with(real(&s.folder))).max_by_key(|s| s.folder.components().count())
 }
 
 #[cfg(test)]
@@ -178,8 +211,25 @@ mod tests {
         crate::view::ask(&pr, &crate::view::for_session("p1"), &json!({"open": "x"})).unwrap();
         assert_eq!(crate::view::take_requests(&host, &crate::view::for_session("p1")), vec![json!({"open": "x"})]);
 
+        // Open is the host's link, not a file the project's agents can delete.
+        fs::remove_file(pr.root.join("projects/up/project.json")).unwrap();
+        assert!(stub.open());
         close_plain(&stub).unwrap();
         assert_eq!(roots.of_session("p1").root, host.root, "a closed project's sessions are not found");
+        assert!(known_session(&host, "p1").is_none(), "and nothing is written for them anywhere");
+        assert!(write_atomic(&stub.open_at.join("view/x.json"), "late").is_err(), "a late write does not make the place again");
+        assert!(fs::symlink_metadata(&stub.open_at).is_err());
+        // Something left at the open place: an empty folder goes, anything else is in the way and said so.
+        fs::create_dir_all(&stub.open_at).unwrap();
+        open_plain(&stub).unwrap();
+        close_plain(&stub).unwrap();
+        fs::create_dir_all(stub.open_at.join("x")).unwrap();
+        assert!(open_plain(&stub).is_err());
+        fs::remove_dir_all(&stub.open_at).unwrap();
+        // A folder that is not this project's (moved, replaced) is not opened.
+        fs::remove_file(st.root.join(MARKER)).unwrap();
+        assert!(open_plain(&stub).is_err() && !stub.open());
+        write_marker(&st, "up").unwrap();
         assert!(st.root.join("sessions/p1.json").exists(), "closing leaves the data where it rests");
         remove_stub(&host, "up");
         fs::remove_dir_all(&b).unwrap();

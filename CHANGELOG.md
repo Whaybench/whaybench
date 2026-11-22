@@ -29,7 +29,15 @@ names another step.
   A conversation tab whose folder is an open project's runs its agent in the project's container (`podman exec`),
   with the project's data folder and, for Claude Code, the long-lived token kept in the keyring
   (`whaybench token set`, from `claude setup-token`); values go through podman's environment, not its command line.
-  Claude Code's own updater is off in the container (the programs are the host's, read-only). `snapshot`, `snapshots` and `restore` take, list and go back to
+  Claude Code's own updater is off in the container (the programs are the host's, read-only).
+  Whether a project is open is the host's link alone, never a file its agents can change; a project conversation
+  (by its record or its folder) runs in the project's folder and only in its container, and gets no tab rather than
+  an agent on the host when the project is closed or its container cannot start (without podman or an image it runs
+  as before). `open` starts the container before the open place appears and fails when it cannot; `close` keeps the
+  project open when the container cannot be removed. Starts are serialised per project, the first open shows the
+  image download, container names include the data folder, folders are compared as real paths, a moved or replaced
+  project folder is not opened, and a project left open or running by a crash is put back in step at start. Writes
+  about a closed project's session go nowhere instead of to the host's data folder. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -37,7 +37,7 @@ fn new_id(sid: &str) -> String {
 /// Asks still waiting, oldest first: one a hook waits on while its process lives (no longer than the hooks'
 /// timeout, so a reused process number shows nothing), or one answered by a prompt. Only well-formed ids.
 pub fn pending(data: &Path) -> Vec<Value> {
-    let foreign = data.join(crate::roots::MARKER).is_file();
+    let foreign = crate::roots::is_project_root(&crate::paths::Data::new(data.to_path_buf()));
     let mut out: Vec<Value> = fs::read_dir(dir(data)).into_iter().flatten().flatten()
         .filter(|f| f.file_name().to_str().is_some_and(|n| n.ends_with(".json") && !n.ends_with(".answer.json")))
         .filter_map(|f| read_json(&f.path(), Value::Null).ok())
@@ -59,10 +59,19 @@ pub fn pending_all(d: &crate::paths::Data) -> Vec<Value> {
     out
 }
 
-/// The data root an ask was written in, where its answer goes.
-pub fn root_of(d: &crate::paths::Data, id: &str) -> std::path::PathBuf {
-    crate::roots::all_of(d).into_iter().map(|r| r.root).find(|r| request_file(r, id).exists()).unwrap_or_else(|| d.root.clone())
+/// The data root an ask was written in, where its answer goes. None: it is gone (answered, or its project closed),
+/// and the answer goes nowhere.
+pub fn root_of(d: &crate::paths::Data, id: &str) -> Option<std::path::PathBuf> {
+    crate::roots::all_of(d).into_iter().map(|r| r.root).find(|r| request_file(r, id).exists())
 }
+
+/// `answer` in the root the ask is in; an ask gone meanwhile (its project closed) takes no answer.
+pub fn answer_in(d: &crate::paths::Data, id: &str, decision: &str, answers: &Value) -> Result<()> {
+    match root_of(d, id) { Some(r) => answer(&r, id, decision, answers), None => Err("the question is no longer asked".into()) }
+}
+
+/// `clear` in the root the ask is in.
+pub fn clear_in(d: &crate::paths::Data, id: &str) { if let Some(r) = root_of(d, id) { clear(&r, id); } }
 
 /// The person's answer to one ask: decision allow, deny or terminal; answers by question text.
 /// An ask that ended meanwhile (the hook timed out, the agent stopped) takes no answer.

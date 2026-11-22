@@ -149,6 +149,8 @@ fn run(data: paths::Data, apps: Vec<String>, no_session: bool) -> Result<(), Str
     wb_core::sessions::prune(&data);
     wb_core::sessions::schedules::tidy(&data.root);
     wb_core::map::empty_old_trash(&data.root);
+    // Briefsafe projects left open or running by a crash are put back in step (spec 3.22).
+    wb_core::container::reconcile(&data);
 
     let again = std::env::args().skip(1).collect::<Vec<_>>();
     let result = start::prepare().and_then(|_| serve(&data, &run_id, apps, no_session));

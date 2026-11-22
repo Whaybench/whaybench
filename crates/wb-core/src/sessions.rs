@@ -204,7 +204,7 @@ fn resumable_by(d: &Data, id: &str, saved: impl Fn(&str) -> bool) -> String {
 pub fn adopt(d: &Data, old: &str, new: &str) {
     if old == new { return; }
     // A conversation moves within its own root: a project's stays in the project.
-    let d = &at(d, old);
+    let Some(d) = &crate::roots::known_session(d, old) else { return };
     let Some(mut from) = record_of(d, old) else { return };
     let mut to = record_of(d, new).unwrap_or_else(|| serde_json::json!({"id": new}));
     for key in ["cwd", "firstPrompt", "lastPrompt", "tab", "titleSent", "titleByPerson"] {
@@ -246,7 +246,7 @@ pub fn locate(d: &Data, id: &str) -> String {
 
 /// The conversation goes on under this number again: a move recorded on it did not hold.
 pub fn moved_back(d: &Data, id: &str) {
-    let d = &at(d, id);
+    let Some(d) = &crate::roots::known_session(d, id) else { return };
     let Some(mut r) = record_of(d, id) else { return };
     if r.as_object_mut().and_then(|o| o.remove("movedTo")).is_some() {
         let _ = write_atomic(&sessions_dir(d).join(format!("{id}.json")), r.to_string());
@@ -383,11 +383,15 @@ fn heartbeat(p: &Path) -> bool {
     fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|a| a < Duration::from_secs(30))
 }
 
-pub fn mark_off(d: &Data, id: &str) { let _ = write_atomic(&alive_dir(&at(d, id)).join(id), "0"); }
+pub fn mark_off(d: &Data, id: &str) {
+    // About an existing session only: a closed project's is left alone, not noted in the host's root.
+    let own = crate::roots::known_session(d, id).or_else(|| alive_dir(d).join(id).exists().then(|| d.clone()));
+    if let Some(r) = own { let _ = write_atomic(&alive_dir(&r).join(id), "0"); }
+}
 
 /// A session the person ended: kept on disk, listed under the hidden ones, never left as "working".
 pub fn mark_ended(d: &Data, id: &str) {
-    let d = &at(d, id);
+    let Some(d) = &crate::roots::known_session(d, id) else { return };
     let p = sessions_dir(d).join(format!("{id}.json"));
     if let Some(mut r) = read_json(&p) {
         r["ended"] = Value::Bool(true);
