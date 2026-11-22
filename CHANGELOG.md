@@ -132,7 +132,9 @@ names another step.
   A session number is taken only as Whaybench and Claude Code make them (no path, no `..`): records, moves, state,
   heartbeats and ending a session ignore any other. A tab takes a session from a record only when the number is the
   record file's own and of that tab's root, so a project cannot hand its tab a host conversation, and a project's
-  tab never treats its session as a host background one (`/exit` there stops nothing on the host). `snapshot`, `snapshots` and `restore` take, list and go back to
+  tab never treats its session as a host background one (`/exit` there stops nothing on the host).
+  A `cache/open/<x>` folder made inside a project's data is taken as a folder of that project, never as a project root
+  of its own (its `<x>` could be a link anywhere). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

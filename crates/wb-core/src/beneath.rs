@@ -15,7 +15,9 @@ pub const READ_LIMIT: u64 = 4 << 20;
 
 /// The open project root `path` is in, and the path below it; None for a path in no project's open place.
 pub fn split(path: &Path) -> Option<(PathBuf, PathBuf)> {
-    let root = path.ancestors().find(|a| a.parent().is_some_and(|p| p.ends_with("cache/open")))?;
+    // The outermost: a `cache/open/<x>` the agents made inside a project's data is a folder of that project, not a root
+    // of its own (its `<x>` could be their link to anywhere).
+    let root = path.ancestors().filter(|a| a.parent().is_some_and(|p| p.ends_with("cache/open"))).last()?;
     Some((root.to_path_buf(), path.strip_prefix(root).ok()?.to_path_buf()))
 }
 
@@ -170,6 +172,7 @@ mod tests {
         std::os::unix::fs::symlink(&rest, &root).unwrap();
         assert_eq!(split(&root.join("sessions/a.json")), Some((root.clone(), PathBuf::from("sessions/a.json"))));
         assert_eq!(split(&base.join("host/sessions/a.json")), None);
+        assert_eq!(split(&root.join("cache/open/x/id_rsa")), Some((root.clone(), PathBuf::from("cache/open/x/id_rsa"))), "a nested open place is the project's own folder");
 
         fs::write(rest.join("cache/ctl/a.json"), "{}").unwrap();
         assert_eq!(read(&root, Path::new("cache/ctl/a.json"), 10).unwrap(), b"{}");
