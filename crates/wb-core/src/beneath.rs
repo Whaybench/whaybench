@@ -39,6 +39,20 @@ fn at(dir: &OwnedFd, rel: &Path, flags: i32, mode: u32) -> io::Result<OwnedFd> {
     if fd < 0 { Err(Error::last_os_error()) } else { Ok(unsafe { OwnedFd::from_raw_fd(fd as i32) }) }
 }
 
+/// Opens (making what is missing) each folder of `rel` in turn from `dir`, by the folder before it: a folder made is
+/// always made in one already checked, never through a link put on the way.
+fn made_dirs(dir: OwnedFd, rel: &Path) -> io::Result<OwnedFd> {
+    let mut at_dir = dir;
+    for part in rel.components() {
+        let std::path::Component::Normal(name) = part else { return Err(Error::new(ErrorKind::InvalidInput, "not a plain path")) };
+        let n = c(Path::new(name))?;
+        // Safety: mkdirat with a single name in a folder this function holds open.
+        if unsafe { libc::mkdirat(at_dir.as_raw_fd(), n.as_ptr(), 0o700) } != 0 && Error::last_os_error().kind() != ErrorKind::AlreadyExists { return Err(Error::last_os_error()); }
+        at_dir = at(&at_dir, Path::new(name), libc::O_RDONLY | libc::O_DIRECTORY, 0)?;
+    }
+    Ok(at_dir)
+}
+
 fn dir_of(root: &Path, rel: &Path) -> io::Result<OwnedFd> {
     let base = root_fd(root)?;
     if rel.as_os_str().is_empty() { return Ok(base); }
@@ -79,15 +93,7 @@ pub fn remove(root: &Path, rel: &Path) -> io::Result<()> {
 pub fn write(root: &Path, rel: &Path, bytes: &[u8]) -> io::Result<()> {
     static N: AtomicU64 = AtomicU64::new(0);
     let (parent, name) = (rel.parent().unwrap_or(Path::new("")), rel.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?);
-    let base = root_fd(root)?;
-    let mut made = PathBuf::new();
-    for part in parent.components() {
-        made.push(part);
-        let path = c(&made)?;
-        // Safety: mkdirat beneath the root's descriptor; a part that exists (or is a link) is checked by the open below.
-        unsafe { libc::mkdirat(base.as_raw_fd(), path.as_ptr(), 0o700) };
-    }
-    let dir = if parent.as_os_str().is_empty() { root_fd(root)? } else { at(&base, parent, libc::O_RDONLY | libc::O_DIRECTORY, 0)? };
+    let dir = made_dirs(root_fd(root)?, parent)?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let tmp = format!(".{}.{}-{}-{}.tmp", name.to_string_lossy(), std::process::id(), stamp, N.fetch_add(1, Ordering::Relaxed));
     let fd = at(&dir, Path::new(&tmp), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, 0o600)?;
@@ -101,16 +107,7 @@ pub fn write(root: &Path, rel: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 /// Makes a folder (and those above it) beneath the root, none through a link.
-pub fn mkdir(root: &Path, rel: &Path) -> io::Result<()> {
-    let base = root_fd(root)?;
-    let mut made = PathBuf::new();
-    for part in rel.components() {
-        made.push(part);
-        // Safety: mkdirat beneath the root's descriptor; what exists is checked by the open below.
-        unsafe { libc::mkdirat(base.as_raw_fd(), c(&made)?.as_ptr(), 0o700) };
-    }
-    at(&base, rel, libc::O_RDONLY | libc::O_DIRECTORY, 0).map(|_| ())
-}
+pub fn mkdir(root: &Path, rel: &Path) -> io::Result<()> { made_dirs(root_fd(root)?, rel).map(|_| ()) }
 
 /// Puts a link at `rel` beneath the root (in place of what was there), pointing to `target`.
 pub fn link(root: &Path, rel: &Path, target: &Path) -> io::Result<()> {
@@ -152,6 +149,9 @@ mod tests {
         std::os::unix::fs::symlink(&outside, rest.join("ask")).unwrap();
         assert!(list(&root, Path::new("ask")).is_err());
         assert!(write(&root, Path::new("ask/secret.json"), b"x").is_err());
+        // Nor is a folder made on the far side of a link on the way.
+        assert!(mkdir(&root, Path::new("ask/made/deeper")).is_err() && write(&root, Path::new("ask/made/x.json"), b"x").is_err());
+        assert!(!outside.join("made").exists(), "nothing made outside");
         assert_eq!(fs::read_to_string(outside.join("secret.json")).unwrap(), "host");
         // A named pipe does not block the reader.
         let fifo = rest.join("cache/ctl/c.json");

@@ -86,7 +86,11 @@ names another step.
   A project's marker also notes when it was made, so a project made again with the same id never takes an earlier
   one's snapshots. Opening, closing and restoring a project take turns (a restore cannot run while an open starts its
   agents). In a git repository around the folder its snapshot folder is excluded too; the WSL setup checks the user
-  and group id ranges each; moving a conversation's view requests goes through no links. `snapshot`, `snapshots` and `restore` take, list and go back to
+  and group id ranges each; moving a conversation's view requests goes through no links.
+  Writing beneath a project's data makes each folder in the one before it, so no folder is made on the far side of a
+  link; the project's marker and `session wait`'s state are read that safe way too. An add-on agent's settings
+  variable and folder for a project's tab are named by the host from the add-on, not taken from what runs in the
+  container. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

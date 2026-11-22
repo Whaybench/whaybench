@@ -161,7 +161,7 @@ impl Relay {
             if let Some(a) = &agent {
                 env.push((wb_core::agents::ENV_AGENT.into(), a.id.clone()));
                 let isolated = matches!(place, wb_core::container::Place::Container);
-                if let Some((var, folder)) = wb_core::container::agent_home(s, isolated, &a.id)? { env.push((var, folder)); }
+                if let Some((var, folder)) = wb_core::container::agent_home(s, isolated, a)? { env.push((var, folder)); }
             }
             if !addon {
                 match wb_core::secret::get(wb_core::secret::CLAUDE_TOKEN) {

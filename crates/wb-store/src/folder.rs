@@ -67,9 +67,8 @@ pub fn discard(dir: &Path, subvolume: bool) -> Res<()> {
 
 /// The project a folder (or a snapshot of it) belongs to: its data root's marker (the id and when it was made).
 fn owner(dir: &Path) -> Option<serde_json::Value> {
-    let marker = dir.join(wb_core::roots::PROJECT_DATA).join(wb_core::roots::MARKER);
-    if !fs::symlink_metadata(&marker).is_ok_and(|m| m.is_file()) { return None; }
-    let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(marker).ok()?).ok()?;
+    let bytes = wb_core::beneath::read(dir, &Path::new(wb_core::roots::PROJECT_DATA).join(wb_core::roots::MARKER), 4096).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     v["id"].is_string().then(|| serde_json::json!({"id": v["id"], "made": v["made"]}))
 }
 

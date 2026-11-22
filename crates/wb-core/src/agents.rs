@@ -181,6 +181,9 @@ impl Agent {
 
     /// The agent's own settings folder `<data>/<id>`, made ready before anything starts. Logins and choices are copied
     /// from the person's folder once; the templates are written each time. Returns the variable and folder to set.
+    /// The variable naming its settings folder (CODEX_HOME), if it has one.
+    pub fn home_var(&self) -> Option<&str> { self.home.as_ref().map(|h| h.env.as_str()) }
+
     pub fn prepare(&self, data: &Path, exe: &Path) -> Result<Option<(String, PathBuf)>> {
         self.prepare_with(data, exe, self.home.as_ref().and_then(|h| std::env::var_os(&h.env)).map(PathBuf::from))
     }

@@ -244,7 +244,10 @@ pub fn tidy(s: &Stub, isolated: bool) {
 /// An add-on agent's settings folder for a project's tab (`CODEX_HOME` and where), made in the project's data: in its
 /// container (from the add-on's files and the project's own home, so its login is the project's), or without one by
 /// the host's `whaybench` on the open place.
-pub fn agent_home(s: &Stub, isolated: bool, id: &str) -> Result<Option<(String, String)>, String> {
+pub fn agent_home(s: &Stub, isolated: bool, agent: &crate::agents::Agent) -> Result<Option<(String, String)>, String> {
+    // Named by the host from the add-on, never taken from what the program in there prints.
+    let Some(var) = agent.home_var() else { return Ok(None) };
+    let id = agent.id.as_str();
     let mut c = if isolated {
         let mut c = Command::new("podman");
         c.args(["exec", &name(s), "whaybench", "agent-home", id]);
@@ -257,7 +260,8 @@ pub fn agent_home(s: &Stub, isolated: bool, id: &str) -> Result<Option<(String, 
     };
     let out = c.stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
     if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+    // Where `prepare` makes it in the project's data (its data folder is the open place there).
+    Ok(Some((var.to_string(), s.open_at.join(id).to_string_lossy().to_string())))
 }
 
 /// Runs `work` with the project's container paused, if it runs (a snapshot of one moment).

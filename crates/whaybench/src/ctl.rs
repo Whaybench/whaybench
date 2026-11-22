@@ -260,7 +260,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 if let Some(v) = since_newer(wb_core::roots::for_session(data, &now).root.join("answers").join(format!("{now}.json"))) { println!("{}", v["text"].as_str().unwrap_or("")); return Ok(()); }
                 // Stopped on a question to the person (a permission, an input): the asker is told, not left waiting.
                 // Already waiting when the wait began counts too: it went on to ask between `type` and `wait`.
-                let state: Option<serde_json::Value> = fs::read(sessions::state_dir(&wb_core::roots::for_session(data, &now)).join(format!("{now}.json"))).ok().and_then(|b| serde_json::from_slice(&b).ok());
+                let state: Option<serde_json::Value> = wb_core::paths::read_text(&sessions::state_dir(&wb_core::roots::for_session(data, &now)).join(format!("{now}.json"))).ok().and_then(|b| serde_json::from_str(&b).ok());
                 if let Some(v) = state.filter(|v| v["state"] == "waiting") {
                     return Err(format!("{id} waits for the person: {}", v["note"].as_str().unwrap_or("a permission or an input")));
                 }

@@ -40,7 +40,8 @@ impl Stub {
     }
     /// Where its data rests is this project's (its marker names it).
     pub fn intact(&self) -> bool {
-        fs::read_to_string(self.stored().root.join(MARKER)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        // Beneath where the data rests, as any file its agents can change: no link, no pipe, a few bytes.
+        crate::beneath::read(&self.stored().root, Path::new(MARKER), 4096).ok().and_then(|t| serde_json::from_slice::<Value>(&t).ok())
             .is_some_and(|v| v["id"] == self.id.as_str())
     }
 }
