@@ -183,8 +183,10 @@ fn draw(d: &Data, list: &gtk::ListBox, panel: &RefCell<Panel>, unit: i32, force:
     }
     // A project's conversation: only paths of that project are looked at (its records are its agents' to write).
     if let Some(pid) = wb_core::roots::Roots::new(d.clone()).project_of(&session) {
-        let mine = |p: &str| { let p = std::path::Path::new(p); wb_core::beneath::split(p).is_some_and(|(r, _)| r.file_name().is_some_and(|n| n.to_string_lossy() == pid))
-            || wb_core::roots::project_root_of(d, p).is_some_and(|st| st.id == pid) };
+        // By where it really is (a link in the project to a host file is not the project's).
+        let places: Vec<std::path::PathBuf> = wb_core::roots::stubs(d).into_iter().filter(|st| st.id == pid)
+            .flat_map(|st| [st.folder.clone(), st.stored().root]).filter_map(|p| std::fs::canonicalize(p).ok()).collect();
+        let mine = |p: &str| std::fs::canonicalize(p).is_ok_and(|real| places.iter().any(|r| real.starts_with(r)));
         touches.retain(|t| mine(s(t, "path")));
     }
     let hide = hidden(d);

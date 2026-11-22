@@ -248,7 +248,13 @@ names another step.
   digits, `-` and `_` only; the Files panel's Remove from list does nothing once its project has locked (en, ko).
   From the eighth review: the recovery key page is shown whatever the view follows and is never read out to a tool;
   a host read of a project folder's file (a pinned view) is refused; the Files panel looks only at a project
-  conversation's own paths; a Briefsafe id is checked before any lock is made from it. `snapshot`, `snapshots` and `restore` take, list and go back to
+  conversation's own paths; a Briefsafe id is checked before any lock is made from it.
+  From the ninth review: the last changed map of a project is taken only for a conversation of that project; a
+  desktop notice read in a project's folder says only the project's name; `whaybench-view shot` makes no picture of a
+  project's page or a recovery key; the view's guard decodes a file address before it checks it; the Files panel
+  takes a project conversation's path as the project's only where it really is. `whaybench-files` from the host does not work on a
+  project's conversation; a project's file patterns walk a bounded number of entries; a refused agent request logs
+  its target only when it is a plain id. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

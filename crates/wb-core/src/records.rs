@@ -57,7 +57,8 @@ pub fn related_index(rows: &[Value], at: i64) -> Option<usize> { rows.iter().pos
 /// only files whose real path is there; a few hundred at most, so no pattern makes a panel walk a disk.
 fn attached(d: &Data, pattern: &str) -> Vec<std::path::PathBuf> {
     const MOST: usize = 500;
-    let hits = |p: &str| glob::glob(p).into_iter().flatten().flatten().filter(|x| x.is_file());
+    // The walk itself is bounded too: hits the real-path check drops still count.
+    let hits = |p: &str| glob::glob(p).into_iter().flatten().flatten().take(MOST * 10).filter(|x| x.is_file());
     if !crate::roots::is_project_root(d) { return hits(pattern).take(MOST).collect(); }
     let id = d.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let host = Data::new(d.root.ancestors().nth(3).map(std::path::Path::to_path_buf).unwrap_or_default());

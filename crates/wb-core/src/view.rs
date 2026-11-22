@@ -185,6 +185,9 @@ pub fn for_session(session: &str) -> String { format!("s-{session}") }
 /// A view's own requests.
 pub fn for_view(name: &str) -> String { format!("v-{name}") }
 
+/// Present while the view shows a page no tool of the host gets (a project's, a recovery key): its picture is refused.
+pub fn protected_mark(d: &Data, name: &str) -> PathBuf { d.cache().join(format!("view-protected-{name}")) }
+
 pub fn ask(d: &Data, to: &str, request: &Value) -> std::io::Result<()> {
     let dir = requests_dir(d, to);
     std::fs::create_dir_all(&dir)?;

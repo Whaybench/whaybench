@@ -184,7 +184,23 @@ fn lasting(v: &V, path: &str, own: bool) -> Option<String> {
     Some(if std::fs::create_dir_all(&v.hist.dir).is_ok() && std::fs::copy(p, &copy).is_ok() { copy.to_string_lossy().to_string() } else { path.to_string() })
 }
 
+/// A page not given to a tool of the host (read, a picture of the view): a project's page, a file of a project's folder
+/// (a pinned view may show one), a recovery key page. The file is the one the address names, %-escapes decoded.
+fn protected(v: &V) -> bool {
+    let url = v.hist.current().map(|c| c.0.clone()).unwrap_or_default();
+    let file = if url.starts_with("file:") { gio::File::for_uri(&url).path().unwrap_or_default() } else { std::path::PathBuf::from(&url) };
+    v.of_project || wb_core::beneath::split(&file).is_some() || wb_core::roots::project_root_of(&v.d, &file).is_some()
+        || wb_core::vault::is_recovery_page(&file.to_string_lossy())
+}
+
+/// Marks the view as showing a protected page, for `whaybench-view shot`.
+fn mark_protected(v: &V) {
+    let mark = view::protected_mark(&v.d, &v.name);
+    if protected(v) { if !mark.exists() { let _ = std::fs::write(&mark, ""); } } else { let _ = std::fs::remove_file(&mark); }
+}
+
 fn display(v: &V) {
+    mark_protected(v);
     // The pages drawn here paint their own background, or leave it to a see-through panel.
     v.web.set_background_color(&gtk::gdk::RGBA::TRANSPARENT);
     match v.hist.current() {
@@ -350,9 +366,7 @@ fn answer_read(v: &V, all: bool, reply: String) {
     let link = view::link_note(&v.d, &v.link, v.followed.as_deref());
     let d = v.d.clone();
     // Asked from the host: a project's page is not read out to it (spec 3.22: project -> host is blocked).
-    // Nor a file of a project's folder (a pinned view may show one), nor a recovery key page (it never goes to a tool).
-    let file = Path::new(url.strip_prefix("file://").unwrap_or(&url));
-    if v.of_project || wb_core::beneath::split(file).is_some() || wb_core::roots::project_root_of(&d, file).is_some() || wb_core::vault::is_recovery_page(&url) {
+    if protected(v) {
         write_reply(&d, &reply, &json!({"url": "", "title": "", "selected": [], "text": [wb_core::i18n::t("briefsafe-view-not-read")], "link": link}));
         return;
     }
@@ -453,6 +467,8 @@ fn tick(s: &Shared) {
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
+    // A mark left by a view that ended: what it showed is not on screen now.
+    let _ = std::fs::remove_file(view::protected_mark(&d, &name));
     let store = view::webkit_store(&d);
     let session = webkit6::NetworkSession::new(Some(&store.join("data").to_string_lossy()), Some(&store.join("cache").to_string_lossy()));
     // Sign-ins stay over restarts: without a file the cookies live only as long as the panel.

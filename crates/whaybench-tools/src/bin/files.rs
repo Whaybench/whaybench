@@ -29,6 +29,8 @@ fn run(mut args: Vec<String>, data: &Data) -> Result<(), String> {
         args.drain(i..=i + 1);
     }
     let session = session.or_else(|| sessions::target(data)).ok_or(wb_core::i18n::t("no-session"))?;
+    // From the host, a project's conversation is not looked into or written to (spec 3.22).
+    if !wb_core::roots::is_project_root(data) && wb_core::roots::Roots::new(data.clone()).project_of(&session).is_some() { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
     // The session's own root: a project's attachments and memory are the project's (spec 3.22).
     let at = wb_core::roots::for_session(data, &session);
     let data = &at;

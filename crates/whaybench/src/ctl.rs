@@ -182,7 +182,7 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
             let landing = sessions::current_id(data, to);
             let clean = !text.chars().any(|c| c.is_control() && c != '\n' && c != '\t');
             if !mine(to) || !mine(&landing) || !clean {
-                record::warn("request", "agent's request not delivered", "a project's agent may type only plain text in its own project's conversations", &[("session", to.to_string()), ("project", pid.to_string())]);
+                record::warn("request", "agent's request not delivered", "a project's agent may type only plain text in its own project's conversations", &[("session", if wb_core::map::safe_id(to).is_ok() { to.to_string() } else { "?".into() }), ("project", pid.to_string())]);
                 continue;
             }
             from = wb_core::roots::stubs(data).into_iter().find(|s| s.id == pid).map_or_else(|| pid.to_string(), |s| format!("project {}", s.name));

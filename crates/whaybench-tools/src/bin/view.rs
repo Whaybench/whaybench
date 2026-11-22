@@ -179,6 +179,8 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
             Ok(())
         }
         Some("shot") => {
+            // A project's page or a recovery key in the view: no picture of it for the host (spec 3.22).
+            if !flag(&args, "--firefox") && view::protected_mark(d, view::FIRST_VIEW).exists() { return Err(wb_core::i18n::t("briefsafe-view-not-read").into()); }
             let out = args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)).map(|a| absolute(a)).unwrap_or_else(|| d.cache().join("view-shot.png").to_string_lossy().to_string());
             let exe = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench");
             let o = Command::new(exe).args(["ctl", "--data-dir", &d.root.to_string_lossy(), "shot", "--out", &out, "--app", if flag(&args, "--firefox") { view::FIREFOX_APP } else { view::VIEW_APP }]).output().map_err(|e| e.to_string())?;

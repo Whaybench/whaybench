@@ -68,7 +68,10 @@ impl Waiting {
         // A second of overlap, so a file written during the last look is read again; a wait already seen is no news.
         let from = self.looked - Duration::from_secs(1);
         self.looked = SystemTime::now();
-        for e in wb_core::roots::all_of(d).iter().flat_map(|r| wb_core::paths::list_dir(&wb_core::sessions::state_dir(r))) {
+        let stubs = wb_core::roots::stubs(d);
+        for (r, e) in wb_core::roots::all_of(d).iter().flat_map(|r| wb_core::paths::list_dir(&wb_core::sessions::state_dir(r)).into_iter().map(move |e| (r.clone(), e))) {
+            // Read in a project's root: its project's, whatever the session's record says (or if it has none).
+            let in_project = (r.root != d.root).then(|| stubs.iter().find(|s| s.root().root == r.root).map(|s| s.name.clone()).unwrap_or_default());
             if std::fs::symlink_metadata(&e).and_then(|m| m.modified()).is_ok_and(|t| t < from) { continue; }
             let Some(v) = wb_core::paths::read_text(&e).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { continue };
             let session = e.file_stem().unwrap_or_default().to_string_lossy().to_string();
@@ -78,9 +81,10 @@ impl Waiting {
             std::thread::spawn(move || {
                 // A project's conversation is told by its project's name only: the desktop keeps what it is shown.
                 let project = wb_core::roots::Roots::new(d.clone()).project_of(&session).and_then(|id| wb_core::roots::stubs(&d).into_iter().find(|s| s.id == id));
-                let body = match project {
-                    Some(p) => p.name,
-                    None => [wb_core::sessions::session_name(&d, &session), note].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · "),
+                let body = match (in_project, project) {
+                    (Some(name), _) => name,
+                    (None, Some(p)) => p.name,
+                    (None, None) => [wb_core::sessions::session_name(&d, &session), note].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · "),
                 };
                 show(wb_core::i18n::t("notify-waiting"), &body);
             });

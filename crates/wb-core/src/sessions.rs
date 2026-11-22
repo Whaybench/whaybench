@@ -472,7 +472,10 @@ fn latest_id(d: &Data) -> Option<String> {
     crate::roots::all_of(d).iter().filter_map(|r| {
         let p = latest_map(r);
         let when = crate::paths::meta(&p).and_then(|m| m.modified()).ok()?;
-        Some((when, read_json(&p)?.get("sessionId")?.as_str()?.to_string()))
+        let id = read_json(&p)?.get("sessionId")?.as_str()?.to_string();
+        // A project's file is its agents' to write: only a plain number of a conversation of that project.
+        if !plain_id(&id) || (r.root != d.root && crate::roots::known_session(d, &id).is_none_or(|k| k.root != r.root)) { return None; }
+        Some((when, id))
     }).max_by_key(|x| x.0).map(|x| x.1)
 }
 
