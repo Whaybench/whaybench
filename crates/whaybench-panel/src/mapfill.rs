@@ -1,7 +1,7 @@
 //! The side worker of a map style: fills fields the style needs and the nodes lack, outside the
 //! conversation. It asks a small model once, without tools or plugins and saving nothing, and leaves a patch the map mod
 //! applies; the panel redraws when the map file changes.
-use std::{fs, io::Write, path::{Path, PathBuf}, process::{Command, Stdio}, time::Instant};
+use std::{fs, io::Write, path::PathBuf, process::{Command, Stdio}, time::Instant};
 
 use serde_json::{Value, json};
 use wb_core::{log as record, paths::Data, sessions};
@@ -10,9 +10,8 @@ use crate::mapstyles::{self, Style};
 
 const TRANSCRIPT_LIMIT: usize = 90_000;
 
-fn transcript_path(id: &str) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    fs::read_dir(Path::new(&home).join(".claude/projects")).ok()?.flatten().map(|e| e.path().join(format!("{id}.jsonl"))).find(|p| p.is_file())
+fn transcript_path(d: &Data, id: &str) -> Option<PathBuf> {
+    fs::read_dir(d.claude_dir()?.join("projects")).ok()?.flatten().map(|e| e.path().join(format!("{id}.jsonl"))).find(|p| p.is_file())
 }
 
 /// The conversation as text: the person's and the AI's words, each cut short, the end of it kept.
@@ -57,6 +56,8 @@ pub fn run(d: &Data, session: &str, style: &Style, scope: Option<&str>) {
         let fields = [(wb_core::i18n::t("sessions"), session.chars().take(8).collect::<String>()), ("style", style.name.clone())];
         if level_warn { record::warn("map", "map fill", &text, &fields); } else { record::decide("map", "map fill", &text, &fields); }
     };
+    // A Briefsafe project's conversation is not handed to a worker on the host (spec 3.22).
+    if wb_core::roots::Roots::new(d.clone()).project_of(session).is_some() { log(false, "a project's session: not filled from the host".into()); return; }
     let Some(data) = sessions::map_of(d, session) else { log(true, "no map".into()); return };
     let nodes = mapstyles::scoped(&data, scope);
     let need = mapstyles::missing(style, &nodes, s(&data, "current"));
@@ -69,7 +70,7 @@ pub fn run(d: &Data, session: &str, style: &Style, scope: Option<&str>) {
         format!("- {}: {}{}  [{}]", s(n, "id"), s(n, "label"), if parent.is_empty() { String::new() } else { wb_core::i18n::ai_f("parent", &[("parent", (parent).to_string())]) }, if !wb_core::map::is_open(n) { wb_core::i18n::ai("done") } else { wb_core::i18n::ai("open-3") })
     }).collect();
     let asks: Vec<String> = need.iter().map(|(f, ids)| wb_core::i18n::ai_f("nodes", &[("f", (f).to_string()), ("a1", (mapstyles::filled_hint(f)).to_string()), ("a2", (ids.join(", ")).to_string())])).collect();
-    let talk = transcript_path(session).and_then(|p| fs::read_to_string(p).ok()).map(|t| transcript_text(&t)).unwrap_or_default();
+    let talk = transcript_path(d, session).and_then(|p| fs::read_to_string(p).ok()).map(|t| transcript_text(&t)).unwrap_or_default();
     let prompt = wb_core::i18n::ai_f("output-only-the-json-array-as", &[("talk", (talk).to_string()), ("a1", (listing.join("\n")).to_string()), ("a2", (asks.join("\n")).to_string())]);
     // An empty folder: no project settings, so no plugins load.
     let work = d.cache().join("fill-work");

@@ -12,7 +12,11 @@ names another step.
 ### Added
 - Project folders (Briefsafe, first part): `whaybench-project new ID NAME --folder DIR [--from SRC]` makes the
   project folder as a btrfs subvolume (a plain folder where btrfs is not there), copies a folder in with reflinks
-  where it can, and takes its first snapshot. `snapshot`, `snapshots` and `restore` take, list and go back to
+  where it can, and takes its first snapshot. The project's data (map, documents, a copy of every document
+  template) is kept in the folder, in `.whaybench/` laid out like a data folder and left out of git; the data
+  folder keeps only a stub with its name and folder, and `whaybench-project list` shows it as `kind: briefsafe`.
+  Conversations of such a project find their transcripts in its own Claude folder, and the map filler does not hand
+  them to a worker outside the project. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -35,6 +35,29 @@ impl Data {
     pub fn instance(&self) -> PathBuf { self.cache().join("instance.json") }
     /// Requests to the running compositor (`whaybench ctl`).
     pub fn ctl(&self) -> PathBuf { self.cache().join("ctl") }
+    /// Claude Code's folder for the sessions kept here: a Briefsafe project's own (`<project root>/claude`, which its
+    /// agents get as CLAUDE_CONFIG_DIR), else the person's ($CLAUDE_CONFIG_DIR, else ~/.claude).
+    pub fn claude_dir(&self) -> Option<PathBuf> {
+        if self.root.file_name().is_some_and(|n| n == crate::roots::PROJECT_DATA) { return Some(self.root.join(crate::roots::CLAUDE_DIR)); }
+        std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude")))
+    }
+}
+
+/// Files under `root` whose bytes hold `needle`, links not followed: the check that a data folder holds none of a
+/// project's content (spec 3.22, the host data folder against a project's).
+pub fn files_containing(root: &Path, needle: &[u8]) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let Ok(kind) = e.file_type() else { continue };
+            if kind.is_dir() { dirs.push(e.path()); continue; }
+            if kind.is_file() && std::fs::read(e.path()).is_ok_and(|b| !needle.is_empty() && b.windows(needle.len()).any(|w| w == needle)) { found.push(e.path()); }
+        }
+    }
+    found.sort();
+    found
 }
 
 /// Where a new conversation starts: `work_dir` in the data directory's settings.json, else ~/work. Written with
@@ -256,5 +279,27 @@ mod tests {
         assert_eq!(std::fs::read_to_string(aside.path()).unwrap(), "[\"x\", cut", "kept beside");
         assert!(!file.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod content_tests {
+    use super::*;
+
+    #[test]
+    fn a_project_marker_is_found_in_its_own_root_and_not_in_the_host_one() {
+        let base = std::env::temp_dir().join(format!("wb-roots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (host, project) = (Data::new(base.join("host")), Data::new(base.join("project")));
+        std::fs::create_dir_all(host.root.join("sessions")).unwrap();
+        std::fs::create_dir_all(project.root.join("answer-log")).unwrap();
+        std::fs::write(host.root.join("sessions/a.json"), "{\"cwd\":\"/w\"}").unwrap();
+        std::fs::write(project.root.join("answer-log/b.jsonl"), "secret-7f3a in an answer").unwrap();
+        // A link from the host root into the project is not followed: its target is not host content.
+        std::os::unix::fs::symlink(project.root.join("answer-log"), host.root.join("link")).unwrap();
+        assert!(files_containing(&host.root, b"secret-7f3a").is_empty());
+        assert_eq!(files_containing(&project.root, b"secret-7f3a"), vec![project.root.join("answer-log/b.jsonl")]);
+        assert!(files_containing(&host.root, b"").is_empty());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

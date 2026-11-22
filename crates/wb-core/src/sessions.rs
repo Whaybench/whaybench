@@ -96,9 +96,8 @@ fn continued_in_text(text: &str) -> Option<String> {
 
 fn transcript_of(d: &Data, id: &str) -> Option<PathBuf> {
     let cwd = record_of(d, id)?.get("cwd")?.as_str()?.to_string();
-    let home = std::env::var("HOME").ok()?;
     let folder: String = cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    Some(Path::new(&home).join(".claude/projects").join(folder).join(format!("{id}.jsonl")))
+    Some(d.claude_dir()?.join("projects").join(folder).join(format!("{id}.jsonl")))
 }
 
 /// After /resume picked a session that runs in the background, Claude Code does not move it into this tab: this
@@ -318,9 +317,9 @@ pub fn attach_name(id: &str) -> String {
 pub fn has_conversation(d: &Data, id: &str) -> bool {
     if record_of(d, id).and_then(|r| r.get("firstPrompt")?.as_str().map(|p| !p.is_empty())).unwrap_or(false) { return true; }
     // The record can miss a prompt; Claude Code's own record cannot. Ending a session is not to be undone on a guess.
-    let Some(home) = std::env::var_os("HOME") else { return true };
+    let Some(claude) = d.claude_dir() else { return true };
     let name = format!("{id}.jsonl");
-    fs::read_dir(Path::new(&home).join(".claude/projects")).into_iter().flatten().flatten().any(|e| {
+    fs::read_dir(claude.join("projects")).into_iter().flatten().flatten().any(|e| {
         holds_conversation(&e.path().join(&name))
     })
 }

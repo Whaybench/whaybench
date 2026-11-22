@@ -45,11 +45,16 @@ pub fn make(dir: &Path, from: Option<&Path>) -> Res<bool> {
     let subvolume = on_btrfs(parent);
     if subvolume { btrfs(&["subvolume".as_ref(), "create".as_ref(), dir.as_os_str()])?; } else { fs::create_dir(dir).map_err(|e| e.to_string())?; }
     if let Some(src) = from
-        && let Err(e) = run("cp", &["-a".as_ref(), "--reflink=auto".as_ref(), src.join(".").as_os_str(), dir.as_os_str()]) {
+        && let Err(e) = copy_into(src, dir) {
         // The copy failed half way: what was made goes, the source stays as it was.
         return Err(match discard(dir, subvolume) { Ok(()) => e, Err(e2) => format!("{e}; the half copy is left at {}: {e2}", dir.display()) });
     }
     Ok(subvolume)
+}
+
+/// Copies everything in `src` into `dst` (reflinked where it can be), keeping modes and times.
+pub fn copy_into(src: &Path, dst: &Path) -> Res<()> {
+    run("cp", &["-a".as_ref(), "--reflink=auto".as_ref(), src.join(".").as_os_str(), dst.as_os_str()])
 }
 
 /// Removes a project folder just made, when making the project failed after it.

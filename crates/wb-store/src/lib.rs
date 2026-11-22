@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! projects/<pid>/project.json             name, desc, parent, docs [{id, addon, name, original}], paths,
-//!                                         folder, subvolume (the project folder, spec 3.22)
+//!                                         folder, subvolume, kind "briefsafe" (the project folder, spec 3.22)
 //! projects/<pid>/docs/<doc>/document.md   the document; headings carry their numbers
 //! projects/<pid>/docs/<doc>/meta.json     {sha, sections: {heading path: last change ms}}
 //! projects/<pid>/work/<session>/...       a session's working copies

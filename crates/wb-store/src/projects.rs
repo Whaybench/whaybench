@@ -1,5 +1,5 @@
 //! Projects: create, find by folder, and the tree of projects.
-use std::collections::HashSet;
+use std::{collections::HashSet, fs, path::Path};
 
 use serde_json::{Value, json};
 
@@ -19,8 +19,56 @@ impl Store {
         let mut p = self.get_project(pid).ok_or_else(|| format!("no project: {pid}"))?;
         p["folder"] = json!(folder);
         p["subvolume"] = json!(subvolume);
+        // A project made with its own folder; one without `kind` is the older kind, working as before.
+        p["kind"] = json!("briefsafe");
         write_json(&self.pdir(pid).join("project.json"), &p)?;
         Ok(p)
+    }
+
+    /// Makes a Briefsafe project (spec 3.22): its folder (a subvolume on btrfs, `from` copied in), its data root
+    /// `<folder>/.whaybench` laid out like a data folder with the project in it and a copy of every document
+    /// template, the host's stub, and the first snapshot. Everything that can refuse is asked before the folder is
+    /// made; a failure after it removes what was made. Answers the project and the first snapshot.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, mut paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>) -> Res<(Value, Option<crate::folder::Taken>)> {
+        use wb_core::roots::{self, Stub};
+        if self.get_project(pid).is_some() || roots::stubs(&self.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
+        if !parent.is_empty() && self.get_project(parent).is_none() { return Err(format!("no parent project: {parent}")); }
+        let inside = |a: &str, b: &str| a == b || Path::new(a).starts_with(b) || Path::new(b).starts_with(a);
+        let taken: Vec<(String, String)> = roots::stubs(&self.data).into_iter().map(|s| (s.id, s.folder.to_string_lossy().to_string()))
+            .chain(self.list_projects().iter().map(|p| (s(p, "id").to_string(), s(p, "folder").to_string()))).filter(|(_, f)| !f.is_empty()).collect();
+        if let Some((other, _)) = taken.iter().find(|(_, f)| inside(folder, f)) {
+            return Err(format!("the folder is inside or around the folder of project {other} (a snapshot would not hold the inner one)"));
+        }
+        let dir = Path::new(folder);
+        let subvolume = crate::folder::make(dir, from)?;
+        let stub = Stub { id: pid.into(), name: name.into(), folder: dir.to_path_buf() };
+        let made = (|| -> Res<Value> {
+            let inner = Store::new(stub.root());
+            if !paths.iter().any(|p| p == folder) { paths.insert(0, folder.to_string()); }
+            inner.create_project(pid, name, desc, parent, paths, always)?;
+            let p = inner.set_folder(pid, folder, subvolume)?;
+            // The templates as they are now: later changes to the add-ons do not reach this project.
+            let templates = self.data.root.join("addons/project-docs");
+            if templates.is_dir() {
+                let to = inner.data.root.join("addons/project-docs");
+                fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+                crate::folder::copy_into(&templates, &to)?;
+            }
+            exclude_from_git(dir)?;
+            roots::write_stub(&self.data, &stub).map_err(|e| e.to_string())?;
+            Ok(p)
+        })();
+        let p = match made {
+            Ok(p) => p,
+            Err(e) => {
+                roots::remove_stub(&self.data, pid);
+                return Err(match crate::folder::discard(dir, subvolume) { Ok(()) => e, Err(e2) => format!("{e}; the folder made is left at {folder}: {e2}") });
+            }
+        };
+        // The first state, before anything is changed in it.
+        let first = if subvolume { Some(crate::folder::snapshot(dir)?) } else { None };
+        Ok((p, first))
     }
 
     pub fn project_for_cwd(&self, cwd: &str) -> Option<Value> {
@@ -78,6 +126,20 @@ impl Store {
 }
 
 /// Tests of the project store.
+/// The project's data stays out of a git repository in its folder: `.whaybench/` in `.git/info/exclude`, so a
+/// commit of everything does not take it along. The repository's own files are not changed.
+fn exclude_from_git(dir: &Path) -> Res<()> {
+    let git = dir.join(".git");
+    if !git.is_dir() { return Ok(()); }
+    let file = git.join("info/exclude");
+    let now = fs::read_to_string(&file).unwrap_or_default();
+    let line = format!("/{}/", wb_core::roots::PROJECT_DATA);
+    if now.lines().any(|l| l.trim() == line) { return Ok(()); }
+    fs::create_dir_all(git.join("info")).map_err(|e| e.to_string())?;
+    let sep = if now.is_empty() || now.ends_with('\n') { "" } else { "\n" };
+    fs::write(&file, format!("{now}{sep}{line}\n")).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::Path};
@@ -94,6 +156,50 @@ mod tests {
         st.add_doc("t", &DocAddon { id: "spec".into(), name: "Spec".into(), md, original: None }).unwrap();
         st
     }
+    #[test]
+    fn a_project_with_its_own_folder_is_of_the_briefsafe_kind() {
+        let st = setup();
+        assert!(st.get_project("t").unwrap().get("kind").is_none(), "made without a folder: the older kind");
+        let p = st.set_folder("t", "/w/t", true).unwrap();
+        assert_eq!((s(&p, "kind"), s(&p, "folder"), p["subvolume"].as_bool()), ("briefsafe", "/w/t", Some(true)));
+        assert_eq!(st.get_project("t").unwrap(), p);
+    }
+
+    #[test]
+    fn a_briefsafe_project_keeps_its_data_in_its_folder_and_only_a_stub_on_the_host() {
+        let host = scratch("bs");
+        let md = host.data.root.join("addons/project-docs/wbs/WBS.md");
+        fs::create_dir_all(md.parent().unwrap()).unwrap();
+        fs::write(&md, "# WBS\n").unwrap();
+        let work = host.data.root.join("work");
+        let src = work.join("old");
+        fs::create_dir_all(src.join(".git/info")).unwrap();
+        fs::write(src.join("a.txt"), "hi").unwrap();
+        let folder = work.join("up").to_string_lossy().to_string();
+        assert!(host.create_in_folder("up", "Up", "", "nosuch", vec![], false, &folder, Some(&src)).is_err());
+        assert!(!Path::new(&folder).exists(), "a refusal makes nothing");
+        let (p, _) = host.create_in_folder("up", "Up", "", "", vec![], false, &folder, Some(&src)).unwrap();
+        assert_eq!(s(&p, "kind"), "briefsafe");
+        assert!(host.get_project("up").is_none(), "the project is not in the host's store");
+        let stubs = wb_core::roots::stubs(&host.data);
+        assert_eq!((stubs.len(), stubs[0].open()), (1, true));
+        let inner = Store::new(stubs[0].root());
+        assert_eq!(s(&inner.get_project("up").unwrap(), "folder"), folder);
+        assert_eq!(fs::read_to_string(inner.data.root.join("addons/project-docs/wbs/WBS.md")).unwrap(), "# WBS\n");
+        assert_eq!(fs::read_to_string(Path::new(&folder).join(".git/info/exclude")).unwrap(), "/.whaybench/\n");
+        assert!(host.create_in_folder("up", "Up", "", "", vec![], false, &format!("{folder}2"), None).is_err(), "the id is taken");
+        assert!(host.create_in_folder("in", "In", "", "", vec![], false, &format!("{folder}/in"), None).is_err(), "not inside another");
+        // Snapshots of a test folder on btrfs are read-only: clean up the way the program prunes.
+        let dir = Path::new(&folder);
+        while let Some(n) = crate::folder::snapshots(dir).first().cloned() {
+            let at = dir.with_file_name(".up.snapshots").join(&n);
+            let _ = std::process::Command::new("btrfs").args(["property", "set", "-ts"]).arg(&at).args(["ro", "false"]).status();
+            let _ = std::process::Command::new("btrfs").args(["subvolume", "delete"]).arg(&at).output();
+        }
+        let _ = crate::folder::discard(dir, true);
+        let _ = fs::remove_dir_all(&host.data.root);
+    }
+
     fn change(p: &Path, f: impl Fn(&str) -> String) { let t = text(p); fs::write(p, f(&t)).unwrap(); }
     fn edit(st: &Store, f: impl Fn(&str) -> String, what: &str) -> Value {
         let p = st.checkout("t", "spec", "s1").unwrap();

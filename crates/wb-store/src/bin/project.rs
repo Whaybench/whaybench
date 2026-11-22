@@ -9,8 +9,10 @@ const HELP: &str = r#"Project store command. Only the AI writes projects, and on
 
   whaybench-project list | tree                    projects (tree: parent by id)
   whaybench-project new ID NAME [--parent P] [--path DIR] [--always] [--desc D] [--folder DIR [--from SRC]]
-                                                   --folder makes the project folder (a btrfs subvolume where it can;
-                                                   --from copies a folder in) and takes its first snapshot
+                                                   --folder makes a Briefsafe project: its folder (a btrfs subvolume
+                                                   where it can; --from copies a folder in), its data inside it
+                                                   (<folder>/.whaybench), and the first snapshot. Its documents and map
+                                                   are worked on with WHAYBENCH_DATA_DIR=<folder>/.whaybench
   whaybench-project snapshot ID | snapshots ID     take a snapshot of the project folder (30 kept) / list them
   whaybench-project restore ID SNAPSHOT            put the folder back as it was; the state now is kept as a snapshot.
                                                    Run it from outside the project folder, with nothing working in it
@@ -81,9 +83,8 @@ fn input(rest: &[String]) -> Res<Value> {
 }
 
 fn project_folder(st: &Store, pid: &str) -> Res<std::path::PathBuf> {
-    let p = st.get_project(pid).ok_or_else(|| format!("no project: {pid}"))?;
-    if !p["subvolume"].as_bool().unwrap_or(false) { return Err(format!("project {pid} has no snapshot folder (made without --folder, or not on btrfs)")); }
-    Ok(std::path::PathBuf::from(s(&p, "folder")))
+    wb_core::roots::stubs(&st.data).into_iter().find(|s| s.id == pid).map(|s| s.folder)
+        .ok_or_else(|| format!("no project with its own folder: {pid} (made with new --folder)"))
 }
 
 fn arg(rest: &[String], i: usize) -> Res<&str> { rest.get(i).map(String::as_str).ok_or_else(|| "missing argument".to_string()) }
@@ -94,7 +95,12 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
     let mut rest: Vec<String> = a[1..].to_vec();
     let session = opt(&mut rest, "--session").unwrap_or_else(calling_session);
     match cmd.as_str() {
-        "list" => out(Value::Array(st.list_projects().iter().map(|p| json!({"id": p["id"], "name": p["name"], "parent": p.get("parent"), "docs": p["docs"], "paths": p.get("paths")})).collect())),
+        "list" => {
+            let mut all: Vec<Value> = st.list_projects().iter().map(|p| json!({"id": p["id"], "name": p["name"], "parent": p.get("parent"), "docs": p["docs"], "paths": p.get("paths")})).collect();
+            // A Briefsafe project's content is in its own folder: the host lists its name and folder only.
+            all.extend(wb_core::roots::stubs(&st.data).into_iter().map(|s| json!({"id": s.id, "name": s.name, "kind": "briefsafe", "folder": s.folder})));
+            out(Value::Array(all));
+        }
         "tree" => {
             let t: Vec<String> = st.tree().iter().map(|(p, d)| format!("{}{} [{}]", "  ".repeat(*d), s(p, "name"), s(p, "id"))).collect();
             out(json!(if t.is_empty() { "(none)".to_string() } else { t.join("\n") }));
@@ -113,22 +119,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 out(st.create_project(pid, name, &desc, &parent, paths, always)?);
                 return Ok(0);
             };
-            // Everything that can refuse is asked before the folder is made, so a refusal leaves nothing behind.
-            if st.get_project(pid).is_some() { return Err(format!("project exists: {pid}")); }
-            if !parent.is_empty() && st.get_project(&parent).is_none() { return Err(format!("no parent project: {parent}")); }
-            if let Some(other) = st.list_projects().iter().find(|p| { let f = s(p, "folder"); !f.is_empty() && (folder.starts_with(&format!("{f}/")) || f.starts_with(&format!("{folder}/"))) }) {
-                return Err(format!("the folder is inside or around the folder of project {} (a snapshot would not hold the inner one)", s(other, "id")));
-            }
-            let dir = Path::new(&folder);
-            let subvolume = folder::make(dir, from.as_deref().map(Path::new))?;
-            if !paths.contains(&folder) { paths.insert(0, folder.clone()); }
-            let made = st.create_project(pid, name, &desc, &parent, paths, always).and_then(|_| st.set_folder(pid, &folder, subvolume));
-            let p = match made {
-                Ok(p) => p,
-                Err(e) => return Err(match folder::discard(dir, subvolume) { Ok(()) => e, Err(e2) => format!("{e}; the folder made is left at {folder}: {e2}") }),
-            };
-            // The first state, before anything is changed in it (spec 3.22).
-            let first = if subvolume { Some(folder::snapshot(dir)?) } else { None };
+            let (p, first) = st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new))?;
             out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name), "warning": first.and_then(|t| t.warning)}));
         }
         "snapshot" => { let t = folder::snapshot(&project_folder(st, arg(&rest, 0)?)?)?; out(json!({"snapshot": t.name, "warning": t.warning})); }
