@@ -90,7 +90,10 @@ names another step.
   Writing beneath a project's data makes each folder in the one before it, so no folder is made on the far side of a
   link; the project's marker and `session wait`'s state are read that safe way too. An add-on agent's settings
   variable and folder for a project's tab are named by the host from the add-on, not taken from what runs in the
-  container. `snapshot`, `snapshots` and `restore` take, list and go back to
+  container.
+  Opening or going back to a project's conversation carries the project with the request, and a tab that is a
+  project's stays it: when the project has closed meanwhile it does not open (said in the status line), never on the
+  host. A tab starts the project's container only while the project is open, in turn with opening and closing it. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

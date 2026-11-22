@@ -128,7 +128,9 @@ fn check_needed(parts: &[(String, String)]) {
 
 /// What a new conversation tab starts with.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TermOpen { pub attach: Option<String>, pub resume: Option<String>, pub map_from: Option<String>, #[serde(default)] pub agent: Option<String> }
+pub struct TermOpen { pub attach: Option<String>, pub resume: Option<String>, pub map_from: Option<String>, #[serde(default)] pub agent: Option<String>,
+    /// The Briefsafe project the conversation is of, known when it was asked for: closed by then, the tab does not open.
+    #[serde(default)] pub project: Option<String> }
 
 fn new_tab_id() -> String {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -150,6 +152,7 @@ pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<String, S
     if let Some(a) = &open.attach { command += &format!(" --attach {}", q(a)?); }
     if let Some(r) = &open.resume { command += &format!(" --resume {}", q(r)?); }
     if let Some(m) = &open.map_from { command += &format!(" --map-from {}", q(m)?); }
+    if let Some(p) = &open.project { command += &format!(" --project {}", q(p)?); }
     Ok(command)
 }
 

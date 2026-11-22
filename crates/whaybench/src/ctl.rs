@@ -303,18 +303,19 @@ pub fn show_session(data: &Data, id: &str) -> Result<(), String> {
 
 /// The session in a new tab: attached if it runs in the background, else started again from where it was saved.
 fn open_session(data: &Data, id: &str) -> Result<(), String> {
+    let project = wb_core::roots::Roots::new(data.clone()).project_of(id);
     match sessions::agent(id) {
         Some(a) if a.get("kind").and_then(|k| k.as_str()) == Some("interactive") => {
             Err(wb_core::i18n::t("running-in-another-terminal-type-bg").into())
         }
-        Some(_) => post(data, &Request::OpenTerm { open: TermOpen { attach: Some(id.to_string()), ..Default::default() } }),
+        Some(_) => post(data, &Request::OpenTerm { open: TermOpen { attach: Some(id.to_string()), project, ..Default::default() } }),
         None => {
             let resume = sessions::resumable(data, id);
             if resume != id {
                 record::decide("session", "reopened under the earlier number", "no conversation is saved under this number", &[("session", id.to_string()), ("resumed", resume.clone())]);
                 sessions::moved_back(data, &resume);
             }
-            post(data, &Request::OpenTerm { open: TermOpen { resume: Some(resume), ..Default::default() } })
+            post(data, &Request::OpenTerm { open: TermOpen { resume: Some(resume), project, ..Default::default() } })
         }
     }
 }

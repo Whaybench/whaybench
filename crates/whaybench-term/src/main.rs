@@ -100,9 +100,15 @@ impl Relay {
         let cwd = earlier.filter(|c| std::path::Path::new(c).is_dir()).unwrap_or_else(|| work.to_string_lossy().to_string());
         // A Briefsafe project's conversation (by its record, else by its folder) runs in the project's folder and only
         // in its container (spec 3.22): a record cannot send it elsewhere, and no project conversation falls to the host.
-        let project = self.session.as_deref().and_then(|s| wb_core::roots::Roots::new(self.data.clone()).project_of(s))
-            .and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|st| st.id == id))
-            .or_else(|| wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd)));
+        // A tab already a project's (asked for as one, or started in one before) stays it: closed, it does not open.
+        let noted = sessions::tab_project(&self.data, &self.tab);
+        let project = match &noted {
+            Some(id) => Some(wb_core::roots::stubs(&self.data).into_iter().find(|st| &st.id == id).filter(wb_core::roots::Stub::open)
+                .ok_or_else(|| wb_core::i18n::t("briefsafe-project-closed").to_string())?),
+            None => self.session.as_deref().and_then(|s| wb_core::roots::Roots::new(self.data.clone()).project_of(s))
+                .and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|st| st.id == id))
+                .or_else(|| wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd))),
+        };
         let cwd = match &project {
             Some(p) if wb_core::roots::project_root_of(&self.data, std::path::Path::new(&cwd)).is_none_or(|at| at.id != p.id) => p.folder.to_string_lossy().to_string(),
             _ => cwd,
@@ -112,7 +118,7 @@ impl Relay {
             Some(p) => {
                 let own = paths::own_exe().map_err(|e| e.to_string())?;
                 wb_core::container::place_for(Some(p), wb_core::container::isolation(), p.open(), wb_core::container::running(p),
-                    || wb_core::container::start(p, &wb_core::container::programs(&own)))
+                    || wb_core::container::life(p, || if p.open() { wb_core::container::start(p, &wb_core::container::programs(&own)) } else { Err(wb_core::i18n::t("briefsafe-project-closed").to_string()) }))
             }
         };
         if let wb_core::container::Place::Refused(why) = &place { return Err(why.clone()); }
@@ -563,19 +569,22 @@ fn set_raw() {
 fn main() {
     wb_core::paths::private_files();
     let mut args = std::env::args().skip(1);
-    let (mut tab, mut attach, mut resume, mut map_from) = (None, None, None, None);
+    let (mut tab, mut attach, mut resume, mut map_from, mut project) = (None, None, None, None, None);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--tab" => tab = args.next(),
             "--attach" => attach = args.next(),
             "--resume" => resume = args.next(),
             "--map-from" => map_from = args.next(),
+            "--project" => project = args.next(),
             other => { let _ = writeln!(std::io::stderr(), "whaybench-term: unknown argument {other}"); std::process::exit(2); }
         }
     }
     let Some(tab) = tab else { let _ = writeln!(std::io::stderr(), "whaybench-term: --tab is needed"); std::process::exit(2) };
     let Some(root) = paths::resolve(None, |k| std::env::var(k).ok()) else { std::process::exit(2) };
     let data = Data::new(root);
+    // Noted before anything starts: the tab is that project's, whatever its records say later.
+    if project.is_some() { sessions::set_tab_project(&data, &tab, project.as_deref()); }
     let run = record::run_id(&data);
     record::open(&data, &format!("term-{tab}"), &run, "first");
     record::install_panic_hook();
