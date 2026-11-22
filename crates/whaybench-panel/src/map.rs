@@ -205,6 +205,10 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
     let items = Items::new();
     let session = sessions::focus(d);
     let tree = tree_of(data);
+    // A project's map (a file in its open place) goes only to that project's own conversations, and never into the
+    // host's projects (spec 3.22: project -> host is blocked).
+    let map_project = wb_core::beneath::split(std::path::Path::new(path)).and_then(|(r, _)| r.file_name().map(|n| n.to_string_lossy().to_string()));
+    let may_send = match &map_project { None => true, Some(id) => session.as_deref().is_some_and(|s| wb_core::roots::Roots::new(d.clone()).project_of(s).as_deref() == Some(id.as_str())) };
     if let Some(n) = node {
         let refer = items.sub();
         let (id, label) = (s(n, "id").to_string(), s(n, "label").to_string());
@@ -221,7 +225,7 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
         }
         {
             let (d2, s2, n2, p2, t2, f2, l2) = (d.clone(), session.clone(), n.clone(), path.to_string(), title.to_string(), flow.clone(), lines.clone());
-            refer.add(wb_core::i18n::t("take-as-reference-this-node"), session.is_some(), move || {
+            refer.add(wb_core::i18n::t("take-as-reference-this-node"), session.is_some() && may_send, move || {
                 let Some(t) = &s2 else { return };
                 let text = mapimport::reference_request(&p2, &t2, &n2, &f2, &l2);
                 if sessions::queue_prompt(&d2, t, &text) { status::say(&d2, &wb_core::i18n::f("reference-request-sent", &[("title", cut(&t2, 20)), ("head", cut(s(&n2, "label"), 20)), ("session", cut(t, 8))]), 8); }
@@ -235,7 +239,7 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
             let (st, d2, s2, l2, f2, label2) = (store.clone(), d.clone(), session.clone().unwrap_or_default(), lines.clone(), flow.clone(), label.clone());
             // A project's conversation does not write into the host's projects.
             let host_session = session.as_deref().is_some_and(|s| wb_core::roots::Roots::new(d.clone()).project_of(s).is_none());
-            sub.add(&name, host_session, move || {
+            sub.add(&name, host_session && map_project.is_none(), move || {
                 let Ok(q) = st.queue_add(&pid, "reflect", &label2, &s2) else { return };
                 if sessions::queue_prompt(&d2, &s2, &reflect_request(Some(&pid), Some(&q), &f2, &l2)) { status::say(&d2, &wb_core::i18n::f("project-reflection-request-sent-session", &[("a1", cut(&label2, 20)), ("a2", cut(&s2, 8))]), 8); }
                 else { st.queue_drop(&pid, &q); status::say(&d2, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(&s2, 8))]), 8); }
@@ -247,7 +251,7 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
     let whole = items.sub();
     {
         let (d2, s2, p2, t2, data2) = (d.clone(), session.clone(), path.to_string(), title.to_string(), data.clone());
-        whole.add(wb_core::i18n::t("take-as-reference-whole-map"), session.is_some(), move || {
+        whole.add(wb_core::i18n::t("take-as-reference-whole-map"), session.is_some() && may_send, move || {
             let Some(t) = &s2 else { return };
             let text = mapimport::whole_reference_request(&p2, &t2, &data2);
             if sessions::queue_prompt(&d2, t, &text) { status::say(&d2, &wb_core::i18n::f("reference-request-sent", &[("title", cut(&t2, 20)), ("head", wb_core::i18n::t("whole-map-head").to_string()), ("session", cut(t, 8))]), 8); }

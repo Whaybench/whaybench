@@ -308,7 +308,7 @@ pub fn reconcile(host: &Data) {
         let (open, runs) = (s.open(), podman && running(&s));
         // Left paused by a snapshot that did not finish: going again, before any tab comes back to it.
         if runs && status(&s).as_deref() == Some("paused") { let _ = Command::new("podman").args(["unpause", &name(&s)]).stdout(Stdio::null()).stderr(Stdio::null()).status(); }
-        let _ = std::fs::remove_file(closing_mark(&s));
+        if !closing(&s) { let _ = std::fs::remove_file(closing_mark(&s)); }
         // Opened in its container and the container is gone (or podman is): closed, not left for the host to run.
         // (A vault: its link goes only once the vault is off, so its data is never left in the clear unseen.)
         let gone = !runs && opened_isolated(&s) && fs_link(&s);
@@ -411,7 +411,8 @@ pub fn hang_up(s: &Stub, tab: &str) {
     if crate::map::safe_id(tab).is_err() { return; }
     // Waited for, five seconds at most: the agent writes what it has as it ends, before its project closes under it.
     let script = format!("p=$(cat /tmp/whaybench-tab-{tab}.pid 2>/dev/null) && kill -HUP \"$p\" && i=0; while [ $i -lt 50 ] && kill -0 \"$p\" 2>/dev/null; do sleep 0.1; i=$((i+1)); done; rm -f /tmp/whaybench-tab-{tab}.pid");
-    let _ = Command::new("podman").args(["exec", &name(s), "sh", "-c", &script]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    // Bounded here too: what is in there (the pid file) is the agents' to change, a pipe there would hold `cat`.
+    let _ = Command::new("timeout").args(["8", "podman", "exec", &name(s), "sh", "-c", &script]).stdout(Stdio::null()).stderr(Stdio::null()).status();
 }
 
 /// Where a tab's agent runs (spec 3.22): a project's conversation only in the project's container. Without

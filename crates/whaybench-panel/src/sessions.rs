@@ -253,7 +253,11 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 id => {
                     sessions::set_focus(&d, id, "person's click");
                     let mut a = data_arg(&d);
-                    a.extend(["session".into(), "show".into(), id.to_string()]);
+                    // A project's conversation opens as that project's, refused if it has closed since the row was drawn.
+                    match wb_core::roots::Roots::new(d.clone()).project_of(id) {
+                        Some(p) => a.extend(["session".into(), "show".into(), "--project".into(), p, id.to_string()]),
+                        None => a.extend(["session".into(), "show".into(), id.to_string()]),
+                    }
                     ctl(&d, a);
                 }
             }

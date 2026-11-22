@@ -334,6 +334,7 @@ briefsafe-too-long = 너무 오래 걸려 멈췄습니다. 다시 해 보세요
 briefsafe-snapshot-taken = 스냅샷을 떴습니다
 briefsafe-snapshot-warning = 스냅샷을 떴습니다 · { $why }
 briefsafe-unreadable = 이 프로젝트의 기록을 읽지 못했습니다.
+briefsafe-not-isolated = 컨테이너 없이 열림(이 시스템에 podman이나 이미지가 없음): 에이전트가 격리 없이 사용자 권한으로 돕니다.
 panel-left-closed = 패널 비정상 종료 반복 · 로그 생성
 not-run-no-conversation-tab-open = { $head } 미실행 · 대화 탭 없음 · 세션 목록에서 열기
 session-ended-hidden-in-the-session = 세션 종료됨 · 세션 목록에서 숨김

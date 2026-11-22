@@ -1,7 +1,7 @@
 //! What the panels' web pages share: Markdown as HTML, the theme's colours and fonts as CSS, and the address of
 //! a link that was pressed.
 use gtk::prelude::*;
-use pulldown_cmark::{html, CowStr, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 use wb_core::{paths::Data, theme};
 
 pub fn escape(t: &str) -> String { t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;") }
@@ -14,13 +14,9 @@ pub fn markdown(md: &str, raw: RawHtml) -> String {
     let md = crate::common::table_pipes(md);
     let events = Parser::new_ext(&md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS).filter_map(|ev| Some(match ev {
         Event::Html(t) | Event::InlineHtml(t) if raw != RawHtml::Kept => Event::Text(t),
-        // Text someone else wrote (a Briefsafe project's): a link leads only to a web page, whatever its case or scheme
-        // (javascript:, wb:, file:); an image is its words, never fetched.
-        Event::Start(Tag::Link { link_type, dest_url, title, id }) if raw == RawHtml::Untrusted => {
-            let web = { let d = dest_url.to_ascii_lowercase(); d.starts_with("http://") || d.starts_with("https://") };
-            Event::Start(Tag::Link { link_type, dest_url: if web { dest_url } else { CowStr::Borrowed("#") }, title, id })
-        }
-        Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) if raw == RawHtml::Untrusted => return None,
+        // Text someone else wrote (a Briefsafe project's): its links and images are their words only. Nothing it names
+        // is followed, fetched or handed to another program from here (a web address would reach the host's views).
+        Event::Start(Tag::Link { .. }) | Event::End(TagEnd::Link) | Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) if raw == RawHtml::Untrusted => return None,
         other => other,
     }));
     let mut out = String::new();
@@ -70,7 +66,8 @@ mod tests {
     fn untrusted_markdown_links_only_to_web_pages_and_fetches_nothing() {
         let h = markdown("[a](javascript:alert(1)) [b](WB:bs:close) [c](file:///etc/passwd) [d](HTTPS://example.org) ![e](http://x/y.png) <b>x</b>", Untrusted);
         assert!(!h.to_lowercase().contains("javascript:") && !h.to_lowercase().contains("wb:") && !h.contains("file:"), "{h}");
-        assert!(h.contains("HTTPS://example.org") && !h.contains("<img") && h.contains("e") && h.contains("&lt;b&gt;"), "{h}");
+        assert!(!h.contains("<a ") && !h.contains("<img"), "no link, no image: {h}");
+        assert!(h.contains("&lt;b&gt;") && h.contains('d') && h.contains('e'), "their words stay: {h}");
     }
 
     #[test]

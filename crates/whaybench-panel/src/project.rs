@@ -83,7 +83,7 @@ fn doc_page(st: &Store, pid: &str, d: &Value, anchors: &mut HashMap<String, Hash
             // The panel's own markup goes in after the Markdown is drawn: in the text it would be the document's (and
             // shown as text for a Briefsafe project). A marker of characters no Markdown makes stands for it.
             mine_marks.push((format!("\u{E000}{n}\u{E000}"), format!("<a id='{anchor}'></a>"), format!("\u{E001}{n}\u{E001}"), ask));
-            out.push(format!("{} \u{E000}{n}\u{E000}{}\u{E001}{n}\u{E001}", "#".repeat(*level), title));
+            out.push(format!("{} \u{E000}{n}\u{E000} {} \u{E001}{n}\u{E001}", "#".repeat(*level), title));
             continue;
         }
         if hide.guide.is_match(line) || hide.source.is_match(line) { continue; }
@@ -94,7 +94,12 @@ fn doc_page(st: &Store, pid: &str, d: &Value, anchors: &mut HashMap<String, Hash
     if !s(d, "original").is_empty() { head += &wb_core::i18n::f("original", &[("a1", (e(s(d, "original"))).to_string())]); }
     head += &wb_core::i18n::f("contents", &[("a1", (toc.join("<br>")).to_string())]);
     let mut body = render(&out.join("\n"));
-    for (mark, html, ask_mark, ask) in &mine_marks { body = body.replacen(mark.as_str(), html, 1).replacen(ask_mark.as_str(), ask, 1); }
+    // One pass over the page (a document of many headings must not take long).
+    let marks: HashMap<String, String> = mine_marks.into_iter().flat_map(|(m, h, am, a)| [(m, h), (am, a)]).collect();
+    if !marks.is_empty() {
+        let re = Regex::new("[\u{E000}\u{E001}][0-9]+[\u{E000}\u{E001}]").unwrap();
+        body = re.replace_all(&body, |c: &regex::Captures| marks.get(&c[0]).cloned().unwrap_or_default()).into_owned();
+    }
     format!("{head}<div id='body'></div>{body}")
 }
 
@@ -266,7 +271,7 @@ struct P {
     /// A `whaybench-project` step running (log in, log out, snapshot), for one project.
     job: Option<Job>,
     /// What the last step of a project said when it did not work: its project, the kind of step and the reason.
-    bs_msg: Option<(String, String, String)>,
+    bs_msg: HashMap<String, (String, String)>,
 }
 type Shared = Rc<RefCell<P>>;
 
@@ -310,7 +315,7 @@ fn choose(p: &mut P, key: Option<String>) {
 fn start_job(p: &mut P, id: &str, kind: &str, what: &str, args: &[&str], input: Option<String>) {
     if let Some(j) = &p.job { status::say(&p.d, &wb_core::i18n::f("briefsafe-busy", &[("what", j.what.clone())]), 5); return; }
     // Said when it cannot even start (no program, a full disk), not left as a press that did nothing.
-    let fail = |p: &mut P, why: String| p.bs_msg = Some((id.into(), kind.into(), why));
+    let fail = |p: &mut P, why: String| { p.bs_msg.insert(id.into(), (kind.into(), why)); };
     let Ok(exe) = std::env::current_exe() else { return fail(p, "whaybench-project not found".into()) };
     let dir = p.d.cache().join("project-jobs");
     let _ = std::fs::create_dir_all(&dir);
@@ -326,7 +331,7 @@ fn start_job(p: &mut P, id: &str, kind: &str, what: &str, args: &[&str], input: 
             if let Some(mut i) = child.stdin.take() { let _ = std::io::Write::write_all(&mut i, input.unwrap_or_default().as_bytes()); }
             p.job = Some(Job { id: id.into(), kind: kind.into(), what: what.into(), child, started: std::time::Instant::now(), out, err });
             // Another project's message stays for it.
-            if p.bs_msg.as_ref().is_some_and(|m| m.0 == id) { p.bs_msg = None; }
+            p.bs_msg.remove(id);
             p.stamp.clear();
         }
         Err(e) => fail(p, e.to_string()),
@@ -346,15 +351,21 @@ fn poll_job(p: &mut P) -> bool {
         // Safety: kill on the process group the job leads (made with process_group(0)); its own id is that group's.
         unsafe { libc::kill(-(job.child.id() as i32), libc::SIGKILL) };
         // A snapshot stopped half way would leave the project's container paused.
-        if job.kind == "snapshot" && let Some(st) = stub_of(&p.d, &job.id) { wb_core::container::unpause(&st); }
+        // Off the panel's thread: podman may be what is slow.
+        if job.kind == "snapshot" && let Some(st) = stub_of(&p.d, &job.id) { std::thread::spawn(move || wb_core::container::unpause(&st)); }
+        // A log in stopped half way may leave the vault open behind a locked page: closed again.
+        if (job.kind == "open" || job.kind == "recover") && let Ok(exe) = std::env::current_exe() {
+            let _ = std::process::Command::new(exe.with_file_name("whaybench-project")).args(["close", &job.id]).env(wb_core::paths::ENV_DATA_DIR, &p.d.root)
+                .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+        }
     }
     let status = job.child.wait();
     let ok = !late && status.is_ok_and(|st| st.success());
     let said = std::fs::read_to_string(&job.err).unwrap_or_default().trim().trim_start_matches("error: ").to_string();
     let out: Value = std::fs::read_to_string(&job.out).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     let _ = (std::fs::remove_file(&job.out), std::fs::remove_file(&job.err));
-    if late { p.bs_msg = Some((job.id, job.kind, wb_core::i18n::t("briefsafe-too-long").to_string())); }
-    else if !ok { p.bs_msg = Some((job.id, job.kind, said)); }
+    if late { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), wb_core::i18n::t("briefsafe-too-long").to_string())); }
+    else if !ok { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), said)); }
     else if job.kind == "snapshot" {
         let warn = s(&out, "warning");
         status::say(&p.d, &if warn.is_empty() { wb_core::i18n::t("briefsafe-snapshot-taken").to_string() } else { wb_core::i18n::f("briefsafe-snapshot-warning", &[("why", warn.to_string())]) }, 8);
@@ -364,7 +375,7 @@ fn poll_job(p: &mut P) -> bool {
 }
 
 /// What the last step of this project said, if it did not work.
-fn msg_for<'a>(p: &'a P, id: &str) -> Option<(&'a str, &'a str)> { p.bs_msg.as_ref().filter(|m| m.0 == id).map(|m| (m.1.as_str(), m.2.as_str())) }
+fn msg_for<'a>(p: &'a P, id: &str) -> Option<(&'a str, &'a str)> { p.bs_msg.get(id).map(|m| (m.0.as_str(), m.1.as_str())) }
 
 /// A step for this project is running, and it hides its content (logging in).
 fn opening(p: &P, id: &str) -> bool { p.job.as_ref().is_some_and(|j| j.id == id && (j.kind == "open" || j.kind == "recover")) }
@@ -379,14 +390,14 @@ fn closed_page(p: &P, st: &wb_core::roots::Stub) -> String {
         let mut b = format!("<h1>{name}</h1><p>{}</p>", e(&wb_core::i18n::f("briefsafe-locked-page", &[("name", st.name.clone())])));
         match msg_for(p, &st.id) {
             // No key: said in the person's words, with the way on (and still there after a recovery key that did not fit).
-            Some((kind, why)) if st.vault && (why.contains(wb_core::vault::NO_KEY) || kind == "recover") => {
+            Some((kind, why)) if st.vault && (why.contains(wb_core::vault::NO_KEY) || kind == "recover" || (kind == "open" && why.contains("gocryptfs"))) => {
                 if kind == "recover" { b += &format!("<p class='warn'>{}</p>", e(&wb_core::i18n::f("briefsafe-failed", &[("why", why.to_string())]))); }
-                b += &format!("<p>{}</p><p>{}</p>", e(&t("briefsafe-no-key-page")), link("bs", "recover", &e(&t("briefsafe-enter-recovery"))));
+                b += &format!("<p>{}</p><p>{}</p>", e(&t("briefsafe-no-key-page")), link("bs", &format!("{}:recover", st.id), &e(&t("briefsafe-enter-recovery"))));
             }
             Some((_, why)) => b += &format!("<p class='warn'>{}</p>", e(&wb_core::i18n::f("briefsafe-failed", &[("why", why.to_string())]))),
             None => {}
         }
-        b += &format!("<p>{}</p>", link("bs", "open", &e(&t("briefsafe-login"))));
+        b += &format!("<p>{}</p>", link("bs", &format!("{}:open", st.id), &e(&t("briefsafe-login"))));
         b
     };
     format!("<!doctype html><meta charset='utf-8'><style>{}</style><body>{body}</body>", style(&p.d))
@@ -404,7 +415,7 @@ fn project_sessions(d: &Data, id: &str) -> Vec<Value> {
 fn open_bar(p: &P, st: &wb_core::roots::Stub) -> String {
     let t = |k: &str| e(wb_core::i18n::t(k));
     let mine: Vec<Value> = project_sessions(&p.d, &st.id).into_iter().filter(|r| s(r, "movedTo").is_empty() && r["ended"] != true).collect();
-    let rows: Vec<String> = mine.iter().take(12).map(|r| format!("<li>{}</li>", link("bs", &format!("resume:{}", s(r, "id")), &e(&sessions::session_name(&p.d, s(r, "id")))))).collect();
+    let rows: Vec<String> = mine.iter().take(12).map(|r| format!("<li>{}</li>", link("bs", &format!("{}:resume:{}", st.id, s(r, "id")), &e(&sessions::session_name(&p.d, s(r, "id")))))).collect();
     let list = if rows.is_empty() { format!("<p class='m'>{}</p>", t("briefsafe-no-sessions")) } else { format!("<ul>{}</ul>", rows.join("")) };
     // A step running for it (a snapshot, logging out), or why the last one did not work: said over its pages.
     let note = match (p.job.as_ref().filter(|j| j.id == st.id), msg_for(p, &st.id)) {
@@ -412,7 +423,9 @@ fn open_bar(p: &P, st: &wb_core::roots::Stub) -> String {
         (None, Some((_, why))) => format!("<p class='warn'>{}</p>", e(&wb_core::i18n::f("briefsafe-failed", &[("why", why.to_string())]))),
         _ => String::new(),
     };
-    format!("{note}<p>{} · {} · {}</p><h3>{}</h3>{list}<hr>", link("bs", "new", &t("briefsafe-new-conversation")), link("bs", "snapshot", &t("briefsafe-snapshot")), link("bs", "close", &t("briefsafe-logout")), t("briefsafe-sessions"))
+    // Opened without a container (no podman or image for this system): said, its agents run as the person.
+    let note = if wb_core::container::opened_isolated(st) { note } else { format!("{note}<p class='m'>{}</p>", t("briefsafe-not-isolated")) };
+    format!("{note}<p>{} · {} · {}</p><h3>{}</h3>{list}<hr>", link("bs", &format!("{}:new", st.id), &t("briefsafe-new-conversation")), link("bs", &format!("{}:snapshot", st.id), &t("briefsafe-snapshot")), link("bs", &format!("{}:close", st.id), &t("briefsafe-logout")), t("briefsafe-sessions"))
 }
 
 /// A request for the chosen session's AI; only to one that is running.
@@ -791,7 +804,7 @@ fn tick(s_: &Shared) {
                 // Its conversations come and go too, and a step's state.
                 let talk = if p.bs.is_some() {
                     let job = p.job.as_ref().map(|j| format!("{}{}", j.id, j.kind)).unwrap_or_default();
-                    format!("{job}{:?}{}", p.bs_msg, project_sessions(&p.d, &pid).iter().map(|r| format!("{}{}", s(r, "id"), at(r, "lastActive"))).collect::<Vec<_>>().join(","))
+                    format!("{job}{:?}{}", p.bs_msg.get(&pid), project_sessions(&p.d, &pid).iter().map(|r| format!("{}{}", s(r, "id"), at(r, "lastActive"))).collect::<Vec<_>>().join(","))
                 } else { String::new() };
                 let now = format!("{}{}{talk}", stamp_of(&p.st, &pid), style(&p.d));
                 if now == p.stamp { false } else { p.stamp = now; true }
@@ -866,9 +879,12 @@ fn clicked(s_: &Shared, uri: &str) {
                 };
                 (where_, s(&d, "original").to_string())
             };
+            // The project the dialog was opened for: sent only if it is still the one shown.
+            let bs_then = s_.borrow().bs.clone();
             let (s2, pid2, w2) = (s_.clone(), pid.clone(), where_.clone());
             ask_text(&win, wb_core::i18n::t("request-change-2"), &wb_core::i18n::f("request", &[("where_", (where_).to_string())]), move |t| {
                 let source = if original.is_empty() { String::new() } else { wb_core::i18n::ai_f("original-of-the-template", &[("original", (original).to_string())]) };
+                if s2.borrow().bs != bs_then { return; }
                 request(&s2.borrow(), &wb_core::i18n::ai_f("change-as-the-user-requests-check", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("pid2", (pid2).to_string()), ("did", (did).to_string()), ("source", (source).to_string())]));
             });
         }
@@ -883,7 +899,8 @@ fn clicked(s_: &Shared, uri: &str) {
             } else {
                 let (s2, id2) = (s_.clone(), id.to_string());
                 let w2 = where_.clone();
-                ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { let _ = &id2; request(&s2.borrow(), &wb_core::i18n::ai_f("rework-section-user-request-the-earlier", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
+                let bs_then = s_.borrow().bs.clone();
+                ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { let _ = &id2; if s2.borrow().bs != bs_then { return; } request(&s2.borrow(), &wb_core::i18n::ai_f("rework-section-user-request-the-earlier", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
             }
         }
         "iback" | "iredo" => {
@@ -898,7 +915,8 @@ fn clicked(s_: &Shared, uri: &str) {
                 over(s_, None);
             } else {
                 let (s2, w2) = (s_.clone(), where_.clone());
-                ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| request(&s2.borrow(), &wb_core::i18n::f("rework-user-request-the-earlier-state", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])));
+                let bs_then = s_.borrow().bs.clone();
+                ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { if s2.borrow().bs != bs_then { return; } request(&s2.borrow(), &wb_core::i18n::f("rework-user-request-the-earlier-state", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
             }
         }
         _ => {}
@@ -909,6 +927,9 @@ fn clicked(s_: &Shared, uri: &str) {
 fn briefsafe_clicked(s_: &Shared, what: &str) {
     let (d, win, id) = { let p = s_.borrow(); (p.d.clone(), p.win.clone(), p.bs.clone()) };
     let Some(id) = id else { return };
+    // A link names the project its page was drawn for: pressed on a page left from another project, it does nothing.
+    let Some((for_id, what)) = what.split_once(':') else { return };
+    if for_id != id { return; }
     let t = |k: &str| wb_core::i18n::t(k).to_string();
     match what {
         "open" => start_job(&mut s_.borrow_mut(), &id, "open", &t("briefsafe-opening"), &["open", &id], None),
@@ -977,7 +998,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let s_: Shared = Rc::new(RefCell::new(P {
         d: d.clone(), st, pid: None, rows: vec![(String::new(), String::new(), usize::MAX)], tab: MAP.to_string(), over: None,
         range: Some(7), stamp: String::new(), shown: String::new(), scroll: HashMap::new(), key_now: String::new(), failed: String::new(), web: web.clone(), pick: pick.clone(), path, tabs, tab_buttons: Vec::new(), anchors: HashMap::new(), tab_keys: Vec::new(), converting: Rc::default(), win: win.clone(),
-        host, bs: None, job: None, bs_msg: None,
+        host, bs: None, job: None, bs_msg: HashMap::new(),
     }));
     // Links are handled here; only the page's own anchors and the drawn page itself pass.
     {

@@ -215,7 +215,16 @@ names another step.
   project closes; a mark left by a killed close no longer keeps tabs away, and no tab starts into a closing project. A
   recovery key is tried read-only before the vault's key file is touched. A step past its time is stopped with all it
   started, and a snapshot stopped so leaves the container going. The panel draws the chosen project at once, keeps
-  other projects' messages, says when a step cannot start, and adds no document control to a Briefsafe project. `snapshot`, `snapshots` and `restore` take, list and go back to
+  other projects' messages, says when a step cannot start, and adds no document control to a Briefsafe project.
+  From the third review: a Briefsafe project's text in the panels keeps no links or images at all (nothing it names is
+  followed or handed on); a map panel showing a project's map sends it only to that project's conversations and never
+  into the host's projects, and a new host project takes no map of a project. A project's row in the Sessions panel
+  opens it as the project's; a conversation's moves never lead from a project into the host's conversations. Ending a
+  tab's agent is bounded on the host side too. The Projects panel's links and dialogs act only for the project they
+  were drawn for, keeps each project's message, closes a vault left open by a log in stopped half way, offers the
+  recovery key after any failed vault log in, says when a project runs without a container, and draws a document's
+  headings in one pass. A closing mark still in use is left alone at start; program links in a project's data are
+  replaced atomically too. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

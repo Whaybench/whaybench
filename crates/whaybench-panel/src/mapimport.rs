@@ -38,7 +38,9 @@ pub fn exported(d: &Data) -> Vec<Choice> {
 /// The maps of other sessions, each as a whole.
 pub fn other_sessions(d: &Data) -> Vec<Sessions> {
     let here = sessions::target(d);
-    sessions::all(d).into_iter().filter(|i| s(i, "movedTo").is_empty() && Some(s(i, "id")) != here.as_deref()).filter_map(|i| {
+    // The host's own conversations: a Briefsafe project's map is never copied out of it (spec 3.22).
+    let roots = wb_core::roots::Roots::new(d.clone());
+    sessions::all(d).into_iter().filter(|i| s(i, "movedTo").is_empty() && Some(s(i, "id")) != here.as_deref() && roots.project_of(s(i, "id")).is_none()).filter_map(|i| {
         let id = s(&i, "id").to_string();
         let map = sessions::map_of(d, &id)?;
         let nodes = map.get("nodes")?.as_array()?;

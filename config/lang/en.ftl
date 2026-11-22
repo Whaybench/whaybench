@@ -334,6 +334,7 @@ briefsafe-too-long = It took too long and was stopped; try again
 briefsafe-snapshot-taken = Snapshot taken
 briefsafe-snapshot-warning = Snapshot taken · { $why }
 briefsafe-unreadable = This project's record could not be read.
+briefsafe-not-isolated = Opened without a container (no podman or image for this system): its agents run as you, outside isolation.
 panel-left-closed = Panel crashed repeatedly · logged
 not-run-no-conversation-tab-open = { $head } not run · No conversation tab · Open it from the session list
 session-ended-hidden-in-the-session = Session ended · Hidden in the session list

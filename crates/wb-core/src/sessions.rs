@@ -57,7 +57,12 @@ pub fn current_id(d: &Data, id: &str) -> String {
     while !seen.contains(&now) {
         seen.push(now.clone());
         match record_of(d, &now).and_then(|r| r.get("movedTo").and_then(Value::as_str).map(String::from)) {
-            Some(next) if plain_id(&next) => now = next,
+            // A move stays in the conversation's own root: a project's record does not lead to a host conversation.
+            // (A host conversation may move to a number with no record yet; a project's only to one of its own.)
+            Some(next) if plain_id(&next) && {
+                let (here, there) = (crate::roots::known_session(d, &now).map(|r| r.root), crate::roots::known_session(d, &next).map(|r| r.root));
+                there == here || (there.is_none() && here.as_ref().is_none_or(|h| !crate::roots::is_project_root(&Data::new(h.clone()))))
+            } => now = next,
             _ => break,
         }
     }
