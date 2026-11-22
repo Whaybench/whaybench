@@ -254,7 +254,10 @@ names another step.
   project's page or a recovery key; the view's guard decodes a file address before it checks it; the Files panel
   takes a project conversation's path as the project's only where it really is. `whaybench-files` from the host does not work on a
   project's conversation; a project's file patterns walk a bounded number of entries; a refused agent request logs
-  its target only when it is a plain id. `snapshot`, `snapshots` and `restore` take, list and go back to
+  its target only when it is a plain id.
+  From the tenth review: a view tied to a project's conversation takes that conversation's list from the project again
+  when the project is logged in to, so nothing it shows is kept in the host's data; a pinned page no longer reloads
+  over and over. `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with

@@ -279,6 +279,8 @@ fn incoming(v: &mut V) -> bool {
 fn switch(v: &mut V) {
     v.followed = session_now(v);
     if let Link::Target(p, t) = &v.link {
+        // A pinned page follows no session (a pinned file of a project is protected by its path).
+        v.of_project = false;
         v.hist = History::only(p, t);
         display(v);
         return;
@@ -447,9 +449,12 @@ fn tick(s: &Shared) {
         display(&v);
         retitle(&v);
     }
-    if v.of_project && !project_of(v.followed.as_deref()) {
-        // The project closed: nothing of it stays on screen (spec 3.22).
+    // The followed session's project closed, or opened again under the same session: its own list, in its own root
+    // (what it shows never goes into the host's).
+    if v.of_project != project_of(v.followed.as_deref()) {
+        // Closed: nothing of it stays on screen (spec 3.22).
         switch(&mut v);
+        v.of_project = project_of(v.followed.as_deref());
         retitle(&v);
     }
     if !matches!(v.link, Link::Target(..)) && now != v.followed {

@@ -76,7 +76,7 @@ impl Waiting {
             let Some(v) = wb_core::paths::read_text(&e).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { continue };
             let session = e.file_stem().unwrap_or_default().to_string_lossy().to_string();
             if !self.newly(&session, v["state"].as_str().unwrap_or(""), v["at"].as_u64().unwrap_or(0)) || focused { continue; }
-            record::detail("session", "waiting told on the desktop", &[("session", session.clone())]);
+            record::detail("session", "waiting told on the desktop", &[("session", if wb_core::map::safe_id(&session).is_ok() { session.clone() } else { "?".into() })]);
             let (d, note) = (d.clone(), v["note"].as_str().unwrap_or("").to_string());
             std::thread::spawn(move || {
                 // A project's conversation is told by its project's name only: the desktop keeps what it is shown.
