@@ -55,7 +55,7 @@ pub fn diff_objs(kind: &str, old: &Map<String, Value>, new: &Map<String, Value>)
 
 impl Store {
     fn event_files(&self, pid: &str) -> Vec<PathBuf> {
-        let mut f: Vec<PathBuf> = fs::read_dir(self.pdir(pid).join("events")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
+        let mut f: Vec<PathBuf> = wb_core::paths::list_dir(&self.pdir(pid).join("events")).into_iter().filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
         f.sort();
         f
     }
@@ -87,7 +87,7 @@ impl Store {
             if age > meta_days * day { let _ = fs::remove_file(&f); }
             else if age > full_days * day && has_copy(&ev) { strip(&mut ev); let _ = write_json(&f, &ev); }
         }
-        let size = |files: &[PathBuf]| files.iter().filter_map(|f| fs::metadata(f).ok()).map(|m| m.len()).sum::<u64>();
+        let size = |files: &[PathBuf]| files.iter().filter_map(|f| wb_core::paths::meta(f).ok()).map(|m| m.len()).sum::<u64>();
         let files = self.event_files(pid);
         for f in &files {
             if size(&files) <= cap { break; }

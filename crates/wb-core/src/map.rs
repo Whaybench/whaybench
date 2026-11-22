@@ -44,7 +44,7 @@ pub(crate) fn write_json(path: &Path, value: &Value) -> Result<()> {
     Ok(crate::paths::write_atomic(path, serde_json::to_vec(value)?)?)
 }
 
-pub(crate) fn safe_id(value: &str) -> Result<&str> {
+pub fn safe_id(value: &str) -> Result<&str> {
     if value.is_empty() || value.len() > 128 || !value.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-') {
         return Err("invalid session or node id".into());
     }

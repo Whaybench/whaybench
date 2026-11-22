@@ -204,6 +204,10 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
     if !running(data) { return Err(format!("not running with data directory {}", data.root.display())); }
     match words.first().map(String::as_str) {
         Some("new") => {
+            // `--project ID`: a new conversation in that Briefsafe project (it must be open; the tab refuses otherwise).
+            let mut words = words.to_vec();
+            let project = words.iter().position(|w| w == "--project").and_then(|i| { let v = words.get(i + 1).cloned(); words.drain(i..(i + 2).min(words.len())); v });
+            if let Some(p) = &project && !wb_core::roots::stubs(data).iter().any(|s| &s.id == p && s.open()) { return Err(wb_core::i18n::t("briefsafe-project-closed").into()); }
             let (agent, map_from) = match &words[1..] {
                 [flag, id, rest @ ..] if flag == "--agent" => (Some(id.clone()), rest.first().cloned()),
                 rest => (None, rest.first().cloned()),
@@ -221,7 +225,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                     || wb_core::roots::stubs(data).iter().any(|s| std::fs::canonicalize(s.stored().root).is_ok_and(|r| real.starts_with(r)));
                 if in_project { return Err(wb_core::i18n::t("briefsafe-map-stays").into()); }
             }
-            post(data, &Request::OpenTerm { open: TermOpen { map_from, agent, ..Default::default() } })
+            post(data, &Request::OpenTerm { open: TermOpen { map_from, agent, project, ..Default::default() } })
         }
         Some("show") => show_session(data, words.get(1).ok_or("session show needs an id")?),
         Some("type") => {

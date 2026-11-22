@@ -152,7 +152,8 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let open = sessions::open_tabs(d);
     let (query, show_hidden) = { let v = view.borrow(); (v.query.clone(), v.show_hidden) };
     let waiting = asking(d);
-    let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}", open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
+    let stubs = wb_core::roots::stubs(d);
+    let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}{:?}", stubs.iter().map(|s| (&s.id, &s.name, s.open())).collect::<Vec<_>>(), open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
         let id = sid(s);
         (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id), sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).len(), sessions::old_version(id))
     }).collect::<Vec<_>>());
@@ -189,14 +190,30 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
         list.append(&follow);
         let held = |s: &Value| open.iter().any(|t| t.tab == text(s, "tab") || t.session.as_deref() == Some(sid(s)));
         let mut hidden = Vec::new();
-        for info in &all {
-            let spoken = !text(info, "firstPrompt").is_empty();
-            // Moved on, or stopped without ever being spoken in: gone. Never spoken in and in no tab: a spare process.
-            if moved(info) || (!spoken && !sessions::alive(d, sid(info))) || (!spoken && !held(info)) { continue; }
-            // A number left behind by a move that did not hold: its conversation is listed under the number it went on in.
-            if sessions::ghost(d, &all, sid(info)) { continue; }
-            if info.get("ended") == Some(&Value::Bool(true)) { hidden.push(info); continue; }
-            add(info, false, subagents_note(d, sid(info)));
+        // The host's conversations, then each Briefsafe project's under its name (spec 3.22): a locked one is its name
+        // only, nothing of its conversations.
+        let roots = wb_core::roots::Roots::new(d.clone());
+        let of: Vec<Option<String>> = all.iter().map(|i| roots.project_of(sid(i))).collect();
+        let groups = std::iter::once(None).chain(stubs.iter().map(Some));
+        for group in groups {
+            if let Some(st) = group {
+                let head = row(&format!("▣ {}", st.name), if st.open() { wb_core::i18n::t("briefsafe-open") } else { wb_core::i18n::t("briefsafe-locked") }, None, !st.open());
+                head.set_widget_name("__project__");
+                head.set_activatable(false);
+                list.append(&head);
+                if !st.open() { continue; }
+            }
+            let want = group.map(|st| st.id.as_str());
+            for (info, p) in all.iter().zip(&of) {
+                if p.as_deref() != want { continue; }
+                let spoken = !text(info, "firstPrompt").is_empty();
+                // Moved on, or stopped without ever being spoken in: gone. Never spoken in and in no tab: a spare process.
+                if moved(info) || (!spoken && !sessions::alive(d, sid(info))) || (!spoken && !held(info)) { continue; }
+                // A number left behind by a move that did not hold: its conversation is listed under the number it went on in.
+                if sessions::ghost(d, &all, sid(info)) { continue; }
+                if info.get("ended") == Some(&Value::Bool(true)) { hidden.push(info); continue; }
+                add(info, false, subagents_note(d, sid(info)));
+            }
         }
         if !hidden.is_empty() {
             let head = row(&wb_core::i18n::f("hidden-sessions", &[("a1", (if show_hidden { "▾" } else { "▸" }).to_string()), ("a2", (hidden.len()).to_string())]), "", None, false);
@@ -232,6 +249,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                 "__hidden__" => { let v = view.borrow().show_hidden; view.borrow_mut().show_hidden = !v; }
                 "__follow__" => sessions::clear_focus(&d),
                 "" => return,
+                other if other.starts_with("__") => return,
                 id => {
                     sessions::set_focus(&d, id, "person's click");
                     let mut a = data_arg(&d);

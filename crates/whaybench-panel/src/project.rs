@@ -134,7 +134,7 @@ fn map_page(st: &Store, pid: &str) -> String {
 
 fn folder_size(dir: &Path) -> (usize, u64) {
     let (mut n, mut size) = (0, 0);
-    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() { n += 1; size += e.metadata().map(|m| m.len()).unwrap_or(0); }
+    for f in wb_core::paths::list_dir(dir) { n += 1; size += wb_core::paths::meta(&f).map(|m| m.len()).unwrap_or(0); }
     (n, size)
 }
 
@@ -243,12 +243,99 @@ struct P {
     tabs: gtk::FlowBox,
     tab_buttons: Vec<(String, gtk::Button)>,
     win: gtk::ApplicationWindow,
+    /// The host's own projects (`st` is a Briefsafe project's store while one is shown and open).
+    host: Store,
+    /// The Briefsafe project on show (spec 3.22), by id.
+    bs: Option<String>,
+    /// A `whaybench-project` step running for it (log in, log out, snapshot), and what it is.
+    job: Option<(String, std::process::Child)>,
+    /// What the last step said when it did not work.
+    bs_msg: Option<String>,
 }
 type Shared = Rc<RefCell<P>>;
 
 fn stamp_of(st: &Store, pid: &str) -> String {
     let base = st.pdir(pid);
-    ["events", "map.json", "project.json"].iter().map(|f| std::fs::metadata(base.join(f)).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |t| t.as_nanos()).to_string()).collect::<Vec<_>>().join(",")
+    ["events", "map.json", "project.json"].iter().map(|f| wb_core::paths::meta(&base.join(f)).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |t| t.as_nanos()).to_string()).collect::<Vec<_>>().join(",")
+}
+
+/// Briefsafe projects are listed by this key, apart from the host's projects' ids.
+const BS: &str = "bs:";
+
+fn stub_of(d: &Data, id: &str) -> Option<wb_core::roots::Stub> { wb_core::roots::stubs(d).into_iter().find(|s| s.id == id) }
+
+/// Shows the project of this list key: a host project, or a Briefsafe one (its store only once it is open).
+fn choose(p: &mut P, key: Option<String>) {
+    match key.as_deref().and_then(|k| k.strip_prefix(BS)) {
+        Some(id) => { p.bs = Some(id.to_string()); p.pid = Some(id.to_string()); }
+        None => { p.bs = None; p.pid = key; p.st = p.host.clone(); }
+    }
+    p.bs_msg = None;
+    p.stamp.clear();
+    p.over = None;
+}
+
+/// Runs a step of `whaybench-project` for a Briefsafe project in the background (keyring and podman can take long);
+/// `input` goes to its standard input (a recovery key), never on its command line.
+fn start_job(p: &mut P, what: &str, args: &[&str], input: Option<String>) {
+    if p.job.is_some() { return; }
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut c = std::process::Command::new(exe.with_file_name("whaybench-project"));
+    c.args(args).env(wb_core::paths::ENV_DATA_DIR, &p.d.root).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
+    match c.spawn() {
+        Ok(mut child) => {
+            if let Some(mut i) = child.stdin.take() { let _ = std::io::Write::write_all(&mut i, input.unwrap_or_default().as_bytes()); }
+            p.job = Some((what.to_string(), child));
+            p.bs_msg = None;
+            p.stamp.clear();
+        }
+        Err(e) => p.bs_msg = Some(e.to_string()),
+    }
+}
+
+/// A finished step: what it said when it did not work. True when one finished.
+fn poll_job(p: &mut P) -> bool {
+    let Some((_, child)) = p.job.as_mut() else { return false };
+    if !matches!(child.try_wait(), Ok(Some(_))) { return false; }
+    let Some((_, child)) = p.job.take() else { return false };
+    if let Ok(out) = child.wait_with_output() && !out.status.success() {
+        let said = String::from_utf8_lossy(&out.stderr).trim().trim_start_matches("error: ").to_string();
+        p.bs_msg = Some(said);
+    }
+    p.stamp.clear();
+    true
+}
+
+/// The page of a Briefsafe project that is not open: locked, a step running, or why the last one did not work.
+fn closed_page(p: &P, st: &wb_core::roots::Stub) -> String {
+    let t = |k: &str| wb_core::i18n::t(k).to_string();
+    let name = e(&st.name);
+    let body = if let Some((what, _)) = &p.job {
+        format!("<h1>{name}</h1><p>{}</p>", e(&wb_core::i18n::f("briefsafe-working", &[("what", what.clone())])))
+    } else {
+        let mut b = format!("<h1>{name}</h1><p>{}</p>", e(&wb_core::i18n::f("briefsafe-locked-page", &[("name", st.name.clone())])));
+        if let Some(why) = &p.bs_msg {
+            b += &format!("<p class='warn'>{}</p>", e(&wb_core::i18n::f("briefsafe-failed", &[("why", why.clone())])));
+            if st.vault && why.contains(wb_core::vault::NO_KEY) {
+                b += &format!("<p>{}</p><p>{}</p>", e(&t("briefsafe-no-key-page")), link("bs", "recover", &e(&t("briefsafe-enter-recovery"))));
+            }
+        }
+        b += &format!("<p>{}</p>", link("bs", "open", &e(&t("briefsafe-login"))));
+        b
+    };
+    format!("<!doctype html><meta charset='utf-8'><style>{}</style><body>{body}</body>", style(&p.d))
+}
+
+/// Over an open Briefsafe project's pages: its conversations and what can be done with it.
+fn open_bar(p: &P, st: &wb_core::roots::Stub) -> String {
+    let t = |k: &str| e(wb_core::i18n::t(k));
+    let roots = wb_core::roots::Roots::new(p.d.clone());
+    let mut mine: Vec<Value> = sessions::all(&p.d).into_iter().filter(|r| roots.project_of(s(r, "id")).as_deref() == Some(st.id.as_str()))
+        .filter(|r| s(r, "movedTo").is_empty() && r["ended"] != true).collect();
+    mine.sort_by_key(|r| std::cmp::Reverse(at(r, "lastActive")));
+    let rows: Vec<String> = mine.iter().take(12).map(|r| format!("<li>{}</li>", link("bs", &format!("resume:{}", s(r, "id")), &e(&sessions::session_name(&p.d, s(r, "id")))))).collect();
+    let list = if rows.is_empty() { format!("<p class='m'>{}</p>", t("briefsafe-no-sessions")) } else { format!("<ul>{}</ul>", rows.join("")) };
+    format!("<p>{} · {} · {}</p><h3>{}</h3>{list}<hr>", link("bs", "new", &t("briefsafe-new-conversation")), link("bs", "snapshot", &t("briefsafe-snapshot")), link("bs", "close", &t("briefsafe-logout")), t("briefsafe-sessions"))
 }
 
 /// A request for the chosen session's AI; only to one that is running.
@@ -329,6 +416,8 @@ fn set_tabs(s_: &Shared, keys: Vec<(String, String)>) {
     let mut p = s_.borrow_mut();
     if p.tab_keys != keys {
         p.tab_keys = keys.clone();
+        // No tabs (a locked project): not even the way to add a document.
+        let any = !keys.is_empty();
         while let Some(c) = p.tabs.first_child() { p.tabs.remove(&c); }
         p.tab_buttons.clear();
         for (key, label) in keys {
@@ -342,12 +431,14 @@ fn set_tabs(s_: &Shared, keys: Vec<(String, String)>) {
             p.tabs.insert(&b, -1);
             p.tab_buttons.push((key, b));
         }
+        if any {
         let plus = gtk::Button::with_label(wb_core::i18n::t("document"));
         plus.add_css_class("flat");
         plus.set_tooltip_text(Some(wb_core::i18n::t("add-a-document-template-add-on")));
         let s2 = s_.clone();
         plus.connect_clicked(move |b| add_doc_menu(&s2, b));
         p.tabs.insert(&plus, -1);
+        }
     }
     for (key, b) in &p.tab_buttons {
         if *key == p.tab && p.over.is_none() { b.add_css_class("chosen"); } else { b.remove_css_class("chosen"); }
@@ -442,7 +533,8 @@ fn redraw(s_: &Shared) {
         let up: Vec<String> = p.st.ancestors(&pid).iter().map(|a| s(a, "name").to_string()).chain(std::iter::once(s(&project, "name").to_string())).collect();
         let kids = p.st.children(&pid).len();
         p.path.set_text(&format!("{}{}", up.join(" › "), if kids > 0 { wb_core::i18n::f("below", &[("kids", (kids).to_string())]) } else { String::new() }));
-        let body = page_for(&mut p);
+        let mut body = page_for(&mut p);
+        if let Some(st) = p.bs.clone().and_then(|id| stub_of(&p.d, &id)) { body = open_bar(&p, &st) + &body; }
         let key = format!("{pid}/{}", p.over.as_ref().map(|o| o.1.clone()).unwrap_or_else(|| p.tab.clone()));
         let html = format!("<!doctype html><meta charset='utf-8'><style>{}</style><body>{body}</body>", style(&p.d));
         let mut tabs = vec![(MAP.to_string(), wb_core::i18n::t("map").to_string())];
@@ -530,18 +622,21 @@ fn new_project(s_: &Shared) {
 
 fn fill_list(s_: &Shared) {
     let mut p = s_.borrow_mut();
-    let rows: Vec<(String, String, usize)> = p.st.tree().into_iter().map(|(v, depth)| (s(&v, "id").to_string(), s(&v, "name").to_string(), depth)).collect();
+    let mut rows: Vec<(String, String, usize)> = p.host.tree().into_iter().map(|(v, depth)| (s(&v, "id").to_string(), s(&v, "name").to_string(), depth)).collect();
+    // Briefsafe projects after the host's: their name and whether they are open, nothing of their content.
+    rows.extend(wb_core::roots::stubs(&p.d).into_iter().map(|st| (format!("{BS}{}", st.id), format!("{} · {}", st.name, wb_core::i18n::t(if st.open() { "briefsafe-open" } else { "briefsafe-locked" })), 0)));
     if rows == p.rows { return; }
     p.rows = rows;
     let names: Vec<String> = if p.rows.is_empty() { vec![wb_core::i18n::t("no-project").to_string()] } else { p.rows.iter().map(|(_, n, depth)| format!("{}{}{n}", "   ".repeat(*depth), if *depth > 0 { "└ " } else { "" })).collect() };
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     let model = gtk::StringList::new(&refs);
     // The project of the chosen session's folder, or the one already on show, or the first.
-    let of_session = sessions::target(&p.d).and_then(|t| sessions::record_of(&p.d, &t)).and_then(|r| p.st.project_for_cwd(s(&r, "cwd"))).map(|v| s(&v, "id").to_string());
-    let want = p.pid.clone().or(of_session);
+    let of_session = sessions::target(&p.d).and_then(|t| sessions::record_of(&p.d, &t)).and_then(|r| p.host.project_for_cwd(s(&r, "cwd"))).map(|v| s(&v, "id").to_string());
+    let shown = p.bs.as_ref().map(|id| format!("{BS}{id}")).or(p.pid.clone());
+    let want = shown.or(of_session);
     let at_row = want.and_then(|w| p.rows.iter().position(|r| r.0 == w)).unwrap_or(0);
-    p.pid = p.rows.get(at_row).map(|r| r.0.clone());
-    p.stamp.clear();
+    let key = p.rows.get(at_row).map(|r| r.0.clone());
+    choose(&mut p, key);
     let pick = p.pick.clone();
     drop(p);
     pick.set_model(Some(&model));
@@ -549,8 +644,40 @@ fn fill_list(s_: &Shared) {
 }
 
 fn tick(s_: &Shared) {
-    convert_waiting(&s_.borrow());
+    if s_.borrow().bs.is_none() { convert_waiting(&s_.borrow()); }
     fill_list(s_);
+    let locked = {
+        let mut p = s_.borrow_mut();
+        poll_job(&mut p);
+        let mut locked = None;
+        if let Some(id) = p.bs.clone() {
+            match stub_of(&p.d, &id) {
+                // Not open (or a step running): its own page, nothing of its content, not even its tabs.
+                Some(st) if p.job.is_some() || !st.open() => {
+                    p.st = p.host.clone();
+                    p.path.set_text(&format!("{} · {}", st.name, wb_core::i18n::t("briefsafe-locked")));
+                    locked = Some(closed_page(&p, &st));
+                }
+                // Open: its own store, read in its data the safe way.
+                Some(st) => {
+                    if p.st.data.root != st.root().root { p.st = Store::new(st.root()); p.stamp.clear(); }
+                    // Its conversations come and go too.
+                    let roots = wb_core::roots::Roots::new(p.d.clone());
+                    let talk: Vec<String> = sessions::all(&p.d).iter().filter(|r| roots.project_of(s(r, "id")).as_deref() == Some(id.as_str())).map(|r| format!("{}{}", s(r, "id"), at(r, "lastActive"))).collect();
+                    let sig = talk.join(",");
+                    if !p.stamp.ends_with(&sig) { p.stamp.clear(); }
+                }
+                None => { choose(&mut p, None); }
+            }
+        }
+        locked
+    };
+    if let Some(page) = locked {
+        set_tabs(s_, Vec::new());
+        let mut p = s_.borrow_mut();
+        if p.shown != page { p.web.load_html(&page, Some("about:blank")); p.shown = page; }
+        return;
+    }
     let due = {
         let mut p = s_.borrow_mut();
         match p.pid.clone() {
@@ -562,7 +689,11 @@ fn tick(s_: &Shared) {
             }
             Some(pid) => {
                 // The theme is in the page too: a change of theme draws it again.
-                let now = format!("{}{}", stamp_of(&p.st, &pid), style(&p.d));
+                let talk = if p.bs.is_some() {
+                    let roots = wb_core::roots::Roots::new(p.d.clone());
+                    sessions::all(&p.d).iter().filter(|r| roots.project_of(s(r, "id")).as_deref() == Some(pid.as_str())).map(|r| format!("{}{}", s(r, "id"), at(r, "lastActive"))).collect::<Vec<_>>().join(",")
+                } else { String::new() };
+                let now = format!("{}{}{talk}", stamp_of(&p.st, &pid), style(&p.d));
                 if now == p.stamp { false } else { p.stamp = now; true }
             }
         }
@@ -592,6 +723,7 @@ fn clicked(s_: &Shared, uri: &str) {
     let value = glib::Uri::unescape_string(value, None::<&str>).map(|v| v.to_string()).unwrap_or_else(|| value.to_string());
     let (pid, win) = { let p = s_.borrow(); (p.pid.clone().unwrap_or_default(), p.win.clone()) };
     let over = |s_: &Shared, o: Option<(String, String)>| { s_.borrow_mut().over = o; redraw(s_); };
+    if kind == "bs" { return briefsafe_clicked(s_, &value); }
     match kind {
         "close" => over(s_, None),
         "range" => { s_.borrow_mut().range = value.parse::<i64>().ok().filter(|d| *d > 0); redraw(s_); }
@@ -666,8 +798,43 @@ fn clicked(s_: &Shared, uri: &str) {
     }
 }
 
+/// A Briefsafe project's step from its page: log in or out, a snapshot, a conversation (spec 3.22).
+fn briefsafe_clicked(s_: &Shared, what: &str) {
+    let (d, win, id) = { let p = s_.borrow(); (p.d.clone(), p.win.clone(), p.bs.clone()) };
+    let Some(id) = id else { return };
+    let t = |k: &str| wb_core::i18n::t(k).to_string();
+    match what {
+        "open" => start_job(&mut s_.borrow_mut(), &t("briefsafe-opening"), &["open", &id], None),
+        "recover" => {
+            let s2 = s_.clone();
+            let id2 = id.clone();
+            ask_text(&win, &t("briefsafe-enter-recovery"), &t("briefsafe-recovery-label"), move |key| {
+                start_job(&mut s2.borrow_mut(), wb_core::i18n::t("briefsafe-opening"), &["open", &id2, "--recovery"], Some(format!("{key}\n")));
+            });
+        }
+        "snapshot" => {
+            status::say(&d, wb_core::i18n::t("briefsafe-snapshotting"), 6);
+            start_job(&mut s_.borrow_mut(), &t("briefsafe-snapshotting"), &["snapshot", &id], None);
+        }
+        "close" => {
+            // Its conversations close with it: said first when some are open.
+            let tabs = sessions::open_tabs(&d).iter().filter(|tab| sessions::tab_project(&d, &tab.tab).as_deref() == Some(id.as_str())).count();
+            let s2 = s_.clone();
+            let go = move || start_job(&mut s2.borrow_mut(), wb_core::i18n::t("briefsafe-closing"), &["close", &id], None);
+            if tabs == 0 { go(); } else { crate::common::confirm(&win, &wb_core::i18n::f("briefsafe-logout-confirm", &[("n", tabs.to_string())]), &[], &t("briefsafe-logout"), go); }
+        }
+        "new" => crate::common::ctl(&d, vec!["--data-dir".into(), d.root.to_string_lossy().to_string(), "session".into(), "new".into(), "--project".into(), id]),
+        other => {
+            if let Some(sid) = other.strip_prefix("resume:") && wb_core::map::safe_id(sid).is_ok() {
+                crate::common::ctl(&d, vec!["--data-dir".into(), d.root.to_string_lossy().to_string(), "session".into(), "show".into(), sid.to_string()]);
+            }
+        }
+    }
+}
+
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let st = Store::new(d.clone());
+    let host = st.clone();
     let web = webkit6::WebView::new();
     crate::common::set_up_web(&web, &d);
     web.set_vexpand(true);
@@ -700,6 +867,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let s_: Shared = Rc::new(RefCell::new(P {
         d: d.clone(), st, pid: None, rows: vec![(String::new(), String::new(), usize::MAX)], tab: MAP.to_string(), over: None,
         range: Some(7), stamp: String::new(), shown: String::new(), scroll: HashMap::new(), key_now: String::new(), failed: String::new(), web: web.clone(), pick: pick.clone(), path, tabs, tab_buttons: Vec::new(), anchors: HashMap::new(), tab_keys: Vec::new(), converting: Rc::default(), win: win.clone(),
+        host, bs: None, job: None, bs_msg: None,
     }));
     // Links are handled here; only the page's own anchors and the drawn page itself pass.
     {
@@ -721,7 +889,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         pick.connect_selected_notify(move |dd| {
             let Ok(mut p) = s2.try_borrow_mut() else { return };
             let chosen = p.rows.get(dd.selected() as usize).map(|r| r.0.clone()).filter(|x| !x.is_empty());
-            if chosen != p.pid { p.pid = chosen; p.stamp.clear(); p.over = None; }
+            let shown = p.bs.as_ref().map(|id| format!("{BS}{id}")).or(p.pid.clone());
+            if chosen != shown { choose(&mut p, chosen); }
         });
     }
     { let s2 = s_.clone(); new.connect_clicked(move |_| new_project(&s2)); }

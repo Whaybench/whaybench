@@ -20,7 +20,6 @@ pub mod projects;
 pub mod queue;
 
 use std::{
-    fs,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -40,14 +39,15 @@ impl Store {
     pub fn pdir(&self, pid: &str) -> PathBuf { self.root.join(pid) }
     pub fn get_project(&self, pid: &str) -> Option<Value> { read(&self.pdir(pid).join("project.json")) }
     pub fn list_projects(&self) -> Vec<Value> {
-        let mut names: Vec<PathBuf> = fs::read_dir(&self.root).into_iter().flatten().flatten().map(|e| e.path().join("project.json")).collect();
+        // Through `paths`: a Briefsafe project's store is in its data, which its agents can change (no links, no pipes).
+        let mut names: Vec<PathBuf> = wb_core::paths::list_dir(&self.root).into_iter().map(|p| p.join("project.json")).collect();
         names.sort();
         names.iter().filter_map(|p| read(p)).collect()
     }
 }
 
-pub fn read(path: &Path) -> Option<Value> { serde_json::from_str(&fs::read_to_string(path).ok()?).ok() }
-pub fn text(path: &Path) -> String { fs::read_to_string(path).unwrap_or_default() }
+pub fn read(path: &Path) -> Option<Value> { serde_json::from_str(&wb_core::paths::read_text(path).ok()?).ok() }
+pub fn text(path: &Path) -> String { wb_core::paths::read_text(path).unwrap_or_default() }
 
 pub fn write_text(path: &Path, content: &str) -> Res<()> {
     wb_core::paths::write_atomic(path, content).map_err(|e| e.to_string())
@@ -80,7 +80,7 @@ pub fn by_id(list: &[Value]) -> Map<String, Value> { list.iter().map(|x| (s(x, "
 pub(crate) fn scratch(name: &str) -> Store {
     static N: AtomicU64 = AtomicU64::new(0);
     let d = std::env::temp_dir().join(format!("wb-store-{name}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
     Store::new(Data::new(d))
 }

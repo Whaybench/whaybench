@@ -146,11 +146,20 @@ fn bin_dir(s: &Stub) -> PathBuf { if s.vault { crate::vault::run_dir(s).join("bi
 
 pub fn programs_bin(s: &Stub, home: &Path) -> Result<(), String> {
     if s.vault {
-        // The person's own folder, not the agents': made again whole.
+        // The person's own folder (read-only in there). The folder itself stays: a running container has it mounted,
+        // and a folder made anew would leave it the old one, emptied. Its links are put in place one by one.
         let dir = bin_dir(s);
-        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        for (name, real) in agent_programs(home) { std::os::unix::fs::symlink(&real, dir.join(name)).map_err(|e| e.to_string())?; }
+        let programs = agent_programs(home);
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            if !programs.iter().any(|(n, _)| e.file_name() == *n) { let _ = std::fs::remove_file(e.path()); }
+        }
+        for (name, real) in programs {
+            let at = dir.join(name);
+            if std::fs::read_link(&at).is_ok_and(|t| t == real) { continue; }
+            let _ = std::fs::remove_file(&at);
+            std::os::unix::fs::symlink(&real, &at).map_err(|e| e.to_string())?;
+        }
         // Its home is in the vault: `$HOME/.local/bin` (the plugins' hooks name it) leads to the same links.
         // A convenience only (PATH names the links' own folder): the agents can spoil it in their home, never the open.
         if let Err(e) = crate::beneath::link(&s.stored().root, Path::new("home/.local/bin"), &home.join(".local/bin")) {

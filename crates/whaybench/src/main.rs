@@ -28,7 +28,7 @@ whaybench hook [--data-dir DIR] claude|ID < EVENT.json    run by the agent's hoo
 whaybench mcp [--data-dir DIR]    the conversation map tool over MCP (stdio), for an agent in a Whaybench tab
 whaybench statusline [--data-dir DIR] < STATUS.json    a Claude Code status line: context and plan usage, kept for the notifications panel
 whaybench token set | check | clear    the long-lived Claude Code token (`claude setup-token`, read from standard input) that Briefsafe projects' agents sign in with, kept in the keyring
-whaybench ctl [--data-dir DIR] session new [MAP-FROM] | show ID | type ID TEXT | wait ID [SECONDS] | end ID
+whaybench ctl [--data-dir DIR] session new [--agent ID] [--project ID] [MAP-FROM] | show ID | type ID TEXT | wait ID [SECONDS] | end ID
 whaybench ctl [--data-dir DIR] quit
 whaybench ctl [--data-dir DIR] shot --out FILE.png [--panel N]    N: panel number, default the whole surface
 whaybench ctl [--data-dir DIR] theme NAME    default or a theme in addons/themes of the data directory

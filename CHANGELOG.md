@@ -186,7 +186,15 @@ names another step.
   `--encrypt` without `--folder` is refused instead of making a plain project. In a vault project the agents spoiling
   their home's program folder no longer keeps the project from opening; rustup finds its toolchains (`RUSTUP_HOME`);
   the add-on folder variable counts only inside a container; gocryptfs's messages go to a private file, so opening
-  cannot hang on its output; the panels never show where a project's data rests in its folder (a vault's key file). `snapshot`, `snapshots` and `restore` take, list and go back to
+  cannot hang on its output; the panels never show where a project's data rests in its folder (a vault's key file).
+- Briefsafe in the panels: the Projects panel lists Briefsafe projects after the host's, by name and whether they are
+  open. A locked one shows its name and Log in, nothing of its content; a missing vault key shows Enter recovery key;
+  a step running (log in, log out, snapshot) shows that it runs, and one that did not work says why. An open one shows
+  its documents, map and changes (read in its data the safe way), its conversations (open one again), New
+  conversation, Snapshot and Log out; logging out with its conversation tabs open asks first. The Sessions panel lists
+  each Briefsafe project under its name after the host's conversations, a locked one by its name only.
+  `whaybench ctl session new --project ID` opens a conversation in an open project. Each tab opening into a running
+  vault project no longer empties the program links its container sees (the folder stays, its links are replaced). `snapshot`, `snapshots` and `restore` take, list and go back to
   read-only snapshots kept beside it (`.<name>.snapshots/`, 30 kept, the oldest go first). Restoring keeps the state
   before as a snapshot and refuses while programs work in the folder or a subvolume is inside it. A folder inside
   another project's folder is refused. Deleting snapshots needs the file system mounted with
