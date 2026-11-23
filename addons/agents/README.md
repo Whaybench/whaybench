@@ -34,6 +34,8 @@ An agent without these cannot keep the map or the session list.
 | `write` | no | `{ "settings file": "template" }`: the template becomes the whole settings file in `home`, each start. JSON or TOML |
 | `context` | no | A text file given to the agent at session start and with each prompt. English: only the agent reads it |
 | `prompt_context` | no | A shorter text file given with each prompt in place of `context`, which then goes only at session start. Text riding on every prompt stays in the conversation, so keep it to a line |
+| `login` | no | Arguments that sign the agent in where it has no browser of its own, such as a code the person enters on a page (Codex's `login --device-auth`). A Briefsafe project's agents keep a login of the project's own: the Projects panel runs this in its container, in a terminal of the view. Without it the panel offers no sign-in for the agent |
+| `login_page` | no | The https page the person opens for that sign-in, shown in the browser tab beside it |
 | `trust` | no | The command inside the agent where the person trusts the hooks; Whaybench says so when its tab opens |
 | `usage` | no | Where the agent's context and plan usage are read, for the notifications panel. `codex-rollout`: the last `token_count` line of Codex's session file, read when a turn ends. Without it the panel shows no usage for the agent's sessions |
 

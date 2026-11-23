@@ -45,6 +45,11 @@ pub struct Agent {
     prompt_context: Option<String>,
     pub trust: Option<String>,
     pub usage: Option<String>,
+    /// Arguments that sign the agent in where it has no browser (a Briefsafe project's container), and the page the
+    /// person opens for it.
+    #[serde(default)]
+    pub login: Vec<String>,
+    pub login_page: Option<String>,
 }
 
 #[derive(Deserialize)]

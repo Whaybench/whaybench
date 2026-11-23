@@ -124,7 +124,8 @@ fn describe(d: &Data, info: &Value, asking: &std::collections::BTreeSet<String>)
     (title, parts.join(" · "))
 }
 
-struct View { query: String, show_hidden: bool, signature: String, first: Option<String> }
+/// `only`: one Briefsafe project's conversations alone, as the Projects panel lists them ("" lists none).
+struct View { query: String, show_hidden: bool, signature: String, first: Option<String>, only: Option<String> }
 
 fn row(title: &str, sub: &str, note: Option<&str>, faded: bool) -> gtk::ListBoxRow {
     let area = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -150,10 +151,10 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let chosen = sessions::focus(d);
     let latest = sessions::latest(d);
     let open = sessions::open_tabs(d);
-    let (query, show_hidden) = { let v = view.borrow(); (v.query.clone(), v.show_hidden) };
+    let (query, show_hidden, only) = { let v = view.borrow(); (v.query.clone(), v.show_hidden, v.only.clone()) };
     let waiting = asking(d);
     let stubs = wb_core::roots::stubs(d);
-    let signature = format!("{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}{:?}", stubs.iter().map(|s| (&s.id, &s.name, s.open())).collect::<Vec<_>>(), open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
+    let signature = format!("{only:?}{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}{:?}", stubs.iter().map(|s| (&s.id, &s.name, s.open())).collect::<Vec<_>>(), open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
         let id = sid(s);
         (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id), sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).len(), sessions::old_version(id))
     }).collect::<Vec<_>>());
@@ -184,19 +185,22 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
             list.append(&r);
         }
     } else {
-        let follow = row(wb_core::i18n::t("follow-latest-session"), &wb_core::i18n::f("current-2", &[("a1", (latest.as_deref().map(|l| cut(l, 8)).unwrap_or_else(|| wb_core::i18n::t("none").into())).to_string())]), None, false);
-        follow.set_widget_name("__follow__");
-        if chosen.is_none() { follow.add_css_class("chosen"); }
-        list.append(&follow);
+        if only.is_none() {
+            let follow = row(wb_core::i18n::t("follow-latest-session"), &wb_core::i18n::f("current-2", &[("a1", (latest.as_deref().map(|l| cut(l, 8)).unwrap_or_else(|| wb_core::i18n::t("none").into())).to_string())]), None, false);
+            follow.set_widget_name("__follow__");
+            if chosen.is_none() { follow.add_css_class("chosen"); }
+            list.append(&follow);
+        }
         let held = |s: &Value| open.iter().any(|t| t.tab == text(s, "tab") || t.session.as_deref() == Some(sid(s)));
         let mut hidden = Vec::new();
         // The host's conversations, then each Briefsafe project's under its name (spec 3.22): a locked one is its name
         // only, nothing of its conversations.
         let roots = wb_core::roots::Roots::new(d.clone());
         let of: Vec<Option<String>> = all.iter().map(|i| roots.project_of(sid(i))).collect();
-        let groups = std::iter::once(None).chain(stubs.iter().map(Some));
+        let groups = only.is_none().then_some(None).into_iter().chain(stubs.iter().filter(|st| only.as_ref().is_none_or(|o| *o == st.id)).map(Some));
         for group in groups {
-            if let Some(st) = group {
+            if only.is_some() && group.is_some_and(|st| !st.open()) { continue; }
+            if let Some(st) = group.filter(|_| only.is_none()) {
                 let head = row(&format!("▣ {}", st.name), if st.open() { wb_core::i18n::t("briefsafe-open") } else { wb_core::i18n::t("briefsafe-locked") }, None, !st.open());
                 head.set_widget_name("__project__");
                 head.set_activatable(false);
@@ -214,6 +218,12 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
                 if info.get("ended") == Some(&Value::Bool(true)) { hidden.push(info); continue; }
                 add(info, false, subagents_note(d, sid(info)));
             }
+        }
+        if only.as_ref().is_some_and(|o| !o.is_empty()) && list.row_at_index(0).is_none() && hidden.is_empty() {
+            let r = row(wb_core::i18n::t("briefsafe-no-sessions"), "", None, true);
+            r.set_selectable(false);
+            r.set_activatable(false);
+            list.append(&r);
         }
         if !hidden.is_empty() {
             let head = row(&wb_core::i18n::f("hidden-sessions", &[("a1", (if show_hidden { "▾" } else { "▸" }).to_string()), ("a2", (hidden.len()).to_string())]), "", None, false);
@@ -238,9 +248,59 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     area.append(&search);
     area.append(&scroll);
     win.set_child(Some(&area));
-    let view = Rc::new(RefCell::new(View { query: String::new(), show_hidden: false, signature: String::new(), first: None }));
-    let data_arg = |d: &Data| vec!["--data-dir".to_string(), d.root.to_string_lossy().to_string()];
+    let view = Rc::new(RefCell::new(View { query: String::new(), show_hidden: false, signature: String::new(), first: None, only: None }));
 
+    list_presses(&list, &d, &view);
+    {
+        let (d, list2, view) = (d.clone(), list.clone(), view.clone());
+        search.connect_search_changed(move |s| {
+            view.borrow_mut().query = s.text().trim().to_string();
+            redraw(&d, &list2, &view, true);
+        });
+    }
+    {
+        let (d, view) = (d.clone(), view.clone());
+        search.connect_activate(move |_| {
+            if let Some(id) = view.borrow().first.clone() {
+                let mut a = data_arg(&d);
+                a.extend(["session".into(), "show".into(), id]);
+                ctl(&d, a);
+            }
+        });
+    }
+    list_menu(&list, &d, &view);
+    {
+        let (d, search) = (d.clone(), search.clone());
+        every(300, move || {
+            // Session → Search sessions in the menu bar: this panel takes the keyboard in its search line.
+            if status::take(&d, "sessions").is_some() {
+                search.grab_focus();
+                search.select_region(0, -1);
+            }
+        });
+    }
+    every(2000, move || redraw(&d, &list, &view, false));
+}
+
+fn data_arg(d: &Data) -> Vec<String> { vec!["--data-dir".to_string(), d.root.to_string_lossy().to_string()] }
+
+/// One Briefsafe project's conversations as this panel lists them (the same rows, presses and menu), for the Projects
+/// panel: the list, and what to call to choose the project ("" for none) and draw it anew.
+pub fn of_project(d: &Data) -> (gtk::ListBox, impl Fn(&str) + Clone + 'static) {
+    let list = gtk::ListBox::new();
+    list.set_selection_mode(gtk::SelectionMode::None);
+    list.set_activate_on_single_click(true);
+    let view = Rc::new(RefCell::new(View { query: String::new(), show_hidden: false, signature: String::new(), first: None, only: Some(String::new()) }));
+    list_presses(&list, d, &view);
+    list_menu(&list, d, &view);
+    let (d, l) = (d.clone(), list.clone());
+    (list, move |id: &str| {
+        { let mut v = view.borrow_mut(); if v.only.as_deref() != Some(id) { v.only = Some(id.to_string()); v.show_hidden = false; v.signature.clear(); } }
+        redraw(&d, &l, &view, false);
+    })
+}
+
+fn list_presses(list: &gtk::ListBox, d: &Data, view: &Rc<RefCell<View>>) {
     {
         let (d, list2, view) = (d.clone(), list.clone(), view.clone());
         list.connect_row_activated(move |_, r| {
@@ -264,23 +324,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             redraw(&d, &list2, &view, true);
         });
     }
-    {
-        let (d, list2, view) = (d.clone(), list.clone(), view.clone());
-        search.connect_search_changed(move |s| {
-            view.borrow_mut().query = s.text().trim().to_string();
-            redraw(&d, &list2, &view, true);
-        });
-    }
-    {
-        let (d, view) = (d.clone(), view.clone());
-        search.connect_activate(move |_| {
-            if let Some(id) = view.borrow().first.clone() {
-                let mut a = data_arg(&d);
-                a.extend(["session".into(), "show".into(), id]);
-                ctl(&d, a);
-            }
-        });
-    }
+}
+
+fn list_menu(list: &gtk::ListBox, d: &Data, view: &Rc<RefCell<View>>) {
     // Right click: hide, or back to the list.
     let click = gtk::GestureClick::new();
     click.set_button(3);
@@ -342,17 +388,6 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         });
     }
     list.add_controller(click);
-    {
-        let (d, search) = (d.clone(), search.clone());
-        every(300, move || {
-            // Session → Search sessions in the menu bar: this panel takes the keyboard in its search line.
-            if status::take(&d, "sessions").is_some() {
-                search.grab_focus();
-                search.select_region(0, -1);
-            }
-        });
-    }
-    every(2000, move || redraw(&d, &list, &view, false));
 }
 
 #[cfg(test)]

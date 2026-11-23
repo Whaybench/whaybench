@@ -79,11 +79,12 @@ Your data stays in its folder (see below).
 
 A Briefsafe project keeps one piece of work apart from everything else on your computer. Every new project is one:
 press **New project** in the **Projects** panel (or ask your agent). It goes in `~/work/<name>`. Once, before its
-first conversation, press **Claude token for projects** there: a terminal in the view signs you in and keeps the token
-its conversations use. Then **Log in** and start a conversation.
+first conversation, press **Log in**, then **Inner login: Claude**: a terminal in the view signs you in and keeps the
+token all projects' conversations use. Codex signs in once in each project (**Codex** beside it; turn on device code
+login in your ChatGPT security settings first). Then start a conversation on the **Sessions** tab.
 
 - **Its own folder.** The project lives in one folder, a btrfs subvolume where the disk allows it. A snapshot is
-  taken when it is made, and again whenever you press **Snapshot**. The 30 latest are kept, and **Restore** puts the
+  taken when it is made, and again whenever you press **Save state**. The 30 latest are kept, and **Restore** puts the
   whole folder back as it was.
 - **Its own agents.** Its conversations run in a rootless podman container. The container sees the project folder,
   your system's programs (read only) and nothing else of your home folder. Claude Code and Codex there have their own

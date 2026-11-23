@@ -485,6 +485,18 @@ pub fn agent_home(s: &Stub, isolated: bool, agent: &crate::agents::Agent) -> Res
     Ok(Some((var.to_string(), s.open_at.join(id).to_string_lossy().to_string())))
 }
 
+/// podman's arguments for signing an add-on agent in inside the project's container (`Agent::login`), its settings
+/// folder the project's: the login is the project's own. A copy of the person's would not do: these logins renew
+/// themselves by a key used once, so two copies sign each other out.
+pub fn login_args(s: &Stub, agent: &crate::agents::Agent) -> Result<Vec<String>, String> {
+    let (var, folder) = agent_home(s, true, agent)?.ok_or("the add-on names no settings folder")?;
+    let program = Path::new(&agent.command).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let mut a: Vec<String> = ["exec", "-it", "--detach-keys=", "-e", "TERM", "-e"].map(String::from).into();
+    a.extend([format!("{var}={folder}"), name(s), program]);
+    a.extend(agent.login.iter().cloned());
+    Ok(a)
+}
+
 /// Runs `work` with the project's container paused, if it runs (a snapshot of one moment).
 pub fn paused<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let podman = |what: &str| Command::new("podman").args([what, &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|x| x.success());

@@ -14,9 +14,11 @@ names another step.
     `~/work/ID` (or `--folder DIR`), encrypted where podman and gocryptfs are, as a btrfs subvolume where the disk
     allows it (a folder copied in with `--from`, a map to start from with `--map`), with a first snapshot. The older
     kind is made only for a sub-project (`--parent`) or with `--plain`.
-  - The Claude Code token the projects' conversations sign in with is made from the Projects panel (Claude token for
-    projects): a terminal in the view runs `claude setup-token`, takes the token it shows off the screen, stores it in
+  - The Claude Code token the projects' conversations sign in with is made from the Projects panel (Inner login:
+    Claude): a terminal in the view runs `claude setup-token`, takes the token it shows off the screen, stores it in
     the keyring and closes; only where none is found is it pasted.
+    An add-on agent signs in once in each project, in its container (Inner login: Codex): the add-on's `login` runs in
+    a terminal of the view, its `login_page` opens beside it.
   - `snapshot`, `snapshots` and `restore` keep and bring back the whole folder (the 30 latest kept); `forget` takes
     it off the list. Removing old snapshots needs the btrfs mount option `user_subvol_rm_allowed`; without it they
     are kept and the answer says so.
@@ -26,9 +28,10 @@ names another step.
   - `--encrypt` keeps the project's data (documents, map, history, memory, conversations) with gocryptfs under a key in
     the keyring. The view panel shows a recovery key once; `open ID --recovery` takes it when the keyring's key is
     gone.
-  - The Projects panel lists Briefsafe projects with their state, and logs in, logs out (closing the project's tabs
-    first), takes snapshots and starts or resumes the project's conversations. The Sessions panel groups a project's
-    conversations under it while it is open.
+  - The Projects panel lists Briefsafe projects with their state. A locked one shows Log in only; an open one its name
+    and when its state was last saved, Save state (a snapshot), Log out (closing its tabs first) and Inner login, and
+    the tabs Sessions (a new conversation of each agent, and its conversations as the Sessions panel lists them),
+    Ideas (the project map, named Map before) and Recent changes. The Sessions panel groups its conversations too.
   - A project's text, map and pages stay in its own panels and conversations; other conversations can give a project
     things, but nothing of it comes back out. Pictures of the screen taken while a project is open are removed after
     ten minutes.

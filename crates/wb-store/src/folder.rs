@@ -97,6 +97,11 @@ fn snapshot_dir(dir: &Path) -> PathBuf {
     dir.with_file_name(format!(".{name}.snapshots"))
 }
 
+/// When the newest snapshot was taken (its name is the time), by the names alone: cheap enough to show all the time.
+pub fn last_snapshot(dir: &Path) -> Option<i64> {
+    fs::read_dir(snapshot_dir(dir)).ok()?.flatten().filter_map(|e| e.file_name().to_str()?.parse().ok()).max()
+}
+
 /// The snapshots of a project folder, oldest first: subvolumes with a number for a name, never a link, of this
 /// project (one left beside a folder of the same name by an earlier project is not this one's to restore or prune).
 pub fn snapshots(dir: &Path) -> Vec<String> {

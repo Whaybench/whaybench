@@ -185,7 +185,7 @@ lines-written-by-ai = <p class='m'>{ $a1 }줄 · AI 작성 · { $a2 }</p>
 original = <p class='m'>원본: { $a1 }</p>
 lines = { $a1 } <small>({ $a2 }줄)</small>
 contents = <div class='toc'><b>목차</b><br>{ $a1 }</div><hr>
-no-project-map-to-add-conversation = <p class='m'>프로젝트 지도 없음 · 반영 경로: 대화 지도 노드 메뉴 → 프로젝트에 반영</p>
+no-project-map-to-add-conversation = <p class='m'>생각 없음 · 반영 경로: 대화 지도 노드 메뉴 → 프로젝트에 반영</p>
 scope = 범위 { $a1 }
 source-nodes = {" "}<span class='m'>· 출처 노드 { $a1 }</span>
 written-by-ai-last-update-idea = <p class='m'>AI 작성 · 최종 갱신 { $a1 } · ◇ 구상 · □ 확정 · ◐ 구현 중·미확인 · ✓ 완료·해결 · ✕ 폐기 · 녹색: 단계 · 범위(포함·보류·제외) · 사유</p>
@@ -298,7 +298,7 @@ ended = 종료됨
 new-session = 새 세션
 new-tab-keep-map-not-opened-2 = 새 탭 (지도 유지) 미실행 · 선택된 세션에 지도 없음
 tab-not-opened = 대화 탭 열지 못함 · { $e }
-briefsafe-no-token = 프로젝트용 Claude Code 토큰 없음 · 프로젝트 패널 → 프로젝트용 Claude 토큰 설정
+briefsafe-no-token = 프로젝트용 Claude Code 토큰 없음 · 프로젝트 패널 → 내부 로그인 → Claude
 briefsafe-keyring-failed = 키링에서 프로젝트 토큰을 읽지 못함(잠김?) · 에이전트가 로그인을 요청할 수 있음
 briefsafe-map-stays = 프로젝트 지도는 프로젝트 안에서만 · 새 대화는 프로젝트에서 시작
 briefsafe-project-closed = 프로젝트 잠김 · 먼저 로그인
@@ -314,15 +314,17 @@ briefsafe-locked = 잠김
 briefsafe-open = 열림
 briefsafe-login = 로그인
 briefsafe-logout = 로그아웃
-briefsafe-snapshot = 스냅샷
-briefsafe-new-conversation = 새 대화
-briefsafe-sessions = 대화
+briefsafe-last-saved = { $half } { $time } { $date } 마지막 저장
+briefsafe-inner-login = 내부 로그인
+project-ideas = 생각
+am = 오전
+pm = 오후
+briefsafe-snapshot = 상태 저장
 briefsafe-no-sessions = 대화 없음
 briefsafe-working = { $what }…
 briefsafe-opening = 로그인하는 중
 briefsafe-closing = 로그아웃하는 중
-briefsafe-snapshotting = 스냅샷을 뜨는 중
-briefsafe-locked-page = { $name } 잠김 · 문서·지도·대화는 로그인 뒤 표시
+briefsafe-snapshotting = 상태 저장 중
 briefsafe-no-key-page = 키링에 이 프로젝트의 키 없음 · 복구 키로 열기
 briefsafe-enter-recovery = 복구 키 입력
 briefsafe-recovery-label = 프로젝트를 만들 때 보여 준 복구 키(16진수 64자)
@@ -331,17 +333,16 @@ briefsafe-failed = 실패: { $why }
 briefsafe-request-own-only = 미전송 · 이 프로젝트의 대화를 먼저 선택
 briefsafe-busy = { $what } 진행 중 · 끝난 뒤 재개
 briefsafe-too-long = 시간 초과로 중단 · 재시도
-briefsafe-snapshot-taken = 스냅샷 완료
-briefsafe-snapshot-warning = 스냅샷 완료 · { $why }
+briefsafe-snapshot-taken = 상태 저장 완료
+briefsafe-snapshot-warning = 상태 저장 완료 · { $why }
 briefsafe-unreadable = 이 프로젝트의 기록을 읽지 못함
 briefsafe-not-isolated = 컨테이너 없이 열림(podman이나 이미지 없음) · 에이전트가 격리 없이 사용자 권한으로 실행됨
-briefsafe-logout-queued = 스냅샷이 끝나면 로그아웃
+briefsafe-logout-queued = 상태 저장 완료 후 로그아웃
 briefsafe-view-not-read = 읽어 주지 않음 · 보기 패널에 문서금고 프로젝트의 페이지가 열려 있음
 briefsafe-draft-stays = 미전송 · 문서금고 프로젝트 대화에서 작성한 글은 해당 프로젝트 대화로만 전송
 briefsafe-pattern-last-part = 와일드카드는 패턴의 마지막 부분에만(문서금고 프로젝트) · src/*.rs 가능, src/*/*.rs 불가
 briefsafe-view-host-only = 문서금고 프로젝트의 대화에서 쓸 수 없는 명령 · 여기서는 whaybench-view open 파일(프로젝트의 페이지나 파일)만 가능
 shot-removed-later = 문서금고 프로젝트가 열려 있음 · 이 사진은 10분 뒤 삭제
-briefsafe-token-setup = 프로젝트용 Claude 토큰 설정
 briefsafe-token-paste = 위에 표시된 토큰(sk-ant-…)을 Ctrl+Shift+V로 붙여넣고 Enter, 이어서 Ctrl+D:
 briefsafe-token-stored = 키링에 저장됨 · 프로젝트에 로그인한 뒤 대화 시작
 briefsafe-token-not-stored = 저장되지 않음 · 프로젝트 패널에서 다시 실행
