@@ -8,11 +8,13 @@ use wb_store::{Res, Store, folder, markdown::headings, s};
 const HELP: &str = r#"Project store command. Only the AI writes projects, and only through this; the person asks.
 
   whaybench-project list | tree                    projects (tree: parent by id)
-  whaybench-project new ID NAME [--parent P] [--path DIR] [--always] [--desc D] [--folder DIR [--from SRC] [--encrypt]]
-                                                   --folder makes a Briefsafe project: its folder (a btrfs subvolume
-                                                   where it can; --from copies a folder in), its data inside it
-                                                   (<folder>/.whaybench), and the first snapshot. Its documents and map
-                                                   are worked on with WHAYBENCH_DATA_DIR=<folder>/.whaybench
+  whaybench-project new ID NAME [--desc D] [--path DIR] [--always] [--folder DIR] [--from SRC] [--map FILE] [--encrypt]
+                                                   a Briefsafe project: in DIR, or ~/work/ID (else ~/ID); encrypted where
+                                                   podman and gocryptfs are (--encrypt asks for it anyway); --map starts
+                                                   its map from a kept map file. The older kind only with --parent P
+                                                   (a sub-project) or --plain. Its folder is a btrfs subvolume where
+                                                   it can (--from copies a folder in), its data inside it
+                                                   (<folder>/.whaybench), with a first snapshot
   whaybench-project convert ID --folder DIR [--from SRC] [--encrypt]
                                                    make a project of the older kind a Briefsafe one: its records move
                                                    into the new folder's data; when the person asks
@@ -125,12 +127,20 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let always = flag(&mut rest, "--always");
             let folder = opt(&mut rest, "--folder").map(|f| absolute(&f));
             let from = opt(&mut rest, "--from").map(|f| absolute(&f));
+            let map = opt(&mut rest, "--map").map(|f| absolute(&f));
             let encrypt = flag(&mut rest, "--encrypt");
+            let plain = flag(&mut rest, "--plain");
             let (pid, name) = (arg(&rest, 0)?, arg(&rest, 1)?);
+            // A new project is a Briefsafe one (spec 3.22), encrypted where a vault can be made; the older kind only for
+            // a sub-project (a Briefsafe project stands alone) or when asked for (`--plain`).
+            let briefsafe = folder.is_some() || (parent.is_empty() && !plain);
+            let encrypt = encrypt || (briefsafe && folder.is_none() && wb_core::vault::available());
+            let folder = if briefsafe && folder.is_none() { Some(wb_core::roots::default_folder(pid).ok_or("no home folder")?.to_string_lossy().to_string()) } else { folder };
             // Before any lock or file is made from it.
             if folder.is_some() && wb_core::map::safe_id(pid).is_err() { return Err(format!("not a project id (letters, digits, - and _ only): {pid}")); }
             let Some(folder) = folder else {
                 if from.is_some() { return Err("--from needs --folder".into()); }
+                if map.is_some() { return Err("--map is for a Briefsafe project".into()); }
                 if encrypt { return Err("--encrypt needs --folder".into()); }
                 // One id for one project: a Briefsafe project's id is taken too.
                 if wb_core::roots::stubs(&st.data).iter().any(|s| s.id == pid) { return Err(format!("project exists: {pid}")); }
@@ -142,7 +152,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             if encrypt && !wb_core::container::isolation() { return Err("--encrypt needs podman and a container image for this system".into()); }
             // In turn with an open of the same id too: it must not find the project half made.
             let would_be = wb_core::roots::Stub::new(&st.data, pid, name, Path::new(&folder));
-            let (p, first, recovery) = wb_core::container::life(&would_be, || wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new), encrypt)))?;
+            let (p, first, recovery) = wb_core::container::life(&would_be, || wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || if parent.is_empty() { st.create_in_folder_with_map(pid, name, &desc, paths, always, &folder, from.as_deref().map(Path::new), encrypt, map.as_deref().map(Path::new)) } else { st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new), encrypt) }))?;
             // The recovery key, once, to the person only (spec 3.22): never in this output, which an AI may be reading.
             let note = recovery.as_ref().and_then(|k| wb_core::roots::stubs(&st.data).into_iter().find(|s| s.id == pid).map(|s| wb_core::vault::show_recovery(&s, &st.data, k)));
             out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning), "recovery_key": note}));

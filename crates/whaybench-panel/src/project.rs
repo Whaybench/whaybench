@@ -382,8 +382,19 @@ fn poll_job(p: &mut P) -> bool {
     let _ = (std::fs::remove_file(&job.out), std::fs::remove_file(&job.err));
     // The next log out waiting, of a project still open (the others go after it, one step at a time).
     let queued = { let q = &mut p.close_after; while !q.is_empty() && !stub_of(&p.d, &q[0]).is_some_and(|st| st.open()) { q.remove(0); } (!q.is_empty()).then(|| q.remove(0)) };
+    // A project that could not be made has no page to say it on: the status line does.
+    if job.kind == "new" && (late || !ok) {
+        let why = if late { wb_core::i18n::t("briefsafe-too-long").to_string() } else { said.clone() };
+        status::say(&p.d, &wb_core::i18n::f("creation-failed", &[("e", why)]), 12);
+    }
     if late { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), wb_core::i18n::t("briefsafe-too-long").to_string())); }
     else if !ok { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), said)); }
+    else if job.kind == "new" {
+        // Made: shown, locked, ready to log in to.
+        choose(p, Some(format!("{BS}{}", job.id)));
+        p.tab = MAP.to_string();
+        p.rows.clear();
+    }
     else if job.kind == "snapshot" {
         let warn = s(&out, "warning");
         status::say(&p.d, &if warn.is_empty() { wb_core::i18n::t("briefsafe-snapshot-taken").to_string() } else { wb_core::i18n::f("briefsafe-snapshot-warning", &[("why", warn.to_string())]) }, 8);
@@ -419,6 +430,8 @@ fn closed_page(p: &P, st: &wb_core::roots::Stub) -> String {
             None => {}
         }
         b += &format!("<p>{}</p>", link("bs", &format!("{}:open", st.id), &e(&t("briefsafe-login"))));
+        // The Claude Code sign-in its conversations use: made here, in a terminal of the view (WSL has no other).
+        b += &format!("<p class='m'>{}</p>", link("bs", &format!("{}:token", st.id), &e(&t("briefsafe-token-setup"))));
         b
     };
     format!("<!doctype html><meta charset='utf-8'><style>{}</style><body>{body}</body>", style(&p.d))
@@ -447,7 +460,7 @@ fn open_bar(p: &P, st: &wb_core::roots::Stub) -> String {
     };
     // Opened without a container (no podman or image for this system): said, its agents run as the person.
     let note = if wb_core::container::opened_isolated(st) { note } else { format!("{note}<p class='m'>{}</p>", t("briefsafe-not-isolated")) };
-    format!("{note}<p>{} · {} · {}</p><h3>{}</h3>{list}<hr>", link("bs", &format!("{}:new", st.id), &t("briefsafe-new-conversation")), link("bs", &format!("{}:snapshot", st.id), &t("briefsafe-snapshot")), link("bs", &format!("{}:close", st.id), &t("briefsafe-logout")), t("briefsafe-sessions"))
+    format!("{note}<p>{} · {} · {} · {}</p><h3>{}</h3>{list}<hr>", link("bs", &format!("{}:new", st.id), &t("briefsafe-new-conversation")), link("bs", &format!("{}:snapshot", st.id), &t("briefsafe-snapshot")), link("bs", &format!("{}:close", st.id), &t("briefsafe-logout")), link("bs", &format!("{}:token", st.id), &t("briefsafe-token-setup")), t("briefsafe-sessions"))
 }
 
 /// A request for the chosen session's AI; only to one that is running.
@@ -734,23 +747,27 @@ fn new_project(s_: &Shared) {
             if name.is_empty() { return; }
             let source = sources.get(p2.selected() as usize).cloned().flatten();
             w.close();
-            let result = (|| -> Result<String, String> {
-                let p = s2.borrow();
-                // Always the host's own (a Briefsafe project shown has its own store in `st`).
-                let pid = new_project_id(&p.host, &name);
-                p.host.create_project(&pid, &name, "", "", Vec::new(), false)?;
-                if let Some(src) = &source {
-                    let (nodes, title, from) = mi::read(&d2, src).ok_or_else(|| wb_core::i18n::t("import-failed-no-map").to_string())?;
-                    let path = mi::keep(&d2, &nodes, &title, &from).map_err(|e| e.to_string())?;
-                    p.host.map_from_nodes(&pid, &nodes, &title, &path.to_string_lossy())?;
-                }
-                Ok(pid)
+            // A Briefsafe project (spec 3.22), made by `whaybench-project new` as a step of its own: its folder, a vault
+            // where one can be made, the recovery key shown in the view; the map chosen goes in as a kept map file.
+            let result = (|| -> Result<(String, Option<String>), String> {
+                let pid = new_project_id(&s2.borrow().host, &name);
+                let map = match &source {
+                    Some(src) => {
+                        let (nodes, title, from) = mi::read(&d2, src).ok_or_else(|| wb_core::i18n::t("import-failed-no-map").to_string())?;
+                        Some(mi::keep(&d2, &nodes, &title, &from).map_err(|e| e.to_string())?.to_string_lossy().to_string())
+                    }
+                    None => None,
+                };
+                Ok((pid, map))
             })();
             match result {
-                Ok(pid) => {
+                Ok((pid, map)) => {
                     record::decide("project", "new project", "the person named it", &[("project", pid.clone()), ("imported_map", source.is_some().to_string())]);
-                    { let mut p = s2.borrow_mut(); choose(&mut p, Some(pid)); p.tab = MAP.to_string(); p.rows.clear(); }
-                    tick(&s2);
+                    let mut args = vec!["new".to_string(), pid.clone(), name.clone()];
+                    if let Some(m) = map { args.extend(["--map".to_string(), m]); }
+                    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                    status::say(&d2, wb_core::i18n::t("briefsafe-creating"), 6);
+                    start_job(&mut s2.borrow_mut(), &pid, "new", wb_core::i18n::t("briefsafe-creating"), &args, None);
                 }
                 Err(e) => s2.borrow().path.set_text(&wb_core::i18n::f("creation-failed", &[("e", e)])),
             }
@@ -962,6 +979,19 @@ fn clicked(s_: &Shared, uri: &str) {
 }
 
 /// A Briefsafe project's step from its page: log in or out, a snapshot, a conversation (spec 3.22).
+/// A terminal in the view where the person makes the Claude Code token the projects' conversations sign in with
+/// (`claude setup-token`) and stores it in the keyring (`whaybench token set`): the token is seen there only, never
+/// in a conversation.
+fn token_terminal(d: &Data) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let (claude, whaybench) = (sessions::claude_program(), exe.with_file_name("whaybench"));
+    let q = |p: &std::path::Path| format!("'{}'", p.to_string_lossy().replace('\'', "'\\''"));
+    let say = |k: &str| format!("'{}'", wb_core::i18n::t(k).replace('\'', "'\\''"));
+    let script = format!("{} setup-token; echo; printf '%s\\n' {}; {} token set && printf '%s\\n' {} || printf '%s\\n' {}; printf '%s' {}; read _",
+        q(&claude), say("briefsafe-token-paste"), q(&whaybench), say("briefsafe-token-stored"), say("briefsafe-token-not-stored"), say("briefsafe-token-close"));
+    if let Err(e) = wb_core::view::terminal(d, &["sh".into(), "-c".into(), script]) { status::say(d, &wb_core::i18n::f("briefsafe-failed", &[("why", e.to_string())]), 8); }
+}
+
 fn briefsafe_clicked(s_: &Shared, what: &str) {
     let (d, win, id) = { let p = s_.borrow(); (p.d.clone(), p.win.clone(), p.bs.clone()) };
     let Some(id) = id else { return };
@@ -995,6 +1025,7 @@ fn briefsafe_clicked(s_: &Shared, what: &str) {
             if tabs == 0 { go(); } else { crate::common::confirm(&win, &wb_core::i18n::f("briefsafe-logout-confirm", &[("n", tabs.to_string())]), &[], &t("briefsafe-logout"), go); }
         }
         "new" => crate::common::ctl(&d, vec!["--data-dir".into(), d.root.to_string_lossy().to_string(), "session".into(), "new".into(), "--project".into(), id]),
+        "token" => token_terminal(&d),
         other => {
             // Its own conversation only, opened as the project's (refused there if it has closed meanwhile).
             if let Some(sid) = other.strip_prefix("resume:") && wb_core::map::safe_id(sid).is_ok()

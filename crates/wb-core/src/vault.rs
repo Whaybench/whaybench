@@ -106,6 +106,14 @@ pub fn mounted(s: &Stub) -> bool {
     std::fs::read_to_string("/proc/self/mountinfo").is_ok_and(|t| t.lines().any(|l| l.split(' ').nth(4) == Some(escaped.as_str())))
 }
 
+/// Whether a vault can be made here: a container for its agents (its key never reaches a host-run one), and gocryptfs
+/// with FUSE to open it.
+pub fn available() -> bool {
+    crate::container::isolation()
+        && Command::new("gocryptfs").arg("-version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+        && Command::new("fusermount3").arg("-V").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
 /// Open and answering: mounted, and its gocryptfs still there (a dead one leaves the mount, which then fails).
 pub fn ready(s: &Stub) -> bool { mounted(s) && std::fs::metadata(mountpoint(s)).is_ok() }
 

@@ -32,7 +32,13 @@ impl Store {
     #[allow(clippy::too_many_arguments)]
     /// With `vault`, its data is encrypted (spec 3.22): the answer also holds the recovery key, shown once.
     pub fn create_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
-        self.make_in_folder(pid, name, desc, parent, paths, always, folder, from, vault, false)
+        self.make_in_folder(pid, name, desc, parent, paths, always, folder, from, vault, false, None)
+    }
+
+    /// The same, its project map made from a kept map file (`whaybench-map`: nodes and a title) when one is given.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_in_folder_with_map(&self, pid: &str, name: &str, desc: &str, paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool, map: Option<&Path>) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
+        self.make_in_folder(pid, name, desc, "", paths, always, folder, from, vault, false, map)
     }
 
     /// Turns a project of the older kind (`projects/<id>/` in the host's data) into a Briefsafe one (spec 3.22): made
@@ -47,11 +53,19 @@ impl Store {
         // Map edits wait while its records are copied and the old copy goes (they take this lock): none is lost.
         let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.pdir(pid).join("map.lock")).map_err(|e| e.to_string())?;
         lock.lock().map_err(|e| e.to_string())?;
-        self.make_in_folder(pid, s(&p, "name"), s(&p, "desc"), "", paths, p["always"].as_bool().unwrap_or(false), folder, from, vault, true)
+        self.make_in_folder(pid, s(&p, "name"), s(&p, "desc"), "", paths, p["always"].as_bool().unwrap_or(false), folder, from, vault, true, None)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn make_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, mut paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool, carry: bool) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
+    fn make_in_folder(&self, pid: &str, name: &str, desc: &str, parent: &str, mut paths: Vec<String>, always: bool, folder: &str, from: Option<&Path>, vault: bool, carry: bool, map: Option<&Path>) -> Res<(Value, Option<crate::folder::Taken>, Option<String>)> {
+        // A kept map to start from: read before anything is made (a bad file makes nothing).
+        let map = match map {
+            Some(f) => {
+                let m = crate::read(f).ok_or_else(|| format!("{}: not a map file", f.display()))?;
+                Some((m["nodes"].as_array().cloned().unwrap_or_default(), s(&m, "title").to_string(), f.to_string_lossy().to_string()))
+            }
+            None => None,
+        };
         use wb_core::roots::{self, Stub};
         // A plain name: its open place's marks are that name with an extension (`.lock`, `.closing`), which no other id may be.
         if wb_core::map::safe_id(pid).is_err() { return Err(format!("not a project id (letters, digits, - and _ only): {pid}")); }
@@ -103,6 +117,7 @@ impl Store {
                 write_json(&inner.pdir(pid).join("project.json"), &p)?;
             } else {
                 inner.create_project(pid, name, desc, parent, paths, always)?;
+                if let Some((nodes, title, file)) = &map { inner.map_from_nodes(pid, nodes, title, file)?; }
             }
             let p = inner.set_folder(pid, folder, subvolume)?;
             // The templates as they are now: later changes to the add-ons do not reach this project.

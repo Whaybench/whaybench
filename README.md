@@ -77,8 +77,10 @@ Your data stays in its folder (see below).
 
 ## Briefsafe projects
 
-A Briefsafe project keeps one piece of work apart from everything else on your computer. Ask your agent to make one
-(it runs `whaybench-project new ID NAME --folder DIR [--encrypt]`), then log in to it from the **Projects** panel.
+A Briefsafe project keeps one piece of work apart from everything else on your computer. Every new project is one:
+press **New project** in the **Projects** panel (or ask your agent). It goes in `~/work/<name>`. Once, before its
+first conversation, press **Claude token for projects** there: a terminal in the view signs you in and keeps the token
+its conversations use. Then **Log in** and start a conversation.
 
 - **Its own folder.** The project lives in one folder, a btrfs subvolume where the disk allows it. A snapshot is
   taken when it is made, and again whenever you press **Snapshot**. The 30 latest are kept, and **Restore** puts the

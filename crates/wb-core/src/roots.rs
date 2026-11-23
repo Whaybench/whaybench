@@ -62,6 +62,14 @@ impl Stub {
 }
 
 /// Where an open project's data is seen: the same path on the host and in its container.
+/// Where a new project's folder goes when none is named: `~/work/<id>` (the work disk on Windows), else the home
+/// folder's `<id>`; a name in use gets a number.
+pub fn default_folder(id: &str) -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let base = if home.join("work").is_dir() { home.join("work") } else { home };
+    std::iter::once(base.join(id)).chain((2..).map(|n| base.join(format!("{id}-{n}")))).find(|p| std::fs::symlink_metadata(p).is_err())
+}
+
 pub fn open_dir(host: &Data, id: &str) -> PathBuf { host.cache().join("open").join(id) }
 
 /// Opens a project whose data is not sealed: its data is seen at its open place (a link to where it rests).
