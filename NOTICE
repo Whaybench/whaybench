@@ -9,7 +9,7 @@ The release archives also contain:
 - The Rust crates the programs are built from, under their own licences: THIRD-PARTY-LICENSES.html and
   ALACRITTY-THIRD-PARTY-LICENSES.html.
 
-crates/whaybench started from the "smallvil" example of Smithay, and patches/smithay-winit-ime.patch changes Smithay itself. Smithay is licensed as follows:
+crates/whaybench started from the "smallvil" example of Smithay, and patches/smithay-*.patch change Smithay itself. Smithay is licensed as follows:
 
 MIT License
 

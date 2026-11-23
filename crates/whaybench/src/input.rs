@@ -54,6 +54,7 @@ impl App {
                 let button = event.button_code();
                 let button_state = event.state();
                 // Menus close on a press outside them even while the pointer is held by a grab, which skips the rest.
+                if button_state == ButtonState::Pressed { self.finish_composing(); }
                 if button_state == ButtonState::Pressed { let at = self.pointer; self.close_popups_unless_at(at.into()); }
                 let forward = match button_state {
                     ButtonState::Pressed if !pointer.is_grabbed() => self.pointer_pressed(button),
@@ -130,6 +131,7 @@ impl App {
 
     /// `whaybench ctl press|release`, for tests.
     pub fn test_button(&mut self, down: bool, button: u32) {
+        if down { self.finish_composing(); }
         let forward = if down { self.pointer_pressed(button) } else if !matches!(self.act, Act::Idle) { self.pointer_released(); false } else { true };
         if forward {
             let pointer = self.seat.get_pointer().unwrap();
@@ -137,6 +139,12 @@ impl App {
             pointer.button(self, &ButtonEvent { button, state, serial: SERIAL_COUNTER.next_serial(), time: test_time() });
             pointer.frame(self);
         }
+    }
+
+    /// A press may move the focus inside an app, which then drops the letter being composed: it is put in first.
+    fn finish_composing(&mut self) {
+        use smithay::wayland::{input_method::InputMethodSeat, text_input::TextInputSeat};
+        self.seat.input_method().finish_composing(self.seat.text_input());
     }
 
     /// One line per panel, bottom one first.

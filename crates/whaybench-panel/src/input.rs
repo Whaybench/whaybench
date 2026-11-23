@@ -61,6 +61,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             }
         });
     }
+    // A first letter being composed is not in the text yet.
+    { let hint = hint.clone(); view.connect_preedit_changed(move |v, t| hint.set_visible(t.is_empty() && v.buffer().char_count() == 0)); }
     let target = {
         let (d, goes, view) = (d.clone(), goes.clone(), view.clone());
         move || {

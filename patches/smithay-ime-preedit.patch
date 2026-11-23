@@ -1,0 +1,211 @@
+diff --git a/src/wayland/input_method/input_method_handle.rs b/src/wayland/input_method/input_method_handle.rs
+index 5e6c8d00..90b3d3ad 100644
+--- a/src/wayland/input_method/input_method_handle.rs
++++ b/src/wayland/input_method/input_method_handle.rs
+@@ -38,6 +38,18 @@ pub(crate) struct InputMethod {
+ pub(crate) struct Instance {
+     pub object: ZwpInputMethodV2,
+     pub serial: u32,
++    /// The serial from which commits are about the text input entered last.
++    entered: u32,
++    /// What was asked for since the last commit.
++    pending: Pending,
++}
++
++/// Requests are applied together on `commit`, whose serial says which text input they are about.
++#[derive(Default, Debug)]
++struct Pending {
++    commit: Option<String>,
++    preedit: Option<(String, i32, i32)>,
++    delete: Option<(u32, u32)>,
+ }
+ 
+ impl Instance {
+@@ -64,6 +76,8 @@ impl InputMethodHandle {
+             inner.instance = Some(Instance {
+                 object: instance.clone(),
+                 serial: 0,
++                entered: 0,
++                pending: Pending::default(),
+             });
+         }
+     }
+@@ -145,6 +159,28 @@ impl InputMethodHandle {
+         };
+     }
+ 
++    /// Another text input was entered, told to the input method with the next `done`: what it
++    /// commits without having seen that is about the one before, and is not put into this one.
++    pub(crate) fn entered_text_input(&self) {
++        self.with_instance(|instance| instance.entered = instance.serial + 1);
++    }
++
++    /// Put the text being composed into the text input it is in, and have the input method start
++    /// anew there. For the moment before something (a press) takes the text input's focus away
++    /// inside its client, which drops what is composed.
++    pub fn finish_composing(&self, text_input: &TextInputHandle) {
++        if !text_input.commit_preedit() {
++            return;
++        }
++        self.with_instance(|instance| {
++            instance.object.deactivate();
++            instance.done();
++            instance.entered = instance.serial + 1;
++            instance.object.activate();
++            instance.done();
++        });
++    }
++
+     /// Activate input method on the given surface.
+     pub(crate) fn activate_input_method<D: SeatHandler + 'static>(&self, state: &mut D, surface: &WlSurface) {
+         self.with_input_method(|im| {
+@@ -254,39 +290,50 @@ where
+         }
+         match request {
+             zwp_input_method_v2::Request::CommitString { text } => {
+-                self.text_input_handle.with_active_text_input(|ti, _surface| {
+-                    ti.commit_string(Some(text.clone()));
+-                });
++                self.handle.with_instance(|instance| instance.pending.commit = Some(text));
+             }
+             zwp_input_method_v2::Request::SetPreeditString {
+                 text,
+                 cursor_begin,
+                 cursor_end,
+             } => {
+-                self.text_input_handle.with_active_text_input(|ti, _surface| {
+-                    ti.preedit_string(Some(text.clone()), cursor_begin, cursor_end);
+-                });
++                self.handle
++                    .with_instance(|instance| instance.pending.preedit = Some((text, cursor_begin, cursor_end)));
+             }
+             zwp_input_method_v2::Request::DeleteSurroundingText {
+                 before_length,
+                 after_length,
+             } => {
+-                self.text_input_handle.with_active_text_input(|ti, _surface| {
+-                    ti.delete_surrounding_text(before_length, after_length);
+-                });
++                self.handle
++                    .with_instance(|instance| instance.pending.delete = Some((before_length, after_length)));
+             }
+             zwp_input_method_v2::Request::Commit { serial } => {
+-                let current_serial = self
+-                    .handle
+-                    .inner
+-                    .lock()
+-                    .unwrap()
+-                    .instance
+-                    .as_ref()
+-                    .map(|i| i.serial)
+-                    .unwrap_or(0);
+-
+-                self.text_input_handle.done(serial != current_serial);
++                let mut asked = None;
++                self.handle.with_instance(|instance| {
++                    let pending = std::mem::take(&mut instance.pending);
++                    // (Serials wrap around.)
++                    if serial.wrapping_sub(instance.entered) as i32 >= 0 {
++                        asked = Some((pending, serial != instance.serial));
++                    }
++                });
++                let Some((pending, discard_state)) = asked else {
++                    return;
++                };
++
++                self.text_input_handle
++                    .set_preedit(pending.preedit.as_ref().map(|(text, ..)| text.clone()));
++                self.text_input_handle.with_active_text_input(|ti, _surface| {
++                    if let Some((before, after)) = pending.delete {
++                        ti.delete_surrounding_text(before, after);
++                    }
++                    if let Some(text) = &pending.commit {
++                        ti.commit_string(Some(text.clone()));
++                    }
++                    if let Some((text, begin, end)) = &pending.preedit {
++                        ti.preedit_string(Some(text.clone()), *begin, *end);
++                    }
++                });
++                self.text_input_handle.done(discard_state);
+             }
+             zwp_input_method_v2::Request::GetInputPopupSurface { id, surface } => {
+                 if compositor::give_role(&surface, INPUT_POPUP_SURFACE_ROLE).is_err()
+diff --git a/src/wayland/text_input/text_input_handle.rs b/src/wayland/text_input/text_input_handle.rs
+index efcf38e5..1dc62e75 100644
+--- a/src/wayland/text_input/text_input_handle.rs
++++ b/src/wayland/text_input/text_input_handle.rs
+@@ -18,9 +18,22 @@ pub(crate) struct TextInput {
+     focus: Option<WlSurface>,
+     active_text_input_id: Option<ObjectId>,
+     compositor_input_method: bool,
++    /// The text being composed, as the active text input shows it.
++    preedit: Option<String>,
+ }
+ 
+ impl TextInput {
++    /// Put the text being composed into the active text input, before it is left: what the input
++    /// method commits on losing the focus comes too late for it.
++    fn commit_preedit(&mut self) {
++        let Some(text) = self.preedit.take() else { return };
++        self.with_active_text_input(|text_input, _, serial| {
++            text_input.preedit_string(None, 0, 0);
++            text_input.commit_string(Some(text.clone()));
++            text_input.done(serial);
++        });
++    }
++
+     fn with_focused_client_all_text_inputs<F>(&mut self, mut f: F)
+     where
+         F: FnMut(&ZwpTextInputV3, &WlSurface, u32),
+@@ -106,6 +119,7 @@ impl TextInputHandle {
+     /// surface.
+     pub fn leave(&self) {
+         let mut inner = self.inner.lock().unwrap();
++        inner.commit_preedit();
+         // Leaving clears the active text input.
+         inner.active_text_input_id = None;
+         // NOTE: we implement it in a symmetrical way with `enter`.
+@@ -152,6 +166,20 @@ impl TextInputHandle {
+         self.inner.lock().unwrap().compositor_input_method
+     }
+ 
++    /// Put the text being composed into the active text input; whether there was any.
++    pub(crate) fn commit_preedit(&self) -> bool {
++        let mut inner = self.inner.lock().unwrap();
++        let composing = inner.preedit.is_some();
++        inner.commit_preedit();
++        composing
++    }
++
++    /// The text the input method composes in the active text input now, if any.
++    pub(crate) fn set_preedit(&self, text: Option<String>) {
++        let mut inner = self.inner.lock().unwrap();
++        inner.preedit = text.filter(|text| !text.is_empty() && inner.active_text_input_id.is_some());
++    }
++
+     /// The `discard_state` is used when the input-method signaled that
+     /// the state should be discarded and wrong serial sent.
+     pub fn done(&self, discard_state: bool) {
+@@ -302,14 +330,21 @@ where
+ 
+                 match new_state.enable {
+                     Some(true) => {
+-                        *active_text_input_id = Some(resource.id());
++                        let entered = active_text_input_id.replace(resource.id()).is_none();
++                        if entered {
++                            guard.preedit = None;
++                        }
+                         // Drop the guard before calling to other subsystem.
+                         drop(guard);
++                        if entered {
++                            self.input_method_handle.entered_text_input();
++                        }
+                         self.input_method_handle.activate_input_method(state, &focus);
+                         state.activated(new_state.content_type);
+                     }
+                     Some(false) => {
+                         *active_text_input_id = None;
++                        guard.preedit = None;
+                         // Drop the guard before calling to other subsystem.
+                         drop(guard);
+                         self.input_method_handle.deactivate_input_method(state);

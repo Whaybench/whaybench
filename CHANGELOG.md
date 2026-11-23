@@ -11,6 +11,11 @@ names another step.
 - Windows: the keyring's password is asked as the project access password, with a line on what a lost one needs; the
   two fields are named.
 
+### Fixed
+- The last letter being composed (Hangul) is no longer lost when a press elsewhere, or another panel brought to the front,
+  takes the focus from the field or terminal: it is put in first.
+- The Input panel's hint goes as the first letter is composed, not drawn over it.
+
 ## [0.9.1] - 2026-11-23
 
 ### Added
