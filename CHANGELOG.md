@@ -11,7 +11,9 @@ names another step.
 - Briefsafe projects (README, "Briefsafe projects"): a project in a folder of its own, kept apart from the rest of the
   computer.
   - Every new project is one: the Projects panel's New project and `whaybench-project new ID NAME` make it in
-    `~/work/ID` (or `--folder DIR`), encrypted where podman and gocryptfs are, as a btrfs subvolume where the disk
+    `~/work/ID` (or `--folder DIR`), encrypted where podman, gocryptfs and a keyring are
+    (`--no-encrypt`: not; where it was possible before and is not now, the reason is said and nothing is made), as a
+    btrfs subvolume where the disk
     allows it (a folder copied in with `--from`, a map to start from with `--map`), with a first snapshot. The older
     kind is made only for a sub-project (`--parent`) or with `--plain`.
   - The Claude Code token the projects' conversations sign in with is made from the Projects panel (Inner login:
@@ -25,7 +27,12 @@ names another step.
   - Its conversations run in a rootless podman container of the system's own image. The container sees the project
     folder and the system's programs (read only), with Claude Code and Codex settings, history and memory of the
     project's own. Without podman the project opens as a plain folder, and the Projects panel says so.
-  - `--encrypt` keeps the project's data (documents, map, history, memory, conversations) with gocryptfs under a key in
+  - The keyring: a locked one is waited for at its own window; on Windows (gnome-keyring) Whaybench asks the password
+    itself, makes the keyring the first time and can make a new one when the password is lost
+    (`whaybench-project unlock-keyring`).
+  - Conversation map → Reflect in project puts a node in a logged-in project: the request goes to the project's
+    running conversation, which writes it there. Reflect in project → New project is gone.
+  - Encryption keeps the project's data (documents, map, history, memory, conversations) with gocryptfs under a key in
     the keyring. The view panel shows a recovery key once; `open ID --recovery` takes it when the keyring's key is
     gone.
   - The Projects panel lists Briefsafe projects with their state. A locked one shows Log in only; an open one its name

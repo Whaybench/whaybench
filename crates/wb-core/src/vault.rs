@@ -106,13 +106,23 @@ pub fn mounted(s: &Stub) -> bool {
     std::fs::read_to_string("/proc/self/mountinfo").is_ok_and(|t| t.lines().any(|l| l.split(' ').nth(4) == Some(escaped.as_str())))
 }
 
-/// Whether a vault can be made here: a container for its agents (its key never reaches a host-run one), and gocryptfs
-/// with FUSE to open it.
-pub fn available() -> bool {
-    crate::container::isolation()
-        && Command::new("gocryptfs").arg("-version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
-        && Command::new("fusermount3").arg("-V").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+/// What a vault cannot do without and is not here, as a message for the person; None when one can be made: a container
+/// for its agents (its key never reaches a host-run one), gocryptfs with FUSE to open it, a keyring for its key (a
+/// locked one is there).
+pub fn missing() -> Option<String> {
+    let runs = |program: &str, arg: &str| Command::new(program).arg(arg).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+    let need = |k: &str| Some(crate::i18n::t(k).to_string());
+    if !crate::container::podman_found() { return need("vault-needs-podman"); }
+    if crate::container::host_image().is_none() { return need("vault-needs-image"); }
+    if !runs("gocryptfs", "-version") { return need("vault-needs-gocryptfs"); }
+    if !runs("fusermount3", "-V") { return need("vault-needs-fuse"); }
+    match crate::secret::state() { crate::secret::State::Absent(e) => Some(crate::i18n::f("vault-needs-keyring", &[("why", e)])), _ => None }
 }
+
+/// Whether a vault has been made with this data folder: then one that cannot be made now is a fault to be told, not a
+/// computer without vaults.
+pub fn made_here(host: &crate::paths::Data) -> bool { host.root.join("vault-made").exists() || crate::roots::stubs(host).iter().any(|s| s.vault) }
+pub fn note_made(host: &crate::paths::Data) { let _ = std::fs::write(host.root.join("vault-made"), ""); }
 
 /// Open and answering: mounted, and its gocryptfs still there (a dead one leaves the mount, which then fails).
 pub fn ready(s: &Stub) -> bool { mounted(s) && std::fs::metadata(mountpoint(s)).is_ok() }

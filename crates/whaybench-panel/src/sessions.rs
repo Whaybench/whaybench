@@ -147,7 +147,19 @@ fn row(title: &str, sub: &str, note: Option<&str>, faded: bool) -> gtk::ListBoxR
 }
 
 fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) {
-    let all = sessions::all(d);
+    // One project's list reads that project's conversations, not every one; with none to show, nothing.
+    let one = view.borrow().only.clone();
+    let root = match one.as_deref() {
+        None => None,
+        Some(id) => match wb_core::roots::stubs(d).into_iter().find(|s| s.id == id && s.open()) {
+            Some(st) => Some(st.root()),
+            None => {
+                if view.borrow().signature != "-" { view.borrow_mut().signature = "-".into(); while let Some(r) = list.row_at_index(0) { list.remove(&r); } }
+                return;
+            }
+        },
+    };
+    let all = sessions::all(root.as_ref().unwrap_or(d));
     let chosen = sessions::focus(d);
     let latest = sessions::latest(d);
     let open = sessions::open_tabs(d);

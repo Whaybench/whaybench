@@ -47,7 +47,7 @@ say "packages"
 # every start would start another one. awk is for the Codex and Whaybench installers, git for Claude Code's plugin
 # marketplace; Fedora's WSL image has neither. podman runs Briefsafe projects' agents in containers, and gnome-keyring
 # keeps the token they sign in with (the Secret Service; WSL has no desktop to bring one); gocryptfs encrypts a project's
-# data when it is made with --encrypt.
+# data.
 dnf install -y -q webkitgtk6.0 wl-clipboard firefox google-noto-sans-fonts google-noto-sans-cjk-fonts google-noto-color-emoji-fonts default-fonts-other-sans dbus-tools minisign curl gawk git-core procps-ng btrfs-progs xfsprogs podman gnome-keyring gocryptfs
 # fcitx5 without its weak dependencies: its setting program (Whaybench has its own) and the GTK and Qt input modules.
 # The apps inside Whaybench type through the compositor (Wayland text-input).

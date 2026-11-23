@@ -78,30 +78,39 @@ Your data stays in its folder (see below).
 ## Briefsafe projects
 
 A Briefsafe project keeps one piece of work apart from everything else on your computer. Every new project is one:
-press **New project** in the **Projects** panel (or ask your agent). It goes in `~/work/<name>`. Once, before its
+press **New project** in the **Projects** panel (or ask your agent). It goes in `~/work/` (or your
+home folder when there is none), under a short form of its name. Once, before its
 first conversation, press **Log in**, then **Inner login: Claude**: a terminal in the view signs you in and keeps the
 token all projects' conversations use. Codex signs in once in each project (**Codex** beside it; turn on device code
 login in your ChatGPT security settings first). Then start a conversation on the **Sessions** tab.
 
 - **Its own folder.** The project lives in one folder, a btrfs subvolume where the disk allows it. A snapshot is
-  taken when it is made, and again whenever you press **Save state**. The 30 latest are kept, and **Restore** puts the
-  whole folder back as it was.
+  taken when it is made, and again whenever you press **Save state**. The 30 latest are kept. To put the
+  whole folder back as it was, log out and ask your agent to restore one; Codex may ask you to sign in to the project
+  again after that.
 - **Its own agents.** Its conversations run in a rootless podman container. The container sees the project folder,
   your system's programs (read only) and nothing else of your home folder. Claude Code and Codex there have their own
   settings and history.
-- **Encrypted while logged out** (`--encrypt`). The project's documents, map, history, memory and conversations are
+- **Encrypted while logged out**, wherever your computer can. The project's documents, map, history, memory and conversations are
   kept with gocryptfs, under a key held in your keyring. When it is made, the view panel shows a recovery key once:
   keep it somewhere safe. Without it, a lost keyring means a lost project.
 - **Kept apart in Whaybench.** A project's text, map and pages stay in its own panels and conversations. Your other
-  conversations can give a project things, but nothing of the project comes back out to them.
+  conversations can give a project things (conversation map → node menu → **Reflect in project**, while it is logged in
+  and has a conversation running), but nothing of the project comes back out to them.
 
 What it does not protect: while a project is logged in, other programs running as your user (an agent outside the
 project included) can still read its files. Log out when you are done. Pictures of the screen taken while a project
 is open are removed after ten minutes.
 
 **What it needs on Linux.** The Windows setup brings all of this. On Linux, install `podman` for the container and
-`gocryptfs` (with FUSE) for encryption. Without podman a project still gets its own folder and snapshots, but its
-agents run as you, outside a container.
+`gocryptfs` (with FUSE) for encryption, and have a keyring (KDE and GNOME bring one). `btrfs-progs` is needed for
+snapshots on btrfs. Without podman a project still gets its own folder and snapshots, but its agents run as you,
+outside a container. Where encryption was never possible, a project is made without it and Whaybench says why; where it
+was, Whaybench says what is wrong and makes nothing.
+
+**The keyring.** It keeps the projects' keys and the sign-in token. When it is locked, your desktop's own window asks
+its password; on Windows, Whaybench asks it, and has you choose one the first time. A lost keyring password cannot be
+recovered: make a new keyring (offered after a wrong password) and open each project with its recovery key.
 
 **Removing snapshots.** Whaybench deletes snapshots past the 30 kept as you, not as root. That needs the btrfs mount
 option `user_subvol_rm_allowed` on the disk that holds your projects. The Windows setup sets it. On Linux, add it once

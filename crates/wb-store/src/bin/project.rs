@@ -8,10 +8,10 @@ use wb_store::{Res, Store, folder, markdown::headings, s};
 const HELP: &str = r#"Project store command. Only the AI writes projects, and only through this; the person asks.
 
   whaybench-project list | tree                    projects (tree: parent by id)
-  whaybench-project new ID NAME [--desc D] [--path DIR] [--always] [--folder DIR] [--from SRC] [--map FILE] [--encrypt]
+  whaybench-project new ID NAME [--desc D] [--path DIR] [--always] [--folder DIR] [--from SRC] [--map FILE] [--no-encrypt]
                                                    a Briefsafe project: in DIR, or ~/work/ID (else ~/ID); encrypted where
-                                                   podman and gocryptfs are (--encrypt asks for it anyway); --map starts
-                                                   its map from a kept map file. The older kind only with --parent P
+                                                   podman, gocryptfs and a keyring are (--no-encrypt: not); --map starts
+                                                   its map from a map file. The older kind only with --parent P
                                                    (a sub-project) or --plain. Its folder is a btrfs subvolume where
                                                    it can (--from copies a folder in), its data inside it
                                                    (<folder>/.whaybench), with a first snapshot
@@ -72,6 +72,21 @@ fn flag(rest: &mut Vec<String>, name: &str) -> bool {
     had
 }
 
+const NOT_FROM_HERE: &str = "a project is not made from this session (it runs in a project or in a sandbox that may not write outside its folders): tell the person to make it with New project in the Projects panel";
+
+/// A sandboxed session (Codex) may not write where a project is made: said so before anything is tried.
+fn writable(d: &Data) -> Res<()> {
+    let probe = d.cache().join(format!("project-create.{}", std::process::id()));
+    let made = std::fs::create_dir_all(d.cache()).and_then(|_| std::fs::write(&probe, ""));
+    let _ = std::fs::remove_file(&probe);
+    made.map_err(|e| if matches!(e.kind(), std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::PermissionDenied) { NOT_FROM_HERE.into() } else { e.to_string() })
+}
+
+/// The keyring open before a step that needs it: three minutes for the person at its window, said in the status line.
+fn keyring_open(d: &Data) -> Res<()> {
+    wb_core::secret::ensure_open(std::time::Duration::from_secs(180), || wb_core::status::say(d, wb_core::i18n::t("keyring-waiting"), 180))
+}
+
 fn calling_session() -> String {
     ["WHAYBENCH_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"].iter().find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty())).unwrap_or_default()
 }
@@ -119,7 +134,19 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let t: Vec<String> = st.tree().iter().map(|(p, d)| format!("{}{} [{}]", "  ".repeat(*d), s(p, "name"), s(p, "id"))).collect();
             out(json!(if t.is_empty() { "(none)".to_string() } else { t.join("\n") }));
         }
+        "unlock-keyring" => {
+            // The keyring's password on standard input, where Whaybench asks it (WSL); `--anew` sets the old one aside.
+            let anew = flag(&mut rest, "--anew");
+            let mut t = String::new();
+            std::io::stdin().read_to_string(&mut t).map_err(|e| e.to_string())?;
+            wb_core::secret::unlock_with(t.trim_end_matches('\n'), anew)?;
+            out(json!({"keyring": "open"}));
+        }
         "new" => {
+            // Made on the host, by a program that can write there: never inside a project, nor from a sandbox.
+            if wb_core::roots::is_project_root(&st.data) { return Err(NOT_FROM_HERE.into()); }
+            // What follows `--` is the id and the name, whatever it looks like.
+            let plain_words = rest.iter().position(|x| x == "--").map(|i| { let tail = rest.split_off(i + 1); rest.pop(); tail });
             let parent = opt(&mut rest, "--parent").unwrap_or_default();
             let desc = opt(&mut rest, "--desc").unwrap_or_default();
             let mut paths = Vec::new();
@@ -129,12 +156,18 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let from = opt(&mut rest, "--from").map(|f| absolute(&f));
             let map = opt(&mut rest, "--map").map(|f| absolute(&f));
             let encrypt = flag(&mut rest, "--encrypt");
+            let open_data = flag(&mut rest, "--no-encrypt");
             let plain = flag(&mut rest, "--plain");
+            if let Some(words) = plain_words { rest.extend(words); }
             let (pid, name) = (arg(&rest, 0)?, arg(&rest, 1)?);
             // A new project is a Briefsafe one (spec 3.22), encrypted where a vault can be made; the older kind only for
             // a sub-project (a Briefsafe project stands alone) or when asked for (`--plain`).
             let briefsafe = folder.is_some() || (parent.is_empty() && !plain);
-            let encrypt = encrypt || (briefsafe && folder.is_none() && wb_core::vault::available());
+            // Where a vault was never possible, without one, said; where it was, what is wrong is said and nothing made.
+            let missing = if (briefsafe && !open_data) || encrypt { wb_core::vault::missing() } else { None };
+            let refuse = missing.as_ref().filter(|_| encrypt || wb_core::vault::made_here(&st.data));
+            if let Some(why) = refuse { return Err(wb_core::i18n::f("vault-not-now", &[("why", why.clone())])); }
+            let encrypt = encrypt || (briefsafe && !open_data && missing.is_none());
             let folder = if briefsafe && folder.is_none() { Some(wb_core::roots::default_folder(pid).ok_or("no home folder")?.to_string_lossy().to_string()) } else { folder };
             // Before any lock or file is made from it.
             if folder.is_some() && wb_core::map::safe_id(pid).is_err() { return Err(format!("not a project id (letters, digits, - and _ only): {pid}")); }
@@ -147,15 +180,17 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 out(st.create_project(pid, name, &desc, &parent, paths, always)?);
                 return Ok(0);
             };
+            writable(&st.data)?;
+            if encrypt { keyring_open(&st.data)?; }
             // One creation at a time: two with the same id must not both pass the check, nor one undo the other's.
-            // A vault only where the project runs in a container: its key must never reach a host-run agent (spec 3.22).
-            if encrypt && !wb_core::container::isolation() { return Err("--encrypt needs podman and a container image for this system".into()); }
             // In turn with an open of the same id too: it must not find the project half made.
             let would_be = wb_core::roots::Stub::new(&st.data, pid, name, Path::new(&folder));
             let (p, first, recovery) = wb_core::container::life(&would_be, || wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || if parent.is_empty() { st.create_in_folder_with_map(pid, name, &desc, paths, always, &folder, from.as_deref().map(Path::new), encrypt, map.as_deref().map(Path::new)) } else { st.create_in_folder(pid, name, &desc, &parent, paths, always, &folder, from.as_deref().map(Path::new), encrypt) }))?;
             // The recovery key, once, to the person only (spec 3.22): never in this output, which an AI may be reading.
             let note = recovery.as_ref().and_then(|k| wb_core::roots::stubs(&st.data).into_iter().find(|s| s.id == pid).map(|s| wb_core::vault::show_recovery(&s, &st.data, k)));
-            out(json!({"project": p, "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning), "recovery_key": note}));
+            if encrypt { wb_core::vault::note_made(&st.data); }
+            let shown = recovery.is_none() || note.as_deref() == Some(wb_core::i18n::t("briefsafe-recovery-in-view"));
+            out(json!({"project": p, "encrypted": encrypt, "not_encrypted": missing.map(|why| wb_core::i18n::f("vault-off", &[("why", why)])), "snapshot": first.as_ref().map(|t| &t.name).filter(|n| !n.is_empty()), "warning": first.and_then(|t| t.warning), "recovery_key": note, "recovery_key_shown": shown}));
         }
         "convert" => {
             // A project of the older kind into a Briefsafe one, when the person asks (spec 3.22).
@@ -164,7 +199,9 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let encrypt = flag(&mut rest, "--encrypt");
             let pid = arg(&rest, 0)?;
             if wb_core::map::safe_id(pid).is_err() { return Err(format!("{pid}: a Briefsafe project's id is letters, digits, - and _ only; make a new project and move its work instead")); }
-            if encrypt && !wb_core::container::isolation() { return Err("--encrypt needs podman and a container image for this system".into()); }
+            if encrypt && let Some(why) = wb_core::vault::missing() { return Err(wb_core::i18n::f("vault-not-now", &[("why", why)])); }
+            writable(&st.data)?;
+            if encrypt { keyring_open(&st.data)?; }
             let name = st.get_project(pid).map(|p| p["name"].as_str().unwrap_or(pid).to_string()).unwrap_or_else(|| pid.to_string());
             let would_be = wb_core::roots::Stub::new(&st.data, pid, &name, Path::new(&folder));
             let (p, first, recovery) = wb_core::container::life(&would_be, || wb_core::container::flocked(&st.data.cache().join("project-create.lock"), || st.convert_to_folder(pid, &folder, from.as_deref().map(Path::new), encrypt)))?;
@@ -178,6 +215,8 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             // Opened in its container before: there again, or not at all.
             let isolated = wb_core::container::opened_isolated(&st2) || wb_core::container::isolation();
             if st2.vault && !isolated { return Err("this project's vault opens only in its container: podman and an image are needed".into()); }
+            // The keyring before the locks: its window may wait for the person.
+            if st2.vault && !wb_core::vault::ready(&st2) { keyring_open(&st.data)?; }
             wb_core::container::life(&st2, || {
             // The vault first: with the keyring's key, or with the recovery key on standard input.
             if st2.vault {

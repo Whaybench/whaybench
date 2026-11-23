@@ -69,7 +69,8 @@ parent loop or a bad id is refused before saving, and the stored map stays. Remo
 Codex runs with `--sandbox workspace-write`. Five folders of the data folder are its writable roots
 (`sandbox_workspace_write.writable_roots`): `view` and `show` for `whaybench-view`, `projects` for `whaybench-project`,
 `node-files` for `whaybench-files`, `ask` for `whaybench ctl session type` (Whaybench checks and delivers what is
-asked). Only these: with the whole data folder Codex could change its own settings or its
+asked). A new project is made outside them (its folder, its key): Codex says to make it with New project in the
+Projects panel. Only these: with the whole data folder Codex could change its own settings or its
 add-on and undo the sandbox, or type into other tabs. Codex has no status line: when a turn ends, the hook reads the last `token_count` line of Codex's
 session file for the context and the 5-hour and weekly windows. The notifications panel shows Codex's windows for Codex
 sessions and Claude Code's for Claude Code sessions.

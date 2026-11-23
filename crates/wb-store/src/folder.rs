@@ -36,7 +36,7 @@ fn read_only(path: &Path) -> bool {
     unsafe { libc::access(c.as_ptr(), libc::W_OK) != 0 && *libc::__errno_location() == libc::EROFS }
 }
 
-fn is_subvolume(path: &Path) -> bool { fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && m.ino() == SUBVOLUME_INODE) }
+pub fn is_subvolume(path: &Path) -> bool { fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && m.ino() == SUBVOLUME_INODE) }
 
 /// Makes the project folder: a subvolume on btrfs, else a plain folder. With `from`, everything in that folder is
 /// copied in (reflinked where it can be). Answers whether the folder is a subvolume.
@@ -50,7 +50,8 @@ pub fn make(dir: &Path, from: Option<&Path>) -> Res<bool> {
     }
     let parent = dir.parent().ok_or("no parent folder")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let subvolume = on_btrfs(parent);
+    // Without the btrfs tools a plain folder, as on another file system: no snapshots.
+    let subvolume = on_btrfs(parent) && output("btrfs", &["--version".as_ref()]).is_ok();
     if subvolume { btrfs(&["subvolume".as_ref(), "create".as_ref(), dir.as_os_str()])?; } else { fs::create_dir(dir).map_err(|e| e.to_string())?; }
     if let Some(src) = from
         && let Err(e) = copy_into(src, dir) {

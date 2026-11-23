@@ -108,16 +108,32 @@ pub fn flow_of(data: &Value, id: &str) -> Vec<String> {
     chain
 }
 
-pub fn reflect_request(pid: Option<&str>, work: Option<&str>, flow: &[String], lines: &[String]) -> String {
-    let mut t = String::new();
-    if let (Some(p), Some(q)) = (pid, work) {
-        t += &wb_core::i18n::ai_f("project-work-first-run-whaybench-project", &[("q", (q).to_string()), ("p", (p).to_string())]);
-    }
-    let target = pid.map(|p| wb_core::i18n::ai_f("project-2", &[("p", (p).to_string())])).unwrap_or_else(|| wb_core::i18n::ai("a-new-project-create-it-with").into());
-    let map_target = pid.unwrap_or(wb_core::i18n::ai("text-3"));
-    t += &wb_core::i18n::ai_f("reflect-in-project-the-user-sent", &[("target", (target).to_string()), ("a1", (if flow.is_empty() { wb_core::i18n::ai("none-top-branch").to_string() } else { flow.join(" › ") }).to_string()), ("a2", (lines.iter().take(120).cloned().collect::<Vec<_>>().join("\n")).to_string())]);
-    t += &wb_core::i18n::ai_f("n1-first-compare-with-whaybench-project", &[("map_target", (map_target).to_string())]);
+/// `inside`: to a Briefsafe project's own conversation, of a node from outside it.
+pub fn reflect_request(pid: &str, work: &str, flow: &[String], lines: &[String], inside: bool) -> String {
+    let mut t = wb_core::i18n::ai_f("project-work-first-run-whaybench-project", &[("q", work.to_string()), ("p", pid.to_string())]);
+    let target = wb_core::i18n::ai_f("project-2", &[("p", pid.to_string())]);
+    t += &wb_core::i18n::ai_f(if inside { "reflect-in-project-from-outside" } else { "reflect-in-project-the-user-sent" }, &[("target", (target).to_string()), ("a1", (if flow.is_empty() { wb_core::i18n::ai("none-top-branch").to_string() } else { flow.join(" › ") }).to_string()), ("a2", (lines.iter().take(120).cloned().collect::<Vec<_>>().join("\n")).to_string())]);
+    t += &wb_core::i18n::ai_f("n1-first-compare-with-whaybench-project", &[("map_target", pid.to_string())]);
+    if inside { t += wb_core::i18n::ai("reflect-origin-outside"); }
     t
+}
+
+/// The Briefsafe projects a node can be put in: dimmed while locked, and (for a project's own map) any but its own.
+/// The request goes to that project's running conversation, the last one used, which writes it in the project.
+fn reflect_briefsafe(d: &Data, sub: &Items, map_project: Option<&str>, label: &str, flow: &[String], lines: &[String]) {
+    for st in wb_core::roots::stubs(d) {
+        let (d2, label2, f2, l2, st2) = (d.clone(), label.to_string(), flow.to_vec(), lines.to_vec(), st.clone());
+        sub.add(&st.name, st.open() && map_project.is_none_or(|m| m == st.id), move || {
+            if !st2.open() { return; }
+            let root = st2.root();
+            let running = sessions::all(&root).into_iter().filter(|r| s(r, "movedTo").is_empty() && sessions::alive(&d2, s(r, "id"))).max_by_key(|r| r.get("lastActive").and_then(Value::as_i64).unwrap_or(0));
+            let Some(sid) = running.map(|r| s(&r, "id").to_string()) else { return status::say(&d2, &wb_core::i18n::f("reflect-no-conversation", &[("name", st2.name.clone())]), 10) };
+            let store = Store::new(root);
+            let Ok(q) = store.queue_add(&st2.id, "reflect", &label2, &sid) else { return };
+            if sessions::queue_prompt(&d2, &sid, &reflect_request(&st2.id, &q, &f2, &l2, true)) { status::say(&d2, &wb_core::i18n::f("reflect-sent-project", &[("label", cut(&label2, 20)), ("name", st2.name.clone())]), 8); }
+            else { store.queue_drop(&st2.id, &q); status::say(&d2, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(&sid, 8))]), 8); }
+        });
+    }
 }
 
 fn maps_dir(d: &Data) -> std::path::PathBuf { d.maps() }
@@ -251,10 +267,11 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
             let host_session = session.as_deref().is_some_and(|s| wb_core::roots::Roots::new(d.clone()).project_of(s).is_none());
             sub.add(&name, host_session && map_project.is_none(), move || {
                 let Ok(q) = st.queue_add(&pid, "reflect", &label2, &s2) else { return };
-                if sessions::queue_prompt(&d2, &s2, &reflect_request(Some(&pid), Some(&q), &f2, &l2)) { status::say(&d2, &wb_core::i18n::f("project-reflection-request-sent-session", &[("a1", cut(&label2, 20)), ("a2", cut(&s2, 8))]), 8); }
+                if sessions::queue_prompt(&d2, &s2, &reflect_request(&pid, &q, &f2, &l2, false)) { status::say(&d2, &wb_core::i18n::f("project-reflection-request-sent-session", &[("a1", cut(&label2, 20)), ("a2", cut(&s2, 8))]), 8); }
                 else { st.queue_drop(&pid, &q); status::say(&d2, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(&s2, 8))]), 8); }
             });
         }
+        reflect_briefsafe(d, &sub, map_project.as_deref(), &label, &flow, &lines);
         refer.menu.append_submenu(Some(wb_core::i18n::t("reflect-in-project")), &sub.menu);
         items.menu.append_section(None, &refer.menu);
     }
@@ -366,7 +383,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
                 // Checked again when pressed: the map or the conversation in front may have changed since.
                 if !host_pair(&d2, &owner, &s2) { return; }
                 let Ok(q) = st.queue_add(&pid, "reflect", &label2, &s2) else { return };
-                if sessions::queue_prompt(&d2, &s2, &reflect_request(Some(&pid), Some(&q), &f2, &l2)) {
+                if sessions::queue_prompt(&d2, &s2, &reflect_request(&pid, &q, &f2, &l2, false)) {
                     status::say(&d2, &wb_core::i18n::f("project-reflection-request-sent-session", &[("a1", (cut(&label2, 20)).to_string()), ("a2", (cut(&s2, 8)).to_string())]), 8);
                 } else {
                     st.queue_drop(&pid, &q);
@@ -374,13 +391,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
                 }
             });
         }
-        {
-            let (d2, s2, l2, f2, owner) = (d.clone(), session.clone().unwrap_or_default(), lines.clone(), flow.clone(), s(data, "sessionId").to_string());
-            sub.add(wb_core::i18n::t("new-project"), host_only, move || {
-                if !host_pair(&d2, &owner, &s2) { return; }
-                if sessions::queue_prompt(&d2, &s2, &reflect_request(None, None, &f2, &l2)) { status::say(&d2, wb_core::i18n::t("new-project-request-sent"), 8); }
-            });
-        }
+        reflect_briefsafe(d, &sub, map_project.as_deref(), &label, &flow, &lines);
         items.menu.append_submenu(Some(wb_core::i18n::t("reflect-in-project")), &sub.menu);
     }
     let section = items.sub();
@@ -1006,8 +1017,8 @@ mod tests {
         assert!(t.starts_with("[Map update]") && t.contains("do not shorten or merge") && t.contains("detail for the rest") && !t.contains("Scope") && !t.contains("Additional request"));
         let t = update_request(Some(("n1", "branch")), "more", None);
         assert!(t.contains("Scope: branch 'branch' (node n1)") && t.ends_with("Additional request: more"));
-        let r = reflect_request(Some("p"), Some("q1"), &["top".into()], &["- node".into()]);
+        let r = reflect_request("p", "q1", &["top".into()], &["- node".into()], false);
         assert!(r.starts_with("[Project work q1] First run `whaybench-project take p q1`") && r.contains("Upper flow: top\nNode and contents below it:\n- node"));
-        assert!(reflect_request(None, None, &[], &[]).starts_with("[Reflect in project]"));
+        assert!(reflect_request("p", "q1", &[], &[], true).contains("outside"));
     }
 }

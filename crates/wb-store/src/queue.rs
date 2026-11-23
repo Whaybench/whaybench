@@ -22,8 +22,8 @@ impl Store {
 
     /// An item whose request could not be sent.
     pub fn queue_drop(&self, pid: &str, id: &str) {
-        let _ = fs::remove_file(self.q_path(pid, id));
-        let _ = fs::remove_file(self.q_lock(pid, id));
+        let _ = wb_core::paths::remove_file(&self.q_path(pid, id));
+        let _ = wb_core::paths::remove_file(&self.q_lock(pid, id));
     }
 
     pub fn queue(&self, pid: &str, status: Option<&str>) -> Vec<Value> {

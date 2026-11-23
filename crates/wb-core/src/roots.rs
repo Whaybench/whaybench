@@ -66,7 +66,9 @@ impl Stub {
 /// folder's `<id>`; a name in use gets a number.
 pub fn default_folder(id: &str) -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
-    let base = if home.join("work").is_dir() { home.join("work") } else { home };
+    // Windows with its work disk not attached: `~/work` is then a folder that is moved aside when it is back.
+    let work = home.join("work").is_dir() && std::env::var("WHAYBENCH_WORK_DISK").as_deref() != Ok("missing");
+    let base = if work { home.join("work") } else { home };
     std::iter::once(base.join(id)).chain((2..).map(|n| base.join(format!("{id}-{n}")))).find(|p| std::fs::symlink_metadata(p).is_err())
 }
 

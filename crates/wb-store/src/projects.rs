@@ -61,8 +61,10 @@ impl Store {
         // A kept map to start from: read before anything is made (a bad file makes nothing).
         let map = match map {
             Some(f) => {
-                let m = crate::read(f).ok_or_else(|| format!("{}: not a map file", f.display()))?;
-                Some((m["nodes"].as_array().cloned().unwrap_or_default(), s(&m, "title").to_string(), f.to_string_lossy().to_string()))
+                // With its nodes' content (a saved map may only name them, by their numbers in the host's memory).
+                let m = wb_core::map::view_file(&self.data.root, f).map_err(|e| format!("{}: not a map file ({e})", f.display()))?;
+                let title = Some(s(&m, "title")).filter(|t| !t.is_empty()).unwrap_or(name).to_string();
+                Some((m["nodes"].as_array().cloned().unwrap_or_default(), title))
             }
             None => None,
         };
@@ -117,7 +119,14 @@ impl Store {
                 write_json(&inner.pdir(pid).join("project.json"), &p)?;
             } else {
                 inner.create_project(pid, name, desc, parent, paths, always)?;
-                if let Some((nodes, title, file)) = &map { inner.map_from_nodes(pid, nodes, title, file)?; }
+                if let Some((nodes, title)) = &map {
+                    // A whole copy in the project: what its items point back at, readable there.
+                    let kept = Path::new("imported").join("start.json");
+                    let file = inner.data.root.join(&kept);
+                    fs::create_dir_all(file.parent().unwrap_or(&inner.data.root)).map_err(|e| e.to_string())?;
+                    write_json(&file, &json!({"format": "whaybench-map", "title": title, "nodes": nodes}))?;
+                    inner.map_from_nodes(pid, nodes, title, &stub.open_at.join(&kept).to_string_lossy())?;
+                }
             }
             let p = inner.set_folder(pid, folder, subvolume)?;
             // The templates as they are now: later changes to the add-ons do not reach this project.
@@ -291,6 +300,18 @@ mod tests {
         assert_eq!(fs::read_to_string(inner.data.root.join("addons/project-docs/wbs/WBS.md")).unwrap(), "# WBS\n");
         assert_eq!(fs::read_to_string(Path::new(&folder).join(".git/info/exclude")).unwrap(), "/.whaybench/\n");
         assert!(fs::symlink_metadata(Path::new(&folder).join(".whaybench")).unwrap().is_dir() && fs::read_dir(&elsewhere).unwrap().count() == 0, "its own data, nothing written through the link");
+        // Started from a map: its items point at a whole copy in the project.
+        let file = host.data.root.join("m.json");
+        std::fs::write(&file, r#"{"format":"whaybench-map","title":"","nodes":[{"id":"a","label":"Top"},{"id":"b","parent":"a","label":"Below"}]}"#).unwrap();
+        host.create_in_folder_with_map("mapped", "Mapped", "", vec![], false, &format!("{folder}-map"), None, false, Some(&file)).unwrap();
+        let st = wb_core::roots::stubs(&host.data).into_iter().find(|s| s.id == "mapped").unwrap();
+        let m = Store::new(st.stored()).project_map("mapped");
+        assert_eq!(arr(&m, "items").len(), 2);
+        assert_eq!(s(&arr(&m, "areas")[0], "title"), "Mapped", "a map without a title takes the project's name");
+        assert_eq!(arr(&arr(&m, "items")[0], "origin")[0]["imported"], json!(st.open_at.join("imported/start.json")));
+        assert!(st.stored().root.join("imported/start.json").is_file());
+        crate::folder::discard(&st.folder, crate::folder::is_subvolume(&st.folder)).unwrap();
+        wb_core::roots::remove_stub(&host.data, "mapped");
         assert!(host.create_in_folder("up", "Up", "", "", vec![], false, &format!("{folder}2"), None, false).is_err(), "the id is taken");
         assert!(host.create_in_folder("in", "In", "", "", vec![], false, &format!("{folder}/in"), None, false).is_err(), "not inside another");
         // Snapshots of a test folder on btrfs are read-only: clean up the way the program prunes.
