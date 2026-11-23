@@ -32,7 +32,7 @@ function Fail($text) {
 trap { Fail "$_" }
 # It runs as root in the distribution: the one that came with this file, never one fetched from the network unchecked.
 $setup = Join-Path $PSScriptRoot "setup-wsl.sh"
-if (-not (Test-Path $setup)) { Fail "setup-wsl.sh not found beside install.ps1. Use WhaybenchSetup.exe." }
+if (-not (Test-Path -LiteralPath $setup)) { Fail "setup-wsl.sh not found beside install.ps1. Use WhaybenchSetup.exe." }
 # wsl.exe writes UTF-16; read it as such.
 [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
 $wsl = "$env:SystemRoot\System32\wsl.exe"
@@ -88,7 +88,7 @@ $locale = (Get-UICulture).Name -replace '-', '_'
 if ($locale -notmatch '^[a-z]{2,3}_[A-Z]{2}$') { $locale = "" }
 Say "Setting up $Distro for ${user}: packages, Claude Code, Whaybench (several minutes)"
 $script = Join-Path $env:TEMP "whaybench-setup-wsl.sh"
-Copy-Item $setup $script -Force
+Copy-Item -LiteralPath $setup -Destination $script -Force
 # Line ends as Linux reads them. The distribution reads the file where it is, from its folder (--cd takes a Windows
 # path): text piped from PowerShell gets a Windows line end added, which the shell would run as a command, and
 # Windows PowerShell breaks quotes inside arguments to wsl.exe.

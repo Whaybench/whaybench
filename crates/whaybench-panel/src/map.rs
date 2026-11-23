@@ -804,7 +804,10 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
     let indent_now = { let d = d.clone(); move || (mapstyles::default_indent(&d) as i32 * letter).max(8) };
     INDENT.with(|c| c.set(indent_now()));
     let panel = Rc::new(RefCell::new(Panel { data: None, signature: String::new(), flipped: HashSet::new(), picked: None, style: String::new(), page: String::new() }));
-    panel.borrow_mut().style = mapstyles::current(&d, panel_key(scope.as_ref()));
+    // One whose instructions are not confirmed (never, or changed since) is asked about at the first look below.
+    let first = mapstyles::current(&d, panel_key(scope.as_ref()));
+    let read = mapstyles::find(&d, &first).is_none_or(|x| mapstyles::allowed(&d, &x));
+    panel.borrow_mut().style = if read { first } else { mapstyles::DEFAULT.to_string() };
     if let Some(x) = mapstyles::find(&d, &panel.borrow().style) { change.set_label(&wb_core::i18n::f("change-2", &[("a1", (cut(&x.name, 8)).to_string())])); }
     let web: Rc<RefCell<Option<webkit6::WebView>>> = Rc::default();
     { let (w2, d2, k) = (win.clone(), d.clone(), panel_key(scope.as_ref()).to_string()); change.connect_clicked(move |b| style_menu(&w2, b, &d2, &k)); }
