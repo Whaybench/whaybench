@@ -1,5 +1,5 @@
 diff --git a/src/wayland/input_method/input_method_handle.rs b/src/wayland/input_method/input_method_handle.rs
-index 5e6c8d00..90b3d3ad 100644
+index 5e6c8d00..f245ee42 100644
 --- a/src/wayland/input_method/input_method_handle.rs
 +++ b/src/wayland/input_method/input_method_handle.rs
 @@ -38,6 +38,18 @@ pub(crate) struct InputMethod {
@@ -37,7 +37,7 @@ index 5e6c8d00..90b3d3ad 100644
 +    /// Another text input was entered, told to the input method with the next `done`: what it
 +    /// commits without having seen that is about the one before, and is not put into this one.
 +    pub(crate) fn entered_text_input(&self) {
-+        self.with_instance(|instance| instance.entered = instance.serial + 1);
++        self.with_instance(|instance| instance.entered = instance.serial.wrapping_add(1));
 +    }
 +
 +    /// Put the text being composed into the text input it is in, and have the input method start
@@ -50,7 +50,7 @@ index 5e6c8d00..90b3d3ad 100644
 +        self.with_instance(|instance| {
 +            instance.object.deactivate();
 +            instance.done();
-+            instance.entered = instance.serial + 1;
++            instance.entered = instance.serial.wrapping_add(1);
 +            instance.object.activate();
 +            instance.done();
 +        });

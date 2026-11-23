@@ -53,8 +53,8 @@ impl App {
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
                 let button_state = event.state();
-                // Menus close on a press outside them even while the pointer is held by a grab, which skips the rest.
                 if button_state == ButtonState::Pressed { self.finish_composing(); }
+                // Menus close on a press outside them even while the pointer is held by a grab, which skips the rest.
                 if button_state == ButtonState::Pressed { let at = self.pointer; self.close_popups_unless_at(at.into()); }
                 let forward = match button_state {
                     ButtonState::Pressed if !pointer.is_grabbed() => self.pointer_pressed(button),
