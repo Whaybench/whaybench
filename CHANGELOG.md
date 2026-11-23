@@ -7,8 +7,6 @@ names another step.
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-11-21
-
 ### Added
 - Briefsafe projects (README, "Briefsafe projects"): a project in a folder of its own, kept apart from the rest of the
   computer.
@@ -34,6 +32,10 @@ names another step.
   - At each log in a project's Claude settings take the person's plugins (an update moves a plugin's folder); a
     plugin the project's agents turned on or off themselves stays as they set it. A project whose memory a newer
     Whaybench wrote is not logged in to, and says so.
+
+## [0.9.0] - 2026-11-21
+
+### Added
 - The answer panel has ⟳ (the newest answer) and ↶ (the answer shown before ⟳ was pressed, or the node's answers).
 - The answer panel moves to a new answer only while its newest one is shown; while an earlier answer or a node's
   answers are shown, a new one only joins the list. The same conversation under a new number (/resume) is not taken
