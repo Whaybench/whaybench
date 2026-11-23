@@ -751,6 +751,7 @@ pub fn trash(data: &Path, nid: &str, branch: bool) -> Result<String> {
     let node = crate::db::node_get(&conn, nid)?.ok_or("no such node")?;
     let mut scope = vec![nid.to_string()];
     let mut ups = vec![json!({"id": nid, "state": "removed"})];
+    let children = crate::db::children(&conn, nid)?;
     if branch {
         let mut i = 0;
         while i < scope.len() { for k in crate::db::children(&conn, &scope[i])? { if !scope.contains(&k) { scope.push(k); } } i += 1; }
@@ -761,33 +762,32 @@ pub fn trash(data: &Path, nid: &str, branch: bool) -> Result<String> {
     } else {
         let up = node.get("parent").and_then(Value::as_str).unwrap_or("").to_string();
         // What an earlier action deleted stays as that action left it, or it could not be undone any more.
-        for k in crate::db::children(&conn, nid)? {
-            if crate::db::node_get(&conn, &k)?.is_some_and(|n| n["state"] != "removed") { ups.push(json!({"id": k, "parent": up})); scope.push(k); }
+        for k in &children {
+            if crate::db::node_get(&conn, k)?.is_some_and(|n| n["state"] != "removed") { ups.push(json!({"id": k, "parent": up})); scope.push(k.clone()); }
         }
         if !up.is_empty() { scope.push(up); }
     }
     drop(conn);
     let action = fresh("a");
-    let moved: HashSet<String> = if branch { HashSet::new() } else { ups[1..].iter().filter_map(|u| u["id"].as_str().map(String::from)).collect() };
     change_by(data, Scope::Nodes(scope), json!({"upsert": ups}), false, true, Some(&action))?;
-    if !moved.is_empty() { in_place_of(data, nid, &moved); }
+    // Those deleted earlier too: restored, they are in their order again.
+    if !branch && !children.is_empty() { in_place_of(data, nid, &children); }
     Ok(action)
 }
 
-/// On every map that shows a node and nodes that moved up from under it: they come where it is, in the order they had.
+/// On every map that shows a node deleted alone and what was under it: that comes where it is, in the order it had.
 /// Where a node stands on a map tells when it came up; at their own place in the list they would follow what came
 /// after it. Back under it (restored) they are in that order too.
-fn in_place_of(data: &Path, nid: &str, moved: &HashSet<String>) {
+fn in_place_of(data: &Path, nid: &str, children: &[String]) {
     let place = |sid: &str| -> Result<()> {
         // Looked at before the lock: most maps do not show it.
         if !session_entries(data, sid).iter().any(|e| e.1 == nid) { return Ok(()); }
         let _lock = lock(data, sid)?;
         let session = session_read(data, sid)?;
-        let (came, mut rest): (Vec<_>, Vec<_>) = entries_of(&session).into_iter().partition(|e| moved.contains(&e.1));
+        let (came, mut rest): (Vec<_>, Vec<_>) = entries_of(&session).into_iter().partition(|e| children.contains(&e.1));
         let Some(at) = rest.iter().position(|e| e.1 == nid).filter(|_| !came.is_empty()) else { return Ok(()) };
         rest.splice(at + 1..at + 1, came);
-        let latest = read_json(&data.join("latest.json"), Value::Null)?["sessionId"] == sid;
-        session_write(data, sid, &rest, &session["current"], session.get("turn").and_then(Value::as_u64).unwrap_or(0), latest)?;
+        session_write(data, sid, &rest, &session["current"], session.get("turn").and_then(Value::as_u64).unwrap_or(0), false)?;
         Ok(())
     };
     for f in crate::paths::list_dir(data) {
@@ -1101,7 +1101,14 @@ mod tests {
         let m = view(d, "a")?;
         assert_eq!((m["current"].clone(), m["turn"].clone(), m["nodes"].as_array().unwrap().len()), (json!("y"), json!(1), 8));
         assert!(restore(d, &act)?.is_empty());
-        for sid in ["a", "b"] { assert_eq!((under(sid, "t"), under(sid, "p2")), (vec!["p1".to_string(), "p2".into(), "p3".into()], vec!["x".to_string(), "y".into()]), "{sid}"); }
+        let whole = || for sid in ["a", "b"] { assert_eq!((under(sid, "t"), under(sid, "p2")), (vec!["p1".to_string(), "p2".into(), "p3".into()], vec!["x".to_string(), "y".into()]), "{sid}"); };
+        whole();
+        // One under it deleted before: each restored, all in their order again.
+        let latest = fs::read(d.join("latest.json"))?;
+        let acts: Vec<String> = ["x", "p2"].iter().map(|i| trash(d, &nid(d, "a", i), false).unwrap()).collect();
+        for a in acts.iter().rev() { assert!(restore(d, a)?.is_empty()); }
+        whole();
+        assert_eq!(fs::read(d.join("latest.json"))?, latest, "the latest session is not chosen anew by a deletion");
         Ok(())
     }
 
