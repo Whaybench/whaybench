@@ -768,8 +768,34 @@ pub fn trash(data: &Path, nid: &str, branch: bool) -> Result<String> {
     }
     drop(conn);
     let action = fresh("a");
+    let moved: HashSet<String> = if branch { HashSet::new() } else { ups[1..].iter().filter_map(|u| u["id"].as_str().map(String::from)).collect() };
     change_by(data, Scope::Nodes(scope), json!({"upsert": ups}), false, true, Some(&action))?;
+    if !moved.is_empty() { in_place_of(data, nid, &moved); }
     Ok(action)
+}
+
+/// On every map that shows a node and nodes that moved up from under it: they come where it is, in the order they had.
+/// Where a node stands on a map tells when it came up; at their own place in the list they would follow what came
+/// after it. Back under it (restored) they are in that order too.
+fn in_place_of(data: &Path, nid: &str, moved: &HashSet<String>) {
+    let place = |sid: &str| -> Result<()> {
+        // Looked at before the lock: most maps do not show it.
+        if !session_entries(data, sid).iter().any(|e| e.1 == nid) { return Ok(()); }
+        let _lock = lock(data, sid)?;
+        let session = session_read(data, sid)?;
+        let (came, mut rest): (Vec<_>, Vec<_>) = entries_of(&session).into_iter().partition(|e| moved.contains(&e.1));
+        let Some(at) = rest.iter().position(|e| e.1 == nid).filter(|_| !came.is_empty()) else { return Ok(()) };
+        rest.splice(at + 1..at + 1, came);
+        let latest = read_json(&data.join("latest.json"), Value::Null)?["sessionId"] == sid;
+        session_write(data, sid, &rest, &session["current"], session.get("turn").and_then(Value::as_u64).unwrap_or(0), latest)?;
+        Ok(())
+    };
+    for f in crate::paths::list_dir(data) {
+        let Some(sid) = f.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".json")) else { continue };
+        if sid == "latest" || safe_id(sid).is_err() { continue; }
+        // The deletion is done: a map that could not be put in order is only out of order.
+        if let Err(e) = place(sid) { crate::log::warn("map", "nodes not put in place", &e.to_string(), &[("session", sid.to_string())]); }
+    }
 }
 
 /// Undoes one deletion: every node it changed gets its fields back, unless the node changed since; those are
@@ -1055,6 +1081,27 @@ mod tests {
         assert_eq!(state(), "removed");
         assert!(restore(d, &act)?.is_empty());
         assert_eq!(state(), "done");
+        Ok(())
+    }
+
+    #[test]
+    fn what_was_under_a_node_deleted_alone_takes_its_place_on_every_map() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let d = dir.path();
+        command(d, "a", Some(json!({"upsert": [{"id":"t","label":"t"},{"id":"p1","parent":"t","label":"1"},{"id":"p2","parent":"t","label":"2"},{"id":"p3","parent":"t","label":"3"}]})))?;
+        // Made after what comes next on the map, as most are.
+        command(d, "a", Some(json!({"upsert": [{"id":"x","parent":"p2","label":"x"},{"id":"o","parent":"p3","label":"o"},{"id":"y","parent":"p2","label":"y"},{"id":"z","parent":"y","label":"z"}], "current": "y"})))?;
+        end_turn(d, "a")?;
+        start_from(d, "b", &view(d, "a")?)?;
+        let under = |sid: &str, p: &str| -> Vec<String> { map_nodes(d, sid).unwrap().iter().filter(|n| n["parent"] == p && n["state"] != "removed").map(|n| n["id"].as_str().unwrap().to_string()).collect() };
+        let opened = get(d, "a", "y").unwrap()["opened"].clone();
+        let act = trash(d, &nid(d, "a", "p2"), false)?;
+        for sid in ["a", "b"] { assert_eq!(under(sid, "t"), ["p1", "x", "y", "p3"], "{sid}"); }
+        assert_eq!((under("a", "y"), get(d, "a", "y").unwrap()["opened"].clone()), (vec!["z".to_string()], opened), "when it was made stays");
+        let m = view(d, "a")?;
+        assert_eq!((m["current"].clone(), m["turn"].clone(), m["nodes"].as_array().unwrap().len()), (json!("y"), json!(1), 8));
+        assert!(restore(d, &act)?.is_empty());
+        for sid in ["a", "b"] { assert_eq!((under(sid, "t"), under(sid, "p2")), (vec!["p1".to_string(), "p2".into(), "p3".into()], vec!["x".to_string(), "y".into()]), "{sid}"); }
         Ok(())
     }
 

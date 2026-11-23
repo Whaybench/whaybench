@@ -32,6 +32,7 @@ names another step.
   field stays and the agent is told so. A node the person deleted is not brought back by an agent.
 - The map's Delete counts what is under a node in the whole memory, as the notifications panel does, and Delete node alone
   deletes only that node: before, one with nothing under it on this map took along what another session's map had there.
+- What was under a node deleted alone takes its place on the map, instead of going to the end.
 - SECURITY.md says what Whaybench does and does not do, without the stronger claim about its settings and browser data.
 - `install.sh --rollback` goes back only to a version whose files are all there, unchanged, and whose program runs.
 
