@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-23
+
 ### Changed
 - Windows: the keyring's password is asked as the project access password, with a line on what a lost one needs; the
   two fields are named.
