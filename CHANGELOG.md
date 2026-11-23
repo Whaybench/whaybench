@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-23
+
 ### Added
 - Briefsafe projects (README, "Briefsafe projects"): a project in a folder of its own, kept apart from the rest of the
   computer.
