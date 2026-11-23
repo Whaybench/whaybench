@@ -174,7 +174,7 @@ fn prune(dir: &Path, limit: usize) -> Res<Vec<String>> {
 
 /// Programs working in the folder, as `fuser -m` sees them (a subvolume has a device of its own). Empty: none.
 fn busy(dir: &Path) -> Res<String> {
-    let out = Command::new("fuser").arg("-m").arg(dir).output().map_err(|e| format!("cannot check what uses the folder (fuser): {e}"))?;
+    let out = Command::new("fuser").arg("-m").arg(dir).output().map_err(|e| format!("cannot check what uses the folder (fuser, of the package psmisc): {e}"))?;
     // fuser exits 0 with process ids when some use it, 1 when none do.
     match out.status.code() {
         Some(0) => Ok(String::from_utf8_lossy(&out.stdout).trim().to_string()),

@@ -27,7 +27,14 @@ main() {
 
 if [ "${1:-}" = --rollback ]; then
     prev=$(readlink "$VERS/previous" 2>/dev/null) || fail "there is no earlier version to go back to."
-    [ -x "$prev/whaybench" ] || fail "the earlier version in $prev is incomplete."
+    # Checked before the switch: every file as it was installed; a version from before that was kept, its programs.
+    if [ -f "$prev/.sha256sums" ]; then
+        (cd "$prev" && sha256sum -c --quiet .sha256sums >/dev/null 2>&1) || fail "the earlier version in $prev is incomplete or changed."
+        for f in "$prev"/whaybench* "$prev/alacritty"; do [ -x "$f" ] || fail "the earlier version in $prev is incomplete (${f##*/})."; done
+    else
+        for f in whaybench whaybench-panel whaybench-term whaybench-view whaybench-project whaybench-files alacritty; do [ -x "$prev/$f" ] || fail "the earlier version in $prev is incomplete ($f)."; done
+    fi
+    "$prev/whaybench" --version >/dev/null 2>&1 || fail "the earlier version in $prev does not run here."
     now=$(readlink "$LIB" 2>/dev/null || true)
     switch "$prev"
     [ -n "$now" ] && ln -sfn "$now" "$VERS/previous"
@@ -70,6 +77,8 @@ dest="$VERS/$ver"
 rm -rf "$dest.part"
 mkdir -p "$dest.part"
 cp "$tmp/$NAME"/whaybench* "$tmp/$NAME"/alacritty "$tmp/$NAME"/NOTICE "$tmp/$NAME"/*LICENSE* "$dest.part"/
+# What --rollback checks this version against, once it is the earlier one (a dot file: not among what * names).
+(cd "$dest.part" && sha256sum -- * > .sha256sums)
 rm -rf "$dest"
 mv "$dest.part" "$dest"
 # Versions before 0.6.1 put the programs straight in $LIB: that folder becomes the version to go back to.

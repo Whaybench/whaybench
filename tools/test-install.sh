@@ -1,5 +1,6 @@
 #!/bin/sh
-# Checks the system package part of install.sh: for each distribution (a made-up os-release) the command it shows.
+# Checks two parts of install.sh: going back to the earlier version (--rollback), and the system packages: for each
+# distribution (a made-up os-release) the command it shows.
 # Run from the repository: sh tools/test-install.sh. Nothing is installed: with no terminal, install.sh only shows it.
 set -eu
 
@@ -50,5 +51,30 @@ check "ubuntu, snap firefox" 'ID=ubuntu\nID_LIKE=debian\n' 'packages.mozilla.org
 # A real Firefox (Linux Mint's) is kept: no Mozilla archive.
 rm "$t/bin/firefox"; ln -s "$(command -v sh)" "$t/bin/firefox"
 check "mint, own firefox" 'ID=linuxmint\nID_LIKE="ubuntu debian"\n' 'wl-clipboard fcitx5'
+
+# --rollback, in a made-up home: it goes back only to a version that is whole and runs.
+home="$t/home"; vers="$home/.local/lib/whaybench-versions"; lib="$home/.local/lib/whaybench"
+programs="whaybench whaybench-panel whaybench-term whaybench-view whaybench-project whaybench-files alacritty"
+fresh() {
+    rm -rf "$home"; mkdir -p "$vers/1" "$vers/2"
+    for f in $programs; do printf '#!/bin/sh\necho whaybench 1\n' > "$vers/1/$f"; chmod +x "$vers/1/$f"; done
+    [ "${1:-}" = old ] || (cd "$vers/1" && sha256sum -- * > .sha256sums)
+    ln -s "$vers/2" "$lib"; ln -s "$vers/1" "$vers/previous"
+}
+# rolls NAME EXPECTED: the version in use after --rollback.
+rolls() {
+    HOME="$home" sh "$repo/install.sh" --rollback >/dev/null 2>&1 || true
+    now=$(readlink "$lib"); now=${now##*/}
+    if [ "$now" = "$2" ]; then echo "ok   $1"; else echo "FAIL $1: version $now in use, expected $2"; fails=$((fails + 1)); fi
+}
+fresh; rolls "rollback" 1
+fresh; rm "$vers/1/whaybench-panel"; rolls "rollback, a program missing" 2
+fresh; echo x >> "$vers/1/whaybench-term"; rolls "rollback, a program changed" 2
+fresh; chmod -x "$vers/1/whaybench-term"; rolls "rollback, a program that cannot run" 2
+fresh old; rolls "rollback, no list of files" 1
+fresh old; rm "$vers/1/whaybench-view"; rolls "rollback, no list and a program missing" 2
+fresh old; printf '#!/bin/sh\nexit 1\n' > "$vers/1/whaybench"; rolls "rollback, it does not run" 2
+# The list is made as install.sh makes it: every file of the version, and not itself.
+grep -qF '(cd "$dest.part" && sha256sum -- * > .sha256sums)' "$repo/install.sh" || { echo "FAIL the list of files is not made"; fails=$((fails + 1)); }
 
 [ "$fails" = 0 ] || { echo "$fails failed"; exit 1; }
