@@ -177,7 +177,7 @@ check against this key: `RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfi
 
 ## FAQ
 
-**macOS?** Not now: Whaybench needs Linux, on its own or in WSL on Windows.
+**macOS?** Not yet: Whaybench needs Linux, on its own or in WSL on Windows. [Help bring it to the Mac](https://ko-fi.com/whaybench).
 
 **Does it call the AI itself?** No. Your agent works in its terminal as usual; Whaybench shows what it records.
 
