@@ -844,12 +844,14 @@ fn ask_keyring(s_: &Shared) {
     problem.add_css_class("warn");
     problem.set_visible(a.problem.is_some());
     let (one, two) = (gtk::PasswordEntry::new(), gtk::PasswordEntry::new());
+    one.set_placeholder_text(Some(t("keyring-field")));
+    two.set_placeholder_text(Some(t("keyring-field-again")));
     body.append(&one);
     if a.new { body.append(&two); }
     body.append(&problem);
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     row.set_halign(gtk::Align::End);
-    let (cancel, ok) = (gtk::Button::with_label(t("cancel")), gtk::Button::with_label(t(if a.new { "create" } else { "keyring-unlock" })));
+    let (cancel, ok) = (gtk::Button::with_label(t("cancel")), gtk::Button::with_label(t(if a.new { "keyring-set" } else { "keyring-open" })));
     // The password is lost: a new keyring, the old one kept beside it.
     let again = (a.from.clone(), a.id.clone(), a.kind.clone(), a.what.clone(), a.args.clone(), a.input.clone());
     let (wrong, new) = (a.wrong, a.new);
