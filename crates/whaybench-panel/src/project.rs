@@ -437,7 +437,7 @@ fn poll_job(p: &mut P) -> bool {
             if ok { p.ask_keyring = None; p.stamp.clear(); let args: Vec<&str> = a.args.iter().map(String::as_str).collect(); start_job(p, &a.id, &a.kind, &a.what, &args, a.input.clone()); if let Some(j) = &mut p.job { j.from = a.from; } }
             else {
                 let wrong = !late && said.contains(wb_core::secret::LOCKED);
-                let problem = if wrong { wb_core::i18n::t("keyring-wrong").to_string() } else if late { wb_core::i18n::t("briefsafe-too-long").to_string() } else if said.is_empty() { wb_core::i18n::t("keyring-waits").to_string() } else { said };
+                let problem = if wrong { wb_core::i18n::t("keyring-wrong").to_string() } else if late { wb_core::i18n::t("briefsafe-too-long").to_string() } else if said.is_empty() { wb_core::i18n::t("failed-keyring-silent").to_string() } else { said };
                 p.ask_keyring = Some(Asking { wrong, problem: Some(problem), ..a });
             }
         }
