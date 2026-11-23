@@ -125,9 +125,10 @@ pub fn mark_seen(data: &Path, sid: &str) {
     let _ = crate::paths::write_atomic(&f, crate::clock::now_ms().to_string());
 }
 
-fn seen_at(data: &Path, sid: &str) -> i64 { fs::read_to_string(seen_file(data, sid)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0) }
+/// When the session last looked at the memory (0: never).
+pub(crate) fn seen_at(data: &Path, sid: &str) -> i64 { fs::read_to_string(seen_file(data, sid)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0) }
 
-fn after(e: &Value, since: i64) -> bool { crate::clock::parse_ms(e["time"].as_str().unwrap_or("")).is_some_and(|t| t > since) }
+pub(crate) fn after(e: &Value, since: i64) -> bool { crate::clock::parse_ms(e["time"].as_str().unwrap_or("")).is_some_and(|t| t > since) }
 
 /// Who made a change, as the memory list names sessions: `person`, or the first 4 characters of the session id.
 fn by_whom(source: &str) -> String {

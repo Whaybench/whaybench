@@ -435,7 +435,8 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
     // is marked deleted, shows on no map, and waits in that panel's Deleted section to be restored or deleted for good.
     if let (Some(n), Some(target)) = (node, session.as_ref()) {
         let (id, nid, label) = (s(n, "id").to_string(), s(n, "nid").to_string(), s(n, "label").to_string());
-        let below = tree.below(&id).len();
+        // Counted in the whole memory, as the deletion goes: what is under it may be on another session's map only.
+        let below = root_of_map(d, target).map_or(0, |r| wb_core::map::below(&r.root, &nid));
         let drop = items.sub();
         let act = |branch: bool, what: String| {
             let (d2, t2, label2, id2, nid2) = (d.clone(), target.clone(), label.clone(), id.clone(), nid.clone());
@@ -454,7 +455,7 @@ fn node_menu(d: &Data, data: &Value, node: Option<&Value>, scope: Option<&(Strin
             drop.add(&wb_core::i18n::f("delete-whole-branch-including-below", &[("below", (below).to_string())]), true, act(true, "whole branch".into()));
             drop.add(wb_core::i18n::t("delete-node-only-nodes-below-move"), true, act(false, "node only".into()));
         } else {
-            drop.add(wb_core::i18n::t("delete-node"), true, act(true, "node".into()));
+            drop.add(wb_core::i18n::t("delete-node"), true, act(false, "node".into()));
         }
         let sec = items.sub();
         sec.menu.append_submenu(Some(wb_core::i18n::t("delete")), &drop.menu);

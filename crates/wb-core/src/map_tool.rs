@@ -70,6 +70,11 @@ pub fn call(data: &Path, sid: &str, input: &Value) -> Result<String> {
         notes = checks(&before, &after, &sent);
         similar = alike(data, sid, &before, &after, &sent_memid);
         similar.splice(0..0, echo(data, &numbers));
+        // What the person set since this session was told, left as it is.
+        similar.splice(0..0, after["kept"].as_array().into_iter().flatten().map(|k| {
+            let value = k["value"].as_str().map(String::from).unwrap_or_else(|| if k["value"].is_null() { "unset".into() } else { k["value"].to_string() });
+            i18n::ai_f("map-kept", &[("id", k["id"].as_str().unwrap_or("").into()), ("key", k["key"].as_str().unwrap_or("").into()), ("value", value)])
+        }));
     }
     if input.get("show") == Some(&json!(true)) { return Ok(as_text(&map::command(data, sid, None)?)); }
     let mut out = if notes.is_empty() { "Map updated.".to_string() } else { format!("{}\n{}", i18n::ai("map-check"), notes.join("\n")) };

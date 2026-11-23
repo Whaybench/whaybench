@@ -203,6 +203,52 @@ fn resolve(nodes: &mut [Value], changes: &Value, stamp: &Value) {
     }
 }
 
+/// The fields of a node an agent's change leaves as they are: what the person set last, after the agent's session last
+/// looked (`seen`; it wrote from what it remembered), and the state of a node the person deleted.
+fn held(conn: &rusqlite::Connection, nid: &str, state: &Value, seen: i64) -> Result<HashSet<String>> {
+    let mut held = HashSet::new();
+    // A session that never looked is not told of changes either: nothing is held from it but a deletion.
+    if seen > 0 {
+        for e in crate::db::events(conn, "nid = ? AND type = 'node.changed' AND time >= ?", &[nid, &crate::clock::rfc3339(seen)])?.iter().filter(|e| crate::memory::after(e, seen)) {
+            for key in e["data"].as_object().into_iter().flatten().map(|(k, _)| k) {
+                if e["source"] == "person" { held.insert(key.clone()); } else { held.remove(key); }
+            }
+        }
+    }
+    if state == "removed" { held.insert("state".into()); }
+    Ok(held)
+}
+
+/// Puts back what an agent's change would overwrite of the person's (`held`), whatever way it came: a field sent, a
+/// `resolves` link, a regrouping. What was put back, for the agent: `{id, key, value}`.
+fn put_back(conn: &rusqlite::Connection, before: &[Value], nodes: &mut [Value], seen: i64) -> Result<Vec<Value>> {
+    let here: HashSet<String> = nodes.iter().filter_map(|n| n["id"].as_str().map(String::from)).collect();
+    let mut kept = Vec::new();
+    for n in nodes.iter_mut() {
+        let Some(old) = before.iter().find(|o| o["id"] == n["id"] && *o != n) else { continue };
+        let Some(nid) = old["nid"].as_str() else { continue };
+        let put = |n: &mut Value, key: &str| match old.get(key) { Some(v) => n[key] = v.clone(), None => { n.as_object_mut().unwrap().shift_remove(key); } };
+        let mut held: Vec<String> = held(conn, nid, &old["state"], seen)?.into_iter().collect();
+        held.sort();
+        for key in held {
+            if n.get(&key) == old.get(&key) { continue; }
+            // Its parent left out of a regrouping: there is nothing on this map to keep it under.
+            if key == "parent" && old["parent"].as_str().is_some_and(|p| !here.contains(p)) { continue; }
+            put(n, &key);
+            if key == "state" {
+                put(n, "closed");
+                // A suggestion is an open node's.
+                if !is_open(n) { n.as_object_mut().unwrap().shift_remove("suggest"); } else if n.get("suggest").is_none() { put(n, "suggest"); }
+            }
+            kept.push(json!({"id": n["id"], "key": key, "value": old.get(&key)}));
+        }
+        // Nothing of it is changed after all: not stamped as changed.
+        if n.as_object().unwrap().iter().all(|(k, v)| STAMPED.contains(&k.as_str()) || old.get(k) == Some(v))
+            && old.as_object().unwrap().keys().all(|k| STAMPED.contains(&k.as_str()) || n.get(k).is_some()) { *n = old.clone(); }
+    }
+    Ok(kept)
+}
+
 /// Where a change applies: a session's map (ids are the session's own short ids), or nodes named by their node number
 /// (the person's change from the notifications panel, which has no session).
 enum Scope<'a> { Session(&'a str), Nodes(Vec<String>) }
@@ -421,13 +467,13 @@ pub fn link(data: &Path, sid: &str, nid: &str) -> Result<String> {
     Ok(id)
 }
 
-/// How many nodes are under a node, in the whole memory.
+/// How many nodes are under a node, in the whole memory, without the deleted ones.
 pub fn below(data: &Path, nid: &str) -> usize {
     let Ok(conn) = crate::db::open(data) else { return 0 };
     let mut all = vec![nid.to_string()];
     let mut i = 0;
     while i < all.len() { for k in crate::db::children(&conn, &all[i]).unwrap_or_default() { if !all.contains(&k) { all.push(k); } } i += 1; }
-    all.len() - 1
+    all[1..].iter().filter(|k| crate::db::node_get(&conn, k).ok().flatten().is_some_and(|n| n["state"] != "removed")).count()
 }
 
 /// `action` numbers the events of one person's action (a deletion), so it can be undone as one.
@@ -473,6 +519,8 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
         upsert(&mut nodes, changes, &stamp, person)?;
         resolve(&mut nodes, changes, &stamp);
     }
+    let seen = sid.map_or(0, |s| crate::memory::seen_at(data, s));
+    let mut kept = if person { Vec::new() } else { put_back(&tx, &before, &mut nodes, seen)? };
     let outside = outside_links(&tx, &mut nodes, &input, latest)?;
     let mut gone = HashSet::new();
     if let Some(remove) = input.get("remove") {
@@ -500,11 +548,13 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
     // shortcut: every write counts as the session's own; a side worker's fill is not told apart yet.
     let source = if person { "person".to_string() } else { format!("session/{}", sid.unwrap_or("")) };
     let entries = store(&tx, &source, sid, &stamp, action, &before, &nodes)?;
-    link_outside(&tx, &source, sid, &stamp, &entries, &outside)?;
+    kept.extend(link_outside(&tx, &source, sid, &stamp, &entries, &outside, seen)?);
     tx.commit()?;
     let Some(sid) = sid else { return Ok(json!({"nodes": view_nodes(&conn, &entries)?})) };
     let file = session_write(data, sid, &entries, &current, stamp["turn"].as_u64().unwrap_or(0), latest)?;
-    view_of(&conn, &file, sid)
+    let mut now = view_of(&conn, &file, sid)?;
+    if !kept.is_empty() { now["kept"] = json!(kept); }
+    Ok(now)
 }
 
 /// A memory id given as its number (`#n`, as the memory list shows it), in `memid` or a link's `to`, is written as
@@ -554,11 +604,11 @@ fn outside_links(conn: &rusqlite::Connection, nodes: &mut [Value], input: &Value
 }
 
 /// Stores the links to nodes of other sessions; a `resolves` one settles its target there, and what is still open
-/// under it, as on this map.
-fn link_outside(conn: &rusqlite::Connection, source: &str, sid: Option<&str>, stamp: &Value, entries: &[(String, String)], outside: &[(String, String, String)]) -> Result<()> {
+/// under it, as on this map. A state the person set since the session looked (`seen`) stays, and is given back.
+fn link_outside(conn: &rusqlite::Connection, source: &str, sid: Option<&str>, stamp: &Value, entries: &[(String, String)], outside: &[(String, String, String)], seen: i64) -> Result<Vec<Value>> {
     use crate::db;
     let at = stamp["at"].as_i64().unwrap_or(0);
-    let mut events = Vec::new();
+    let (mut events, mut kept) = (Vec::new(), Vec::new());
     for (id, to, rel) in outside {
         let Some((_, from)) = entries.iter().find(|(i, _)| i == id) else { continue };
         let memid_of = |nid: &str| -> Result<Value> { Ok(db::node_get(conn, nid)?.and_then(|n| n.get("memid").cloned()).unwrap_or(Value::Null)) };
@@ -578,6 +628,12 @@ fn link_outside(conn: &rusqlite::Connection, source: &str, sid: Option<&str>, st
         for nid in &settle {
             let Some(mut n) = db::node_get(conn, nid)? else { continue };
             if !is_open(&n) { continue; }
+            // A session is not told of every change to nodes off its map: what the person put on hold there stays.
+            let on_hold = || -> Result<bool> {
+                Ok(n["state"] == "postponed" && !entries.iter().any(|(_, e)| e == nid)
+                    && db::events(conn, "nid = ? AND type = 'node.changed'", &[nid])?.iter().rev().find(|e| e["data"].get("state").is_some()).is_some_and(|e| e["source"] == "person"))
+            };
+            if held(conn, nid, &n["state"], seen)?.contains("state") || on_hold()? { kept.push(json!({"id": n["label"], "key": "state", "value": n["state"]})); continue; }
             let prior = n.get("state").cloned().unwrap_or(Value::Null);
             n["state"] = json!("done");
             n["changed"] = stamp.clone();
@@ -590,7 +646,7 @@ fn link_outside(conn: &rusqlite::Connection, source: &str, sid: Option<&str>, st
         }
     }
     for e in &events { db::event_add(conn, e)?; }
-    Ok(())
+    Ok(kept)
 }
 
 /// Writes what changed between two views of the same nodes into the store, with the events of it, and gives the
@@ -704,7 +760,10 @@ pub fn trash(data: &Path, nid: &str, branch: bool) -> Result<String> {
         }
     } else {
         let up = node.get("parent").and_then(Value::as_str).unwrap_or("").to_string();
-        for k in crate::db::children(&conn, nid)? { ups.push(json!({"id": k, "parent": up})); scope.push(k); }
+        // What an earlier action deleted stays as that action left it, or it could not be undone any more.
+        for k in crate::db::children(&conn, nid)? {
+            if crate::db::node_get(&conn, &k)?.is_some_and(|n| n["state"] != "removed") { ups.push(json!({"id": k, "parent": up})); scope.push(k); }
+        }
         if !up.is_empty() { scope.push(up); }
     }
     drop(conn);
@@ -945,6 +1004,83 @@ mod tests {
         let kinds: Vec<String> = crate::db::events(&crate::db::open(dir.path())?, "nid = ?", &[&a])?.iter().map(|e| e["type"].as_str().unwrap().to_string()).collect();
         assert_eq!(kinds, ["node.added", "session.unlinked", "session.linked"]);
         assert_eq!(below(dir.path(), &t), 2, "the memory still has them as they were");
+        Ok(())
+    }
+
+    #[test]
+    fn an_agent_does_not_undo_what_the_person_set_before_it_is_told() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (d, s, o) = (dir.path(), "s", "other");
+        let write = |sid: &str, v: Value| command(d, sid, Some(v));
+        let look = |sid: &str| { crate::memory::mark_seen(d, sid); std::thread::sleep(std::time::Duration::from_millis(3)); };
+        write(s, json!({"upsert": [{"id":"t","label":"top"},{"id":"a","parent":"t","label":"a","state":"doing"},{"id":"b","parent":"t","label":"b"}]}))?;
+        write(o, json!({"upsert": [{"id":"x","label":"x"}]}))?;
+        let (a, b) = (nid(d, s, "a"), nid(d, s, "b"));
+        look(s);
+        look(o);
+        person(d, json!([{"id": a, "state": "dropped"}]))?;
+        let state = || get(d, s, "a").unwrap()["state"].clone();
+        let was = get(d, s, "a").unwrap();
+        // Sent, resolved from this map or another's, regrouped: the state stays; the rest of the change is kept.
+        let told = write(s, json!({"upsert": [{"id":"a","state":"done"}]}))?;
+        assert_eq!(told["kept"], json!([{"id":"a","key":"state","value":"dropped"}]));
+        assert_eq!(get(d, s, "a").unwrap(), was, "not even stamped");
+        write(s, json!({"upsert": [{"id":"a","state":"done","detail":"new"}]}))?;
+        assert_eq!((state(), get(d, s, "a").unwrap()["detail"].clone()), (json!("dropped"), json!("new")));
+        write(s, json!({"nodes": [{"id":"t","label":"top"},{"id":"a","parent":"t","label":"a","state":"plan"},{"id":"b","parent":"t","label":"b"}]}))?;
+        assert_eq!(state(), "dropped");
+        person(d, json!([{"id": b, "state": "postponed"}]))?;
+        assert_eq!(write(s, json!({"upsert": [{"id":"c","label":"c","links":[{"to":"b","rel":"resolves"}]}]}))?["kept"][0]["value"], "postponed");
+        assert_eq!(write(o, json!({"upsert": [{"id":"x","links":[{"to": b, "rel":"resolves"}]}]}))?["kept"][0]["id"], "b");
+        assert_eq!(get(d, s, "b").unwrap()["state"], "postponed");
+        // Not told of a node off its map at the prompt either: on hold, it stays.
+        look(o);
+        assert_eq!(write(o, json!({"upsert": [{"id":"x","detail":"again","links":[{"to": b, "rel":"resolves"}]}]}))?["kept"][0]["value"], "postponed");
+        // A suggestion sent along with a state that is put back does not stay on the closed node.
+        write(s, json!({"upsert": [{"id":"a","state":"","suggest":{"state":"done","why":"w"}}]}))?;
+        assert!(state() == "dropped" && get(d, s, "a").unwrap().get("suggest").is_none());
+        // Told: it may (the person can have asked for it).
+        look(s);
+        assert!(write(s, json!({"upsert": [{"id":"a","state":""}]}))?.get("kept").is_none());
+        assert!(is_open(&get(d, s, "a").unwrap()));
+        // Its own later change is not the person's: it may go on.
+        person(d, json!([{"id": a, "state": "done"}]))?;
+        look(s);
+        write(s, json!({"upsert": [{"id":"a","state":"doing"}]}))?;
+        assert!(write(s, json!({"upsert": [{"id":"a","state":"done"}]}))?.get("kept").is_none());
+        // Deleted by the person: told or not, no agent brings it back; the person does.
+        let act = trash(d, &a, false)?;
+        look(s);
+        assert_eq!(write(s, json!({"upsert": [{"id":"a","state":"done"}]}))?["kept"][0]["value"], "removed");
+        assert_eq!(state(), "removed");
+        assert!(restore(d, &act)?.is_empty());
+        assert_eq!(state(), "done");
+        Ok(())
+    }
+
+    #[test]
+    fn a_node_alone_goes_without_what_another_map_has_under_it() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let d = dir.path();
+        command(d, "a", Some(json!({"upsert": [{"id":"top","label":"top"},{"id":"pay","parent":"top","label":"pay"}]})))?;
+        let (top, pay) = (nid(d, "a", "top"), nid(d, "a", "pay"));
+        ensure(d, "b")?;
+        let on_b = link(d, "b", &pay)?;
+        command(d, "b", Some(json!({"upsert": [{"id":"card","parent":on_b,"label":"card"},{"id":"refund","parent":"card","label":"refund"}]})))?;
+        let (card, refund) = (nid(d, "b", "card"), nid(d, "b", "refund"));
+        let parent = |n: &str| crate::db::node_get(&crate::db::open(d).unwrap(), n).unwrap().unwrap()["parent"].clone();
+        assert_eq!(below(d, &pay), 2, "counted though this map shows none of them");
+        let act = trash(d, &pay, false)?;
+        assert!(["card", "refund"].iter().all(|i| is_open(&get(d, "b", i).unwrap())));
+        assert_eq!((parent(&card), parent(&refund)), (json!(top), json!(card)));
+        assert!(restore(d, &act)?.is_empty());
+        assert_eq!(parent(&card), json!(pay));
+        let gone = trash(d, &refund, false)?;
+        assert_eq!(below(d, &pay), 1, "a deleted one is not counted");
+        // Deleted before the node above it was: it still comes back by its own deletion, under what it was under.
+        trash(d, &card, false)?;
+        assert!(restore(d, &gone)?.is_empty());
+        assert_eq!((parent(&refund), is_open(&get(d, "b", "refund").unwrap())), (json!(card), true));
         Ok(())
     }
 

@@ -44,6 +44,7 @@ map-check-reason = - { $id }: a conclusion keeps why it was chosen in detail, no
 map-check-kind = - { $id }: its label reads "question → answer": kind conclusion (a check or test result is a fact).
 map-check-options = - { $id }: closed, but options under it are still open: close the chosen one and drop the others; if none was chosen, reopen it.
 map-check-parent = - { $id }: everything under it is closed: close it too, or give it suggest.
+map-kept = - { $id }: not changed: the person set { $key } to { $value }. Leave it, unless the person asks for another.
 map-similar = - { $id } may be about the same thing as { $memid } "{ $label }" ({ $state }, session { $session }): give it that memid only if it clearly is the same problem; else leave it.
 map-number = - { $id } → { $number } "{ $label }": if that is not the one you meant, fix the number.
 # What every turn of every agent is told (whaybench hook). Kept short: they ride on each prompt.
