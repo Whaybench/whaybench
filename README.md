@@ -109,7 +109,8 @@ outside a container. Where encryption was never possible, a project is made with
 was, Whaybench says what is wrong and makes nothing.
 
 **The keyring.** It keeps the projects' keys and the sign-in token. When it is locked, your desktop's own window asks
-its password; on Windows, Whaybench asks it, and has you choose one the first time. A lost keyring password cannot be
+its password; on Windows, Whaybench asks it at New project or Log in in the Projects panel, and has you choose one the
+first time. A lost keyring password cannot be
 recovered: make a new keyring (offered after a wrong password) and open each project with its recovery key.
 
 **Removing snapshots.** Whaybench deletes snapshots past the 30 kept as you, not as root. That needs the btrfs mount

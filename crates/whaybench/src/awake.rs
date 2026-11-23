@@ -65,7 +65,8 @@ fn enabled(d: &Data) -> bool {
 /// When Claude Code lists no session at all (it could not be asked), each is taken as running.
 fn claude_runs(d: &Data, id: &str) -> bool {
     let addon = sessions::record_of(d, id).is_some_and(|r| r["agent"].as_str().is_some());
-    addon || sessions::agents().is_empty() || sessions::agent(id).is_some()
+    // (`alive`: a project's Claude Code is in its container, not in the host's list.)
+    addon || sessions::agents().is_empty() || sessions::alive(d, id)
 }
 
 /// Whether an agent works now: a session's state "working" or "waiting" written less than `STALE` ago whose agent
@@ -80,8 +81,8 @@ fn busy(d: &Data, now: SystemTime, runs: &dyn Fn(&str) -> bool) -> bool {
                 && now_ms.saturating_sub(v["at"].as_u64().unwrap_or(0)) < STALE.as_millis() as u64)
             && runs(&id)
     });
-    turn || std::fs::read_dir(d.cache().join("subagents")).into_iter().flatten().flatten()
-        .any(|e| fresh(&e.path()) && !sessions::subagents_running(d, &e.file_name().to_string_lossy()).is_empty())
+    turn || wb_core::roots::all_of(d).iter().flat_map(|r| wb_core::paths::list_dir(&r.cache().join("subagents")))
+        .any(|e| fresh(&e) && !sessions::subagents_running(d, &e.file_name().unwrap_or_default().to_string_lossy()).is_empty())
 }
 
 /// The program that holds the computer awake until its input ends.

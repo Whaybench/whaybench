@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::{log as record, paths::{Data, write_atomic}, versions};
 
+pub mod asked;
 mod names;
 pub mod schedules;
 mod retention;
@@ -490,11 +491,20 @@ pub fn set_focus_empty(d: &Data, who: &str) {
 /// Whether the tab in front has no session yet (set_focus_empty).
 pub fn empty_chosen(d: &Data) -> bool { read_json(&focus_file(d)).is_some_and(|v| v["sessionId"].is_null()) }
 
-pub fn set_focus(d: &Data, id: &str, who: &str) {
-    let before = read_json(&focus_file(d)).and_then(|v| v.get("sessionId").and_then(Value::as_str).map(String::from)).unwrap_or_default();
-    if before == id { return; }
+pub fn set_focus(d: &Data, id: &str, who: &str) { set_focus_by(d, id, who, false) }
+
+/// `agent`: brought to the front by an agent's request, not chosen by the person (`focus_by_agent`).
+pub fn set_focus_by(d: &Data, id: &str, who: &str, agent: bool) {
+    let was = read_json(&focus_file(d)).unwrap_or_default();
+    let before = was["sessionId"].as_str().unwrap_or_default().to_string();
+    if before == id {
+        // The person chooses what an agent had brought.
+        if !agent && was["agent"] == true { let _ = write_atomic(&focus_file(d), serde_json::json!({"sessionId": id}).to_string()); }
+        return;
+    }
     record::decide("session", "session chosen", "the session of the tab in front", &[("session", id.to_string()), ("by", who.to_string()), ("before", before)]);
-    let _ = write_atomic(&focus_file(d), serde_json::json!({"sessionId": id}).to_string());
+    let v = if agent { serde_json::json!({"sessionId": id, "agent": true}) } else { serde_json::json!({"sessionId": id}) };
+    let _ = write_atomic(&focus_file(d), v.to_string());
 }
 
 pub fn latest_map(d: &Data) -> PathBuf { d.root.join("latest.json") }
@@ -504,6 +514,9 @@ pub fn focus(d: &Data) -> Option<String> {
     let id = read_json(&focus_file(d))?.get("sessionId")?.as_str()?.to_string();
     Some(current_id(d, &id))
 }
+
+/// Whether the chosen session was brought to the front by an agent's request and not chosen by the person since.
+pub fn focus_by_agent(d: &Data) -> bool { read_json(&focus_file(d)).is_some_and(|v| v["agent"] == true) }
 
 /// The session the program is on: the chosen one, else the one whose map changed last.
 pub fn target(d: &Data) -> Option<String> {

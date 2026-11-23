@@ -362,22 +362,31 @@ impl Relay {
                 self.leave_at = Some(Instant::now());
                 return;
             }
+        let project = sessions::tab_project(&self.data, &self.tab).and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|s| s.id == id)).map(|s| s.root());
         if let Some(found) = sessions::session_of_tab(&self.data, &self.tab)
-            && self.session.as_deref() != Some(&found) && !self.session.as_deref().is_some_and(|s| sessions::current_id(&self.data, s) != s) {
+            && self.session.as_deref() != Some(&found)
+            // (A project's tab follows no move: its record's word of where it went is not the host's to act on.)
+            && (project.is_some() || !self.session.as_deref().is_some_and(|s| sessions::current_id(&self.data, s) != s)) {
                 record::decide("session", "tab session found", "a session record names this tab", &[("tab", self.tab.clone()), ("old", self.session.clone().unwrap_or_default()), ("new", found.clone())]);
+                if project.is_some() && let Some(old) = &self.session { sessions::mark_off(&self.data, old); }
                 self.session = Some(found);
                 self.save_tab();
             }
         // That it runs: an add-on agent's, and a project's Claude Code (in its container, so not in the list the host
         // asks Claude Code for). A project's tab writes it in the project, whose record may not be there yet.
-        let project = sessions::tab_project(&self.data, &self.tab).and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|s| s.id == id)).map(|s| s.root());
         if (wb_core::agents::other() || project.is_some()) && self.running
             && let Some(s) = &self.session {
                 let at = project.unwrap_or_else(|| wb_core::roots::for_session(&self.data, s));
-                let _ = paths::create_dir_all(&sessions::alive_dir(&at));
-                let _ = paths::write_atomic(&sessions::alive_dir(&at).join(s), self.child.to_string());
+                let file = sessions::alive_dir(&at).join(s);
+                // A project's Claude Code from its first hook on: before, it may be showing a start screen (sign-in,
+                // trust), which a request must not be typed into.
+                let ready = wb_core::agents::other() || paths::meta(&file).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().unwrap_or_default() <= self.started.elapsed());
+                if ready {
+                    let _ = paths::create_dir_all(&sessions::alive_dir(&at));
+                    let _ = paths::write_atomic(&file, self.child.to_string());
+                }
             }
-        if !wb_core::agents::other() {
+        if !wb_core::agents::other() && sessions::tab_project(&self.data, &self.tab).is_none() {
             self.resumed_somewhere();
             self.follow_move();
         }
@@ -464,9 +473,13 @@ impl Relay {
         let dir = sessions::tab_inbox(&self.data, &self.tab);
         for f in fs::read_dir(&dir).into_iter().flatten().flatten() {
             let v = fs::read_to_string(f.path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+            // While a held question waits for the person, another conversation's words wait too: a prompt takes it away.
+            if v.as_ref().is_some_and(|v| v["other"] == true)
+                && self.session.as_ref().is_some_and(|s| wb_core::ask::held(&wb_core::roots::for_session(&self.data, s).root, s)) { continue; }
             if commands_only && !v.as_ref().and_then(|v| v["text"].as_str()).is_some_and(|t| t.trim_start().starts_with('/')) { continue; }
             let _ = fs::remove_file(f.path());
             let Some(v) = v else { continue };
+            sessions::asked::note_request(&self.data, &v, self.running);
             if !self.running { continue; }
             let text = v.get("text").and_then(|t| t.as_str()).unwrap_or_default().to_string();
             // Sent from outside, the same commands get the same decision as when typed.
@@ -536,8 +549,14 @@ impl Relay {
     }
 
     fn finish(&mut self) {
-        if wb_core::agents::other()
-            && let Some(s) = &self.session { sessions::mark_off(&self.data, s); }
+        let of_project = sessions::tab_project(&self.data, &self.tab);
+        // What was still to be typed in is not: told to what asked, and to the person.
+        let left: Vec<serde_json::Value> = fs::read_dir(sessions::tab_inbox(&self.data, &self.tab)).into_iter().flatten().flatten()
+            .filter_map(|f| fs::read_to_string(f.path()).ok().and_then(|t| serde_json::from_str(&t).ok())).collect();
+        for v in &left { sessions::asked::note_request(&self.data, v, false); }
+        if left.iter().any(|v| !v["text"].as_str().unwrap_or("").starts_with('/')) {
+            wb_core::status::say(&self.data, wb_core::i18n::t("request-lost-with-tab"), 12);
+        }
         if self.running {
             unsafe { libc::kill(self.child, libc::SIGHUP); }
             // In a project's container the agent is not the child's own: it is ended there.
@@ -545,6 +564,9 @@ impl Relay {
                 wb_core::container::hang_up(&p, &self.tab);
             }
         }
+        // After the agent's own end: its tab no longer says that it runs.
+        if (wb_core::agents::other() || of_project.is_some())
+            && let Some(s) = &self.session { sessions::mark_off(&self.data, s); }
         let _ = fs::remove_file(sessions::tab_file(&self.data, &self.tab));
         sessions::set_tab_project(&self.data, &self.tab, None);
         let _ = fs::remove_dir_all(sessions::tab_inbox(&self.data, &self.tab));

@@ -130,7 +130,9 @@ fn check_needed(parts: &[(String, String)]) {
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TermOpen { pub attach: Option<String>, pub resume: Option<String>, pub map_from: Option<String>, #[serde(default)] pub agent: Option<String>,
     /// The Briefsafe project the conversation is of, known when it was asked for: closed by then, the tab does not open.
-    #[serde(default)] pub project: Option<String> }
+    #[serde(default)] pub project: Option<String>,
+    /// Asked for by an agent, not the person.
+    #[serde(default)] pub by_agent: bool }
 
 fn new_tab_id() -> String {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -140,8 +142,8 @@ fn new_tab_id() -> String {
 /// The panel app id of a conversation tab carries its tab id, so the panel knows which tab it is.
 pub const TERM_APP: &str = "whaybench-term";
 
-/// The command for a conversation tab: Alacritty showing the relay, the relay holding Claude Code.
-pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<String, String> {
+/// The command for a conversation tab (Alacritty showing the relay, the relay holding Claude Code), and the tab's id.
+pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<(String, String), String> {
     let config = wb_core::theme::write_terminal_config(data).map_err(|e| e.to_string())?;
     let relay = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench-term");
     let tab = new_tab_id();
@@ -153,7 +155,7 @@ pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<String, S
     if let Some(r) = &open.resume { command += &format!(" --resume {}", q(r)?); }
     if let Some(m) = &open.map_from { command += &format!(" --map-from {}", q(m)?); }
     if let Some(p) = &open.project { command += &format!(" --project {}", q(p)?); }
-    Ok(command)
+    Ok((command, tab))
 }
 
 /// The tab's agent, as variables for the relay and all it starts: the one asked for, else the agent of the session it
@@ -431,7 +433,7 @@ mod agent_tests {
         std::fs::remove_dir_all(dir.path().join("addons/agents/codex")).unwrap();
         assert!(agent_env(&TermOpen { resume: Some("cx".into()), ..Default::default() }, &data).is_err(), "a deleted add-on is said, not run as Claude Code");
         // A map path with shell syntax stays one argument.
-        let cmd = terminal_command(&TermOpen { map_from: Some("/x'; touch /tmp/pwned; '".into()), ..Default::default() }, &data).unwrap();
+        let (cmd, _) = terminal_command(&TermOpen { map_from: Some("/x'; touch /tmp/pwned; '".into()), ..Default::default() }, &data).unwrap();
         assert!(cmd.contains(r"--map-from '/x'\''; touch /tmp/pwned; '\''"), "{cmd}");
     }
 }

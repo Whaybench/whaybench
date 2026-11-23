@@ -84,7 +84,12 @@ fn writable(d: &Data) -> Res<()> {
 
 /// The keyring open before a step that needs it: three minutes for the person at its window, said in the status line.
 fn keyring_open(d: &Data) -> Res<()> {
-    wb_core::secret::ensure_open(std::time::Duration::from_secs(180), || wb_core::status::say(d, wb_core::i18n::t("keyring-waiting"), 180))
+    let mut said = false;
+    let open = wb_core::secret::ensure_open(std::time::Duration::from_secs(180), || { said = true; wb_core::status::say(d, wb_core::i18n::t("keyring-waiting"), 180) });
+    // Over, either way: the line does not go on asking.
+    if said { wb_core::status::say(d, "", 0); }
+    // Where Whaybench asks the password itself, the Projects panel does: an agent's command says so.
+    open.map_err(|e| if [wb_core::secret::LOCKED, wb_core::secret::NOT_MADE].contains(&e.as_str()) { format!("{e}: its password is asked in the Projects panel, at New project or at Log in of an encrypted project; tell the person, then run this again") } else { e })
 }
 
 fn calling_session() -> String {
@@ -122,7 +127,10 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
     let Some(cmd) = a.first().cloned() else { println!("{HELP}"); return Ok(0) };
     if cmd == "-h" || cmd == "--help" { println!("{HELP}"); return Ok(0); }
     let mut rest: Vec<String> = a[1..].to_vec();
+    // (Not in what follows `--`: names.)
+    let words = rest.split_off(rest.iter().position(|x| x == "--").unwrap_or(rest.len()));
     let session = opt(&mut rest, "--session").unwrap_or_else(calling_session);
+    rest.extend(words);
     match cmd.as_str() {
         "list" => {
             let mut all: Vec<Value> = st.list_projects().iter().map(|p| json!({"id": p["id"], "name": p["name"], "parent": p.get("parent"), "docs": p["docs"], "paths": p.get("paths")})).collect();
@@ -163,6 +171,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             // A new project is a Briefsafe one (spec 3.22), encrypted where a vault can be made; the older kind only for
             // a sub-project (a Briefsafe project stands alone) or when asked for (`--plain`).
             let briefsafe = folder.is_some() || (parent.is_empty() && !plain);
+            if briefsafe { writable(&st.data)?; }
             // Where a vault was never possible, without one, said; where it was, what is wrong is said and nothing made.
             let missing = if (briefsafe && !open_data) || encrypt { wb_core::vault::missing() } else { None };
             let refuse = missing.as_ref().filter(|_| encrypt || wb_core::vault::made_here(&st.data));
@@ -180,7 +189,6 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 out(st.create_project(pid, name, &desc, &parent, paths, always)?);
                 return Ok(0);
             };
-            writable(&st.data)?;
             if encrypt { keyring_open(&st.data)?; }
             // One creation at a time: two with the same id must not both pass the check, nor one undo the other's.
             // In turn with an open of the same id too: it must not find the project half made.
@@ -199,8 +207,8 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             let encrypt = flag(&mut rest, "--encrypt");
             let pid = arg(&rest, 0)?;
             if wb_core::map::safe_id(pid).is_err() { return Err(format!("{pid}: a Briefsafe project's id is letters, digits, - and _ only; make a new project and move its work instead")); }
-            if encrypt && let Some(why) = wb_core::vault::missing() { return Err(wb_core::i18n::f("vault-not-now", &[("why", why)])); }
             writable(&st.data)?;
+            if encrypt && let Some(why) = wb_core::vault::missing() { return Err(wb_core::i18n::f("vault-not-now", &[("why", why)])); }
             if encrypt { keyring_open(&st.data)?; }
             let name = st.get_project(pid).map(|p| p["name"].as_str().unwrap_or(pid).to_string()).unwrap_or_else(|| pid.to_string());
             let would_be = wb_core::roots::Stub::new(&st.data, pid, &name, Path::new(&folder));

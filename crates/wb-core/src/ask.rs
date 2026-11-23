@@ -67,6 +67,9 @@ pub fn root_of(d: &crate::paths::Data, id: &str) -> Option<std::path::PathBuf> {
     crate::roots::all_of(d).into_iter().map(|r| r.root).find(|r| crate::paths::is_file(&request_file(r, id)))
 }
 
+/// Whether a question of this session is held for the person, to be answered by a prompt.
+pub fn held(data: &Path, sid: &str) -> bool { pending(data).iter().any(|r| r["via"] == "prompt" && r["session"] == sid) }
+
 /// `answer` in the root the ask is in; an ask gone meanwhile (its project closed) takes no answer.
 pub fn answer_in(d: &crate::paths::Data, id: &str, decision: &str, answers: &Value) -> Result<()> {
     match root_of(d, id) { Some(r) => answer(&r, id, decision, answers), None => Err("the question is no longer asked".into()) }

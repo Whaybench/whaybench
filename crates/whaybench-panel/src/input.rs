@@ -16,6 +16,12 @@ pub fn route(text: &str, session: Option<&str>) -> Route {
     if text.starts_with('/') && !text.contains('\n') { Route::Typed } else { Route::Queued }
 }
 
+/// The conversation a draft goes to: the one it was begun for, until the person chooses another. One that only an
+/// agent's request brought to the front does not take it.
+pub fn draft_goes_to(begun: Option<&str>, front: Option<&str>, by_agent: bool) -> Option<String> {
+    if by_agent && begun.is_some() { begun } else { front }.map(String::from)
+}
+
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let view = gtk::TextView::new();
     view.set_wrap_mode(gtk::WrapMode::WordChar);
@@ -41,18 +47,35 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     win.set_child(Some(&area));
     // The project of the conversation a draft was begun for: it goes only there, and goes when that project locks.
     let owner: Rc<RefCell<Option<String>>> = Rc::default();
+    // The conversation a draft goes to (`draft_goes_to`).
+    let goes: Rc<RefCell<Option<String>>> = Rc::default();
     {
-        let (hint, owner, d) = (hint.clone(), owner.clone(), d.clone());
+        let (hint, owner, goes, d) = (hint.clone(), owner.clone(), goes.clone(), d.clone());
         view.buffer().connect_changed(move |b| {
             hint.set_visible(b.char_count() == 0);
-            if b.char_count() == 0 { *owner.borrow_mut() = None; }
-            else if owner.borrow().is_none() { *owner.borrow_mut() = Some(sessions::focus(&d).and_then(|s| wb_core::roots::Roots::new(d.clone()).project_of(&s)).unwrap_or_default()); }
+            if b.char_count() == 0 { *owner.borrow_mut() = None; *goes.borrow_mut() = None; }
+            else if owner.borrow().is_none() {
+                let s = sessions::focus(&d);
+                *owner.borrow_mut() = Some(s.as_deref().and_then(|s| wb_core::roots::Roots::new(d.clone()).project_of(s)).unwrap_or_default());
+                *goes.borrow_mut() = s;
+            }
         });
     }
+    let target = {
+        let (d, goes, view) = (d.clone(), goes.clone(), view.clone());
+        move || {
+            let front = sessions::focus(&d);
+            if view.buffer().char_count() == 0 { return front; }
+            let to = draft_goes_to(goes.borrow().as_deref(), front.as_deref(), sessions::focus_by_agent(&d)).map(|s| sessions::current_id(&d, &s));
+            goes.borrow_mut().clone_from(&to);
+            to
+        }
+    };
 
     let sent_at: Rc<Cell<i64>> = Rc::default();
     {
         let (d, hint, sent_at, owner, view) = (d.clone(), hint.clone(), sent_at.clone(), owner.clone(), view.clone());
+        let target = target.clone();
         // The keys that switch the input language, as fcitx5 has them now (they are set in Settings → Input…): asked
         // every ten seconds, not every second (each ask is a process).
         let (switch, asked): (Rc<RefCell<String>>, Rc<Cell<i64>>) = Default::default();
@@ -67,7 +90,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             let gone = owner.borrow().as_deref().filter(|p| !p.is_empty()).is_some_and(|p| !wb_core::roots::stubs(&d).iter().any(|s| s.id == p && s.open()));
             if gone { view.buffer().set_text(""); }
             if now - sent_at.get() < 1_500_000 { hint.set_text(wb_core::i18n::t("sent")); return; }
-            let who = sessions::focus(&d).map(|s| wb_core::agents::session_label(&d.root, &s)).unwrap_or_else(|| wb_core::i18n::t("none").into());
+            let who = target().map(|s| wb_core::agents::session_label(&d.root, &s)).unwrap_or_else(|| wb_core::i18n::t("none").into());
             hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", who), ("switch", switch.borrow().clone())]));
         });
     }
@@ -85,7 +108,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             }
             let buffer = view.buffer();
             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().to_string();
-            let session = sessions::focus(&d);
+            let session = target();
             // Typed for a project's conversation, it goes to no other place's (host text may go anywhere: spec 3.22).
             let here = session.as_deref().and_then(|s| wb_core::roots::Roots::new(d.clone()).project_of(s)).unwrap_or_default();
             if owner.borrow().as_ref().is_some_and(|o| !o.is_empty() && *o != here) { status::say(&d, wb_core::i18n::t("briefsafe-draft-stays"), 8); return glib::Propagation::Stop; }
@@ -130,5 +153,13 @@ mod tests {
         assert_eq!(route("/exit", Some("s")), Route::Typed);
         assert_eq!(route("/x\nsecond line", Some("s")), Route::Queued);
         assert_eq!(route("plain text", Some("s")), Route::Queued);
+    }
+    #[test]
+    fn a_draft_stays_with_its_conversation_unless_the_person_chooses_another() {
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(draft_goes_to(Some("a"), Some("b"), true), s("a"), "an agent brought b to the front");
+        assert_eq!(draft_goes_to(Some("a"), Some("b"), false), s("b"), "the person chose b");
+        assert_eq!(draft_goes_to(None, Some("b"), true), s("b"), "begun with no conversation in front");
+        assert_eq!(draft_goes_to(Some("a"), None, false), None);
     }
 }

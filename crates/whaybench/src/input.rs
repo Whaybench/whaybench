@@ -229,6 +229,7 @@ impl App {
                     if let Some(p) = self.surface.get_mut(top) { p.active = i; }
                     self.act = Act::TabPull { pid: top, tab: i, x, y };
                     self.focus_panel(top);
+                    self.person_chose(top);
                     self.note_saved_soon();
                     return false;
                 }
@@ -237,6 +238,7 @@ impl App {
                     self.drag_begins(self.surface.get(top).map(|p| p.tab().id));
                     self.act = Act::Hold { pid: top, gx, gy, dock };
                     self.focus_panel(top);
+                    self.person_chose(top);
                     return false;
                 }
                 None => {}
@@ -244,6 +246,7 @@ impl App {
         }
         if self.surface.get(top).is_some_and(|p| p.rect.bar().contains(x, y)) { return false; }
         self.focus_panel(top);
+        self.person_chose(top);
         true
     }
 

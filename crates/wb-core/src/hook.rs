@@ -58,7 +58,8 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     // done and the subagent shows (and keeps the computer awake) on its own, settled by its SubagentStop.
     let after_turn = event.get("agent_id").is_some()
         && crate::sessions::state_of(&crate::paths::Data { root: data.to_path_buf() }, sid).as_deref() == Some("done");
-    if !state.is_empty() && !(state == "working" && after_turn) { session_record::state(data, sid, state, note)?; }
+    // A turn's end is told once its answer is kept (below): what waits for the end finds the answer there.
+    if !state.is_empty() && name != "Stop" && !(state == "working" && after_turn) { session_record::state(data, sid, state, note)?; }
     subagent(data, sid, name, event)?;
     // What a session scheduled is only shown: failing to write it down must not stop the rest of the hook.
     if let Err(e) = crate::sessions::schedules::on_event(data, sid, name, event) { eprintln!("whaybench: schedule not noted: {e}"); }
@@ -85,7 +86,9 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     match name {
         "Stop" => {
             crate::ask::clear_session(data, sid, crate::ask::Clear::TurnEnded);
-            stop(data, a, sid, event, &mut record)?;
+            let kept = stop(data, a, sid, event, &mut record);
+            session_record::state(data, sid, state, note)?;
+            kept?;
             if a.name != crate::agents::CLAUDE && crate::agents::load(data, a.name).is_ok_and(|g| g.usage.as_deref() == Some("codex-rollout")) {
                 crate::usage::from_codex_rollout(data, sid, a.name, event);
             }

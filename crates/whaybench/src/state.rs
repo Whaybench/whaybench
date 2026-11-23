@@ -189,6 +189,8 @@ pub struct App {
     pub status: Option<Window>,
     /// The front tab and session last made the chosen session.
     pub focused_term: Option<(String, Option<String>)>,
+    /// Conversation tabs an agent brought to the front, until the person chooses them.
+    pub brought: std::collections::HashSet<String>,
     pub shaders: Option<crate::render::Shaders>,
     pub grabbed_popups: Vec<smithay::wayland::shell::xdg::PopupSurface>,
     data: Data,
@@ -276,6 +278,7 @@ impl App {
             slots: HashMap::new(),
             status: None,
             focused_term: None,
+            brought: Default::default(),
             shaders: None,
             grabbed_popups: Vec::new(),
             windows: HashMap::new(), unmapped: Vec::new(), next_tab: 1,
@@ -321,7 +324,8 @@ impl App {
     /// Opens a conversation tab; it joins the other conversation tabs when its window appears.
     pub fn open_terminal(&mut self, open: &crate::start::TermOpen) {
         match crate::start::terminal_command(open, &self.data) {
-            Ok(command) => {
+            Ok((command, tab)) => {
+                if open.by_agent { self.brought.insert(tab); }
                 let run = record::run_id(&self.data);
                 crate::start::spawn_app(&command, &self.socket_name, &self.data, &run);
             }
@@ -605,13 +609,22 @@ impl App {
     /// Notifies the desktop of sessions that have just started waiting on the person (see `notify::Waiting`).
     pub fn tell_waiting(&mut self) { self.waiting.poll(&self.data, self.host_focused); }
 
-    /// Brings a conversation tab to the front.
-    pub fn focus_term(&mut self, tab: &str) {
+    /// Brings a conversation tab to the front; `agent`: an agent's doing, not the person's choice.
+    pub fn focus_term(&mut self, tab: &str, agent: bool) {
         let Some(id) = self.terms.iter().find(|(_, t)| t.as_str() == tab).map(|(i, _)| *i) else { return };
         let Some(pid) = self.surface.holding_tab(id).map(|p| p.pid) else { return };
         if let Some(p) = self.surface.get_mut(pid)
             && let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; }
+        if agent { self.brought.insert(tab.to_string()); }
         self.focus_panel(pid);
+        if !agent { self.person_chose(pid); }
+    }
+
+    /// The person chose this panel's front tab (a press): a conversation an agent had brought counts as chosen.
+    pub fn person_chose(&mut self, pid: u64) {
+        let Some(tab) = self.surface.get(pid).and_then(|p| self.terms.get(&p.tab().id)).cloned() else { return };
+        self.brought.remove(&tab);
+        if let Some((front, Some(s))) = &self.focused_term && *front == tab { wb_core::sessions::set_focus(&self.data, s, wb_core::i18n::t("input")); }
     }
 
     /// Closes a conversation tab the way its close button does.
@@ -629,12 +642,19 @@ impl App {
         if crate::ctl::now_ms() - at > 3_600_000 { let _ = std::fs::remove_file(&file); return; }
         let state = wb_core::paths::read_text(&wb_core::sessions::state_dir(&wb_core::roots::for_session(&self.data, session)).join(format!("{session}.json"))).ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).unwrap_or_default();
+        // Counted from when the text was typed in: the end of the turn before it is not the answer.
+        let at = match wb_core::sessions::asked::read(&self.data, session, tab) {
+            Some((_, wb_core::sessions::asked::Became::Left)) => return,
+            Some((_, wb_core::sessions::asked::Became::Typed(t))) => at.max(t),
+            Some((_, wb_core::sessions::asked::Became::Refused)) => { let _ = std::fs::remove_file(&file); return; }
+            None => at,
+        };
         if state["state"] != "done" || state["at"].as_i64().unwrap_or(0) <= at { return; }
         let _ = std::fs::remove_file(&file);
         if self.focused_term.as_ref().and_then(|(_, s)| s.as_deref()) == Some(session) {
             record::decide("session", "back to the asking tab", "the asked session answered", &[("session", session.to_string()), ("tab", tab.to_string())]);
             let tab = tab.to_string();
-            self.focus_term(&tab);
+            self.focus_term(&tab, true);
         }
     }
 
@@ -654,7 +674,7 @@ impl App {
         let pair = (tab, session);
         if self.focused_term.as_ref() != Some(&pair) {
             match &pair.1 {
-                Some(s) => wb_core::sessions::set_focus(&self.data, s, wb_core::i18n::t("input")),
+                Some(s) => wb_core::sessions::set_focus_by(&self.data, s, wb_core::i18n::t("input"), self.brought.contains(&pair.0)),
                 None => wb_core::sessions::set_focus_empty(&self.data, wb_core::i18n::t("input")),
             }
             self.focused_term = Some(pair);

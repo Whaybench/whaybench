@@ -31,6 +31,8 @@ fn link(kind: &str, rest: &str, label: &str) -> String {
 }
 /// The project shown now, as links name it.
 fn shown_key(p: &P) -> String { p.bs.as_ref().map(|b| bs_key(b)).or(p.pid.clone()).unwrap_or_default() }
+/// The project and the page shown now.
+fn shown_at(p: &P) -> String { format!("{}\u{1}{}\u{1}{}", shown_key(p), p.tab, p.over.is_some()) }
 /// A Briefsafe project's page key: never equal to a host project's, even one of the same id.
 fn bs_key(id: &str) -> String { format!("bs:{id}") }
 
@@ -330,7 +332,7 @@ struct Job {
 }
 
 /// A step that waits for the keyring's password, asked in a dialog.
-struct Asking { id: String, kind: String, what: String, args: Vec<String>, input: Option<String>, new: bool, wrong: bool }
+struct Asking { id: String, kind: String, what: String, args: Vec<String>, input: Option<String>, new: bool, /** Why the last try did not work. */ problem: Option<String>, /** It was the password. */ wrong: bool }
 
 /// Briefsafe projects are listed by this key, apart from the host's projects' ids.
 const BS: &str = "bs:";
@@ -355,7 +357,7 @@ fn start_job(p: &mut P, id: &str, kind: &str, what: &str, args: &[&str], input: 
     // Said when it cannot even start (no program, a full disk), not left as a press that did nothing.
     let fail = |p: &mut P, why: String| {
         // A project not made yet has no page to say it on.
-        if kind == "new" { status::say(&p.d, &wb_core::i18n::f("creation-failed", &[("e", why)]), 12); } else { p.bs_msg.insert(id.into(), (kind.into(), why)); }
+        if kind == "new" { let _ = std::fs::remove_file(new_map_file(&p.d, id)); status::say(&p.d, &wb_core::i18n::f("creation-failed", &[("e", why)]), 12); } else { p.bs_msg.insert(id.into(), (kind.into(), why)); }
     };
     let Ok(exe) = std::env::current_exe() else { return fail(p, "whaybench-project not found".into()) };
     let dir = p.d.cache().join("project-jobs");
@@ -372,7 +374,7 @@ fn start_job(p: &mut P, id: &str, kind: &str, what: &str, args: &[&str], input: 
     match c.spawn() {
         Ok(mut child) => {
             if let Some(mut i) = child.stdin.take() { let _ = std::io::Write::write_all(&mut i, input.as_deref().unwrap_or_default().as_bytes()); }
-            let from = shown_key(p);
+            let from = shown_at(p);
             p.job = Some(Job { id: id.into(), kind: kind.into(), what: what.into(), child, started: std::time::Instant::now(), out, err, args: args.iter().map(|a| a.to_string()).collect(), input, from });
             // Another project's message stays for it.
             p.bs_msg.remove(id);
@@ -404,6 +406,7 @@ fn for_person(said: &str) -> String {
 /// A finished step: what it said, kept for its project. A step past its time (a keyring that never answers, an image
 /// that never comes) is stopped and said so. True when one finished.
 fn poll_job(p: &mut P) -> bool {
+    if p.job.is_none() { next_close(p); }
     let Some(job) = p.job.as_mut() else { return false };
     let limit = match job.kind.as_str() { "open" | "recover" => 600, "new" => 420, _ => 120 };
     let done = matches!(job.child.try_wait(), Ok(Some(_)));
@@ -427,19 +430,21 @@ fn poll_job(p: &mut P) -> bool {
     let said = for_person(std::fs::read_to_string(&job.err).unwrap_or_default().trim().trim_start_matches("error: "));
     let out: Value = std::fs::read_to_string(&job.out).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     let _ = (std::fs::remove_file(&job.out), std::fs::remove_file(&job.err));
-    // The next log out waiting, of a project still open (the others go after it, one step at a time).
-    let queued = { let q = &mut p.close_after; while !q.is_empty() && !stub_of(&p.d, &q[0]).is_some_and(|st| st.open()) { q.remove(0); } (!q.is_empty()).then(|| q.remove(0)) };
     // The keyring's password is asked here, then the step runs again.
     let keyring = !late && !ok && [wb_core::secret::LOCKED, wb_core::secret::NOT_MADE].iter().any(|k| said.contains(k));
     if job.kind == "unlock" {
         if let Some(a) = p.after_unlock.take() {
             if ok { p.ask_keyring = None; p.stamp.clear(); let args: Vec<&str> = a.args.iter().map(String::as_str).collect(); start_job(p, &a.id, &a.kind, &a.what, &args, a.input.clone()); }
-            else { p.ask_keyring = Some(Asking { wrong: true, ..a }); }
+            else {
+                let wrong = !late && said.contains(wb_core::secret::LOCKED);
+                let problem = if wrong { wb_core::i18n::t("keyring-wrong").to_string() } else if late { wb_core::i18n::t("briefsafe-too-long").to_string() } else { said };
+                p.ask_keyring = Some(Asking { wrong, problem: Some(problem), ..a });
+            }
         }
         return true;
     }
     if keyring {
-        p.ask_keyring = Some(Asking { new: said.contains(wb_core::secret::NOT_MADE), id: job.id, kind: job.kind, what: job.what, args: job.args, input: job.input, wrong: false });
+        p.ask_keyring = Some(Asking { new: said.contains(wb_core::secret::NOT_MADE), id: job.id, kind: job.kind, what: job.what, args: job.args, input: job.input, problem: None, wrong: false });
         p.stamp.clear();
         return true;
     }
@@ -453,7 +458,7 @@ fn poll_job(p: &mut P) -> bool {
     else if !ok { p.bs_msg.insert(job.id.clone(), (job.kind.clone(), said)); }
     else if job.kind == "new" {
         // Made: shown, locked, ready to log in to, unless the person has gone on to something else meanwhile.
-        if shown_key(p) == job.from && p.dialog.as_ref().and_then(|w| w.upgrade()).is_none_or(|w| !w.is_visible()) { choose(p, Some(format!("{BS}{}", job.id))); }
+        if shown_at(p) == job.from && p.dialog.as_ref().and_then(|w| w.upgrade()).is_none_or(|w| !w.is_visible()) { choose(p, Some(format!("{BS}{}", job.id))); }
         p.rows.clear();
         // What it answered besides: no vault here, a first state not saved, a recovery key that could not be shown.
         let told: Vec<String> = [s(&out, "not_encrypted"), s(&out, "warning"), if out["recovery_key_shown"] == false { s(&out, "recovery_key") } else { "" }].into_iter().filter(|t| !t.is_empty()).map(String::from).collect();
@@ -465,8 +470,16 @@ fn poll_job(p: &mut P) -> bool {
         status::say(&p.d, &if warn.is_empty() { wb_core::i18n::t("briefsafe-snapshot-taken").to_string() } else { wb_core::i18n::f("briefsafe-snapshot-warning", &[("why", warn.to_string())]) }, 8);
     }
     p.stamp.clear();
-    if let Some(id) = queued { start_job(p, &id, "close", wb_core::i18n::t("briefsafe-closing"), &["close", &id], None); }
+    next_close(p);
     true
+}
+
+/// The next log out waiting, of a project still open (the others go after it, one step at a time).
+fn next_close(p: &mut P) {
+    while !p.close_after.is_empty() && !stub_of(&p.d, &p.close_after[0]).is_some_and(|st| st.open()) { p.close_after.remove(0); }
+    if p.close_after.is_empty() { return; }
+    let id = p.close_after.remove(0);
+    start_job(p, &id, "close", wb_core::i18n::t("briefsafe-closing"), &["close", &id], None);
 }
 
 /// What the last step of this project said, if it did not work.
@@ -827,9 +840,9 @@ fn ask_keyring(s_: &Shared) {
     body.set_margin_top(10); body.set_margin_bottom(10); body.set_margin_start(10); body.set_margin_end(10);
     let line = |text: &str| { let l = gtk::Label::new(Some(text)); l.set_xalign(0.0); l.set_wrap(true); l.set_max_width_chars(28); l };
     body.append(&line(t(if a.new { "keyring-new-label" } else { "keyring-label" })));
-    let problem = line(if a.wrong { t("keyring-wrong") } else { "" });
+    let problem = line(a.problem.as_deref().unwrap_or_default());
     problem.add_css_class("warn");
-    problem.set_visible(a.wrong);
+    problem.set_visible(a.problem.is_some());
     let (one, two) = (gtk::PasswordEntry::new(), gtk::PasswordEntry::new());
     body.append(&one);
     if a.new { body.append(&two); }
@@ -850,7 +863,7 @@ fn ask_keyring(s_: &Shared) {
                 held.borrow_mut().take();
                 w.close();
                 let (id, kind, what, args, input) = a2.clone();
-                { let mut p = s2.borrow_mut(); p.keyring_anew = true; p.ask_keyring = Some(Asking { id, kind, what, args, input, new: true, wrong: false }); }
+                { let mut p = s2.borrow_mut(); p.keyring_anew = true; p.ask_keyring = Some(Asking { id, kind, what, args, input, new: true, problem: None, wrong: false }); }
                 let s3 = s2.clone();
                 glib::idle_add_local_once(move || ask_keyring(&s3));
             });
@@ -884,7 +897,7 @@ fn ask_keyring(s_: &Shared) {
             let password = one.text().to_string();
             if password.is_empty() { return; }
             if new && two.text() != password { problem.set_text(wb_core::i18n::t("keyring-mismatch")); problem.set_visible(true); return; }
-            if s2.borrow().job.is_some() { return; }
+            if let Some(what) = s2.borrow().job.as_ref().map(|j| j.what.clone()) { problem.set_text(&wb_core::i18n::f("briefsafe-busy", &[("what", what)])); problem.set_visible(true); return; }
             let Some(a) = a.borrow_mut().take() else { return };
             w.close();
             let mut p = s2.borrow_mut();
