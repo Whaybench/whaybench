@@ -76,6 +76,9 @@ never calls an AI on its own.
 
 **Private.** No server, no account, no telemetry. Everything stays on your computer.
 
+**Projects in a safe.** Give a piece of work its own folder, its own agents in a container, encryption while you are
+away, and snapshots to go back to.
+
 <p align="center">
   <b>Whaybench is free and made by one developer.</b><br>
   If it saves you time, a coffee keeps it growing.<br><br>

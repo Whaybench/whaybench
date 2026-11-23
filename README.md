@@ -71,7 +71,52 @@ Your data stays in its folder (see below).
 - **Layout and look.** Move, resize and stack panels as tabs. Themes set colours, light and depth, see-through panels
   and glass.
 - **Projects.** A project map built from conversation nodes, and documents from your templates.
+- **Briefsafe projects.** A project in a folder of its own, its agents in a container that sees only that folder, its
+  data encrypted while you are logged out, and snapshots you can go back to (see below).
 - **Local.** No server, no account, no telemetry.
+
+## Briefsafe projects
+
+A Briefsafe project keeps one piece of work apart from everything else on your computer. Ask your agent to make one
+(it runs `whaybench-project new ID NAME --folder DIR [--encrypt]`), then log in to it from the **Projects** panel.
+
+- **Its own folder.** The project lives in one folder, a btrfs subvolume where the disk allows it. A snapshot is
+  taken when it is made, and again whenever you press **Snapshot**. The 30 latest are kept, and **Restore** puts the
+  whole folder back as it was.
+- **Its own agents.** Its conversations run in a rootless podman container. The container sees the project folder,
+  your system's programs (read only) and nothing else of your home folder. Claude Code and Codex there have their own
+  settings and history.
+- **Encrypted while logged out** (`--encrypt`). The project's documents, map, history, memory and conversations are
+  kept with gocryptfs, under a key held in your keyring. When it is made, the view panel shows a recovery key once:
+  keep it somewhere safe. Without it, a lost keyring means a lost project.
+- **Kept apart in Whaybench.** A project's text, map and pages stay in its own panels and conversations. Your other
+  conversations can give a project things, but nothing of the project comes back out to them.
+
+What it does not protect: while a project is logged in, other programs running as your user (an agent outside the
+project included) can still read its files. Log out when you are done. Pictures of the screen taken while a project
+is open are removed after ten minutes.
+
+**What it needs on Linux.** The Windows setup brings all of this. On Linux, install `podman` for the container and
+`gocryptfs` (with FUSE) for encryption. Without podman a project still gets its own folder and snapshots, but its
+agents run as you, outside a container.
+
+**Removing snapshots.** Whaybench deletes snapshots past the 30 kept as you, not as root. That needs the btrfs mount
+option `user_subvol_rm_allowed` on the disk that holds your projects. The Windows setup sets it. On Linux, add it once
+to that file system's line in `/etc/fstab`, then remount:
+
+```sh
+# Example: the line for /home, with the option added at the end of its options
+UUID=...  /home  btrfs  subvol=home,compress=zstd:1,user_subvol_rm_allowed  0 0
+sudo mount -o remount /home
+findmnt -no OPTIONS /home   # user_subvol_rm_allowed should be listed
+```
+
+Not sure which line it is? Ask your agent to do it with you. Without the option, Whaybench tells you which snapshots
+it could not remove.
+
+**A project from before.** A project made before Briefsafe keeps working as it did. To move it into a Briefsafe
+project, ask your agent (it runs `whaybench-project convert ID --folder DIR`). Its records move into the new folder.
+The conversations that worked on it stay where they were.
 
 ## Your data
 
