@@ -3,6 +3,7 @@
 //! it types into the session on request; and when the panel goes, it hands the session to the background.
 //! It lives and ends with its tab. It owns no session: Claude Code does.
 mod screen;
+mod token;
 
 use std::{
     ffi::CString,
@@ -603,6 +604,14 @@ fn set_raw() {
 
 fn main() {
     wb_core::paths::private_files();
+    // The Claude Code token for Briefsafe projects, made and stored without copying it (whaybench-panel token_terminal).
+    if std::env::args().nth(1).as_deref() == Some("--token") {
+        let Some(program) = std::env::args().nth(2) else { std::process::exit(2) };
+        let stored = token::take(&program).and_then(|t| t.ok_or_else(|| "no token on the screen".to_string()))
+            .and_then(|t| wb_core::secret::set(wb_core::secret::CLAUDE_TOKEN, wb_core::secret::CLAUDE_TOKEN_LABEL, &t));
+        if let Err(e) = stored { let _ = writeln!(std::io::stderr(), "whaybench-term: {e}"); std::process::exit(1); }
+        return;
+    }
     let mut args = std::env::args().skip(1);
     let (mut tab, mut attach, mut resume, mut map_from, mut project) = (None, None, None, None, None);
     while let Some(a) = args.next() {

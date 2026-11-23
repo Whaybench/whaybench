@@ -5,6 +5,8 @@ use std::{collections::HashMap, time::Duration};
 
 /// The long-lived Claude Code token (`claude setup-token`) the project containers' agents sign in with.
 pub const CLAUDE_TOKEN: &str = "claude-token";
+/// How the keyring's own tools name it.
+pub const CLAUDE_TOKEN_LABEL: &str = "Whaybench: Claude Code token for project containers";
 
 const LIMIT: Duration = Duration::from_secs(15);
 

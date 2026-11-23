@@ -71,9 +71,10 @@ fn token(words: &[String]) -> Result<(), String> {
         Some("set") => {
             let mut t = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut t).map_err(|e| e.to_string())?;
-            let t = t.trim();
-            if t.is_empty() || t.contains(char::is_whitespace) { return Err("give the token from `claude setup-token` on standard input".into()); }
-            secret::set(CLAUDE_TOKEN, "Whaybench: Claude Code token for project containers", t)?;
+            // A token has no spaces; one copied off the terminal can carry some (line wraps, the TUI's drawing).
+            let t: String = t.split_whitespace().collect();
+            if t.is_empty() { return Err("give the token from `claude setup-token` on standard input".into()); }
+            secret::set(CLAUDE_TOKEN, secret::CLAUDE_TOKEN_LABEL, &t)?;
             println!("stored");
         }
         Some("check") => println!("{}", if secret::get(CLAUDE_TOKEN)?.is_some() { "stored" } else { "none" }),

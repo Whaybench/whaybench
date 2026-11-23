@@ -15,7 +15,8 @@ names another step.
     allows it (a folder copied in with `--from`, a map to start from with `--map`), with a first snapshot. The older
     kind is made only for a sub-project (`--parent`) or with `--plain`.
   - The Claude Code token the projects' conversations sign in with is made from the Projects panel (Claude token for
-    projects): a terminal in the view runs `claude setup-token` and stores what is pasted in the keyring.
+    projects): a terminal in the view runs `claude setup-token`, takes the token it shows off the screen, stores it in
+    the keyring and closes; only where none is found is it pasted.
   - `snapshot`, `snapshots` and `restore` keep and bring back the whole folder (the 30 latest kept); `forget` takes
     it off the list. Removing old snapshots needs the btrfs mount option `user_subvol_rm_allowed`; without it they
     are kept and the answer says so.

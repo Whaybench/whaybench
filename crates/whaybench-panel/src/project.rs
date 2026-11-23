@@ -980,15 +980,16 @@ fn clicked(s_: &Shared, uri: &str) {
 
 /// A Briefsafe project's step from its page: log in or out, a snapshot, a conversation (spec 3.22).
 /// A terminal in the view where the person makes the Claude Code token the projects' conversations sign in with
-/// (`claude setup-token`) and stores it in the keyring (`whaybench token set`): the token is seen there only, never
-/// in a conversation.
+/// (`claude setup-token`): whaybench-term reads it off the screen and stores it in the keyring, and the terminal
+/// closes by itself; where it finds none, the person pastes it (`whaybench token set`). The token is seen there only,
+/// never in a conversation.
 fn token_terminal(d: &Data) {
     let Ok(exe) = std::env::current_exe() else { return };
-    let (claude, whaybench) = (sessions::claude_program(), exe.with_file_name("whaybench"));
+    let (claude, whaybench, term) = (sessions::claude_program(), exe.with_file_name("whaybench"), exe.with_file_name("whaybench-term"));
     let q = |p: &std::path::Path| format!("'{}'", p.to_string_lossy().replace('\'', "'\\''"));
     let say = |k: &str| format!("'{}'", wb_core::i18n::t(k).replace('\'', "'\\''"));
-    let script = format!("{} setup-token; echo; printf '%s\\n' {}; {} token set && printf '%s\\n' {} || printf '%s\\n' {}; printf '%s' {}; read _",
-        q(&claude), say("briefsafe-token-paste"), q(&whaybench), say("briefsafe-token-stored"), say("briefsafe-token-not-stored"), say("briefsafe-token-close"));
+    let script = format!("{} --token {} && {{ echo; printf '%s\\n' {}; sleep 3; exit 0; }}; echo; printf '%s\\n' {}; {} token set && printf '%s\\n' {} || printf '%s\\n' {}; printf '%s' {}; read _",
+        q(&term), q(&claude), say("briefsafe-token-stored"), say("briefsafe-token-paste"), q(&whaybench), say("briefsafe-token-stored"), say("briefsafe-token-not-stored"), say("briefsafe-token-close"));
     if let Err(e) = wb_core::view::terminal(d, &["sh".into(), "-c".into(), script]) { status::say(d, &wb_core::i18n::f("briefsafe-failed", &[("why", e.to_string())]), 8); }
 }
 
