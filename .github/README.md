@@ -21,12 +21,13 @@ which session did what, and everything the agent showed you.</p>
 
 ### Windows
 
-1. Download **[WhaybenchSetup.exe](https://github.com/Whaybench/whaybench/releases/latest/download/WhaybenchSetup.exe)**.
+1. Download
+**[WhaybenchSetup.exe](https://github.com/Whaybench/whaybench/releases/latest/download/WhaybenchSetup.exe)**.
 2. Run it. Windows warns about an unknown app: click **More info**, then **Run anyway**.
 3. Wait while it installs everything. Windows may restart once; the setup goes on by itself.
 4. Start **Whaybench** from the Start menu and sign in to Claude in the browser that opens in the middle of its window.
 
-Needs Windows 11, or Windows 10 21H2 or newer (64-bit). Setup stopped with an error? See
+Needs an x86-64 PC with Windows 11, or Windows 10 21H2 or newer. Setup stopped with an error? See
 [Installing on Windows: when the setup stops](/docs/windows.md).
 
 ### Linux
@@ -45,7 +46,7 @@ Needs Windows 11, or Windows 10 21H2 or newer (64-bit). Setup stopped with an er
    whaybench
    ```
 
-Needs a Wayland desktop and [Claude Code](https://code.claude.com/docs) installed and signed in.
+Needs an x86-64 PC with a Wayland desktop, and [Claude Code](https://code.claude.com/docs) installed and signed in.
 
 Ask your agent something and watch the map grow.
 
@@ -72,12 +73,22 @@ glass included.
 ## Built to stay out of your way
 
 **Your agent, unchanged.** Claude Code or Codex CLI runs in its terminal as usual, with your own login. Whaybench
-never calls an AI on its own.
+calls an AI only when you choose something that needs one.
 
-**Private.** No server, no account, no telemetry. Everything stays on your computer.
+**Private.** No server, no account, no telemetry. Whaybench keeps its records on your computer.
 
-**Projects in a safe.** Give a piece of work its own folder, its own agents in a container, encryption while you are
-away, and snapshots to go back to.
+## Between you and your AI
+
+**Some things are for the two of you.** A talk about a client, an idea not yet out: give it a project of its own. Where
+your system allows it, its agents run in a container with that project's folder, away from the rest of your files.
+
+**Kept out of your other chats.** Whaybench gives a project's map, memory and documents to that project's conversations
+only.
+
+**Locked when you log out.** Where encryption is set up, its conversations, map and memory are encrypted on your disk.
+Press one button to save its state, and go back to it when something goes wrong.
+
+[What it needs, how it works, and what it does not protect](/docs/guide/briefsafe.md)
 
 <p align="center">
   <b>Whaybench is free and made by one developer.</b><br>
@@ -87,8 +98,10 @@ away, and snapshots to go back to.
 
 ## Learn more
 
-- [Guide: updates, data folder, themes and languages, FAQ](/README.md)
-- [Using Codex CLI (experimental)](/docs/codex.md)
+- [Get started: a first conversation in 15 minutes](/docs/getting-started.md)
+- [Documentation](/docs/README.md)
+- [About Whaybench: what it does, your data, FAQ](/README.md)
+- [Using Codex CLI (experimental)](/docs/guide/agents-and-add-ons.md)
 - [Report a bug or suggest an idea](https://github.com/Whaybench/whaybench/issues)
 - [Contributing](/AGENTS.md)
 

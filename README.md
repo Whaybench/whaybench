@@ -14,14 +14,16 @@ side by side in one window.</p>
 
 ### Windows
 
-1. Download **[WhaybenchSetup.exe](https://github.com/Whaybench/whaybench/releases/latest/download/WhaybenchSetup.exe)**.
+1. Download
+**[WhaybenchSetup.exe](https://github.com/Whaybench/whaybench/releases/latest/download/WhaybenchSetup.exe)**.
 2. Run it. Windows warns about an unknown app: click **More info**, then **Run anyway**.
 3. Wait while it installs everything. Windows may restart once; the setup goes on by itself.
 4. Start **Whaybench** from the Start menu and sign in to Claude in the browser that opens in the middle of its window.
 
-Needs Windows 11, or Windows 10 21H2 or newer (64-bit). The setup puts a Linux of its own in WSL with Claude Code and
+Needs an x86-64 PC with Windows 11, or Windows 10 21H2 or newer. The setup puts a Linux of its own in WSL with Claude
+Code and
 Codex CLI; your other WSL systems are not touched. If it stops, run it again and it goes on where it stopped. If it
-stops with an error, [docs/windows.md](docs/windows.md) shows how to fix it step by step.
+stops with an error, [Windows setup help](docs/windows.md) shows how to fix it step by step.
 
 Programs in WSL can reach your Windows files with your rights, so check what an agent wants to run before you allow
 it.
@@ -53,10 +55,17 @@ Whaybench updates itself and says so in its status line; **Whaybench → Restart
 
 - Windows: remove it in **Settings → Apps**. Your projects stay in `%LOCALAPPDATA%\Whaybench\work.vhdx`; see
   [docs/windows.md](docs/windows.md#removing-everything) to remove them too.
-- Linux: delete `~/.local/lib/whaybench`, `~/.local/lib/whaybench-versions` and `~/.local/bin/whaybench`. Remove the
+- Linux: delete `~/.local/lib/whaybench`, `~/.local/lib/whaybench-versions` and the `whaybench*` links in
+  `~/.local/bin`. Remove the
   Claude Code plugin with `claude plugin uninstall context-map@whaybench`.
 
-Your data stays in its folder (see below).
+Your data stays in its folder (see below). Going back a version and checking a download: [Install](docs/install.md).
+
+## Documentation
+
+[Get started](docs/getting-started.md) walks through a first conversation in about 15 minutes. The
+[documentation](docs/README.md) has the guides, the command and settings reference, and
+[troubleshooting](docs/troubleshooting.md).
 
 ## What it does
 
@@ -71,73 +80,48 @@ Your data stays in its folder (see below).
 - **Layout and look.** Move, resize and stack panels as tabs. Themes set colours, light and depth, see-through panels
   and glass.
 - **Projects.** A project map built from conversation nodes, and documents from your templates.
-- **Briefsafe projects.** A project in a folder of its own, its agents in a container that sees only that folder, its
-  data encrypted while you are logged out, and snapshots you can go back to (see below).
+- **Briefsafe projects.** For work between you and your AI: a folder of its own, its agents in a container with that
+  folder, its records encrypted while you are logged out, and snapshots you can go back to (see below).
 - **Local.** No server, no account, no telemetry.
 
 ## Briefsafe projects
 
-A Briefsafe project keeps one piece of work apart from everything else on your computer. Every new project is one:
-press **New project** in the **Projects** panel (or ask your agent). It goes in `~/work/` (or your
-home folder when there is none), under a short form of its name. Once, before its
-first conversation, press **Log in**, then **Inner login: Claude**: a terminal in the view signs you in and keeps the
-token all projects' conversations use. Codex signs in once in each project (**Codex** beside it; turn on device code
-login in your ChatGPT security settings first). Then start a conversation on the **Sessions** tab.
+Some work is between you and your AI: a talk about a client, a plan not yet out. Give it a project. Every new project is
+a Briefsafe project: press **New project** in the project panel, log in, and start a conversation in it.
 
-- **Its own folder.** The project lives in one folder, a btrfs subvolume where the disk allows it. A snapshot is
-  taken when it is made, and again whenever you press **Save state**. The 30 latest are kept. To put the
-  whole folder back as it was, log out and ask your agent to restore one; Codex may ask you to sign in to the project
-  again after that.
-- **Its own agents.** Its conversations run in a rootless podman container. The container sees the project folder,
-  your system's programs (read only) and nothing else of your home folder. Claude Code and Codex there have their own
-  settings and history.
-- **Encrypted while logged out**, wherever your computer can. The project's documents, map, history, memory and conversations are
-  kept with gocryptfs, under a key held in your keyring. When it is made, the view panel shows a recovery key once:
-  keep it somewhere safe. Without it, a lost keyring means a lost project.
-- **Kept apart in Whaybench.** A project's text, map and pages stay in its own panels and conversations. Your other
-  conversations can give a project things (conversation map → node menu → **Reflect in project**, while it is logged in
-  and has a conversation running), but nothing of the project comes back out to them.
+- **It stays in the project.** Whaybench gives the project's map, memory and documents to its own conversations only,
+  and
+  has no server to send them to.
+- **The agent sees one folder.** It runs in a rootless podman container with the project folder. Your system's and
+  agents'
+  programs are there too, read only; the rest of your home folder is not.
+- **Encrypted while you are logged out.** The project's conversations, map and memory, and the documents Whaybench keeps
+  for it, are encrypted with gocryptfs under a key in your keyring. A recovery key is shown once, when the project is
+made: keep it somewhere safe.
+- **Snapshots.** Press **Save state** to keep the whole folder as it is, and go back to it later.
 
-What it does not protect: while a project is logged in, other programs running as your user (an agent outside the
-project included) can still read its files. Log out when you are done. Pictures of the screen taken while a project
-is open are removed after ten minutes.
+Know its limits:
 
-**What it needs on Linux.** The Windows setup brings all of this. On Linux, install `podman` for the container and
-`gocryptfs` (with FUSE) for encryption, and have a keyring (KDE and GNOME bring one). `btrfs-progs` is needed for
-snapshots on btrfs. Without podman a project still gets its own folder and snapshots, but its agents run as you,
-outside a container. Where encryption was never possible, a project is made without it and Whaybench says why; where it
-was, Whaybench says what is wrong and makes nothing.
+- The agent uses its model and the internet, as it does outside a project.
+- Your own files in the project folder are not encrypted, logged out or not. Use disk encryption for those.
+- While a project is logged in, other programs running as you can read all of it. Log out when you are done: quitting
+  Whaybench can leave it open.
+- The container needs `podman` and an image for your system (Fedora, Ubuntu, Debian); the encryption also needs
+  `gocryptfs` and a keyring; snapshots need btrfs. The Windows setup brings them. Without them a project is made without
+  that part, and Whaybench says so.
 
-**The keyring.** It keeps the projects' keys and the sign-in token. When it is locked, your desktop's own window asks
-its password. On Windows, Whaybench asks it as the **project access password**: one for all encrypted projects, set at
-the first one. A lost one cannot be recovered: reset it (offered after a wrong
-password) and open each project once with its recovery key.
-
-**Removing snapshots.** Whaybench deletes snapshots past the 30 kept as you, not as root. That needs the btrfs mount
-option `user_subvol_rm_allowed` on the disk that holds your projects. The Windows setup sets it. On Linux, add it once
-to that file system's line in `/etc/fstab`, then remount:
-
-```sh
-# Example: the line for /home, with the option added at the end of its options
-UUID=...  /home  btrfs  subvol=home,compress=zstd:1,user_subvol_rm_allowed  0 0
-sudo mount -o remount /home
-findmnt -no OPTIONS /home   # user_subvol_rm_allowed should be listed
-```
-
-Not sure which line it is? Ask your agent to do it with you. Without the option, Whaybench tells you which snapshots
-it could not remove.
-
-**A project from before.** A project made before Briefsafe keeps working as it did. To move it into a Briefsafe
-project, ask your agent (it runs `whaybench-project convert ID --folder DIR`). Its records move into the new folder.
-The conversations that worked on it stay where they were.
+How to set it up, recover it and go back to a snapshot: [Briefsafe projects](docs/guide/briefsafe.md). What exactly is
+protected: [Security](docs/security.md).
 
 ## Your data
 
-Everything is in `~/.local/share/whaybench`. Copy that folder to move your setup. It holds the sign-ins of the view
-panel's browser, so keep it to yourself. Its `cache` folder can be deleted at any time.
+Everything is in `~/.local/share/whaybench`. It is the main thing to copy when you move your setup. It holds the
+sign-ins of the view
+panel's browser, so keep it to yourself. Its `cache` folder can be deleted while Whaybench is closed.
 
-Conversations are kept until you choose otherwise: `{"keep_days": 365}` in its `settings.json` drops those not used
-for a year.
+Conversations are kept until you choose otherwise in **Settings → Preferences…**. Each Briefsafe project keeps its own
+data in its folder, so copy those folders too. Backing up and moving to another computer:
+[Settings and data](docs/reference/settings-and-data.md).
 
 ## Make it yours
 
@@ -152,8 +136,8 @@ Themes, languages, map styles and document templates are folders. English and Ko
 
 ## Codex CLI
 
-Experimental. Open a Codex conversation from the session menu (**New conversation → Codex**). See
-[docs/codex.md](docs/codex.md).
+Experimental. Open a Codex conversation from the menu (**Sessions → New conversation → Codex**) and trust its hooks once
+with `/hooks`. See [Agents and add-ons](docs/guide/agents-and-add-ons.md).
 
 ## Build from source
 
@@ -172,21 +156,23 @@ Whaybench is a Wayland compositor written in Rust with [Smithay](https://github.
 an app of its own: GTK 4 panels, Alacritty terminals, WebKit and Firefox views. The agent runs unchanged in the
 terminal; its standard hooks call `whaybench hook`, and the map tool is the MCP server `whaybench mcp`.
 
-Releases are signed with [minisign](https://jedisct1.github.io/minisign/), and Whaybench updates only with files that
-check against this key: `RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia`
+Releases are signed with [minisign](https://jedisct1.github.io/minisign/), and Whaybench downloads an update only when
+it checks against this key: `RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia`
 
 ## FAQ
 
-**macOS?** Not yet: Whaybench needs Linux, on its own or in WSL on Windows. [Help bring it to the Mac](https://ko-fi.com/whaybench).
+**macOS?** Not yet: Whaybench needs Linux, on its own or in WSL on Windows. [Help bring it to the
+Mac](https://ko-fi.com/whaybench).
 
-**Does it call the AI itself?** No. Your agent works in its terminal as usual; Whaybench shows what it records.
+**Does it call the AI itself?** Your agent works in its terminal as usual, and Whaybench shows what it records. The one
+exception is yours to choose: a map style that needs more than the map holds has a small Claude model fill it in once.
 
 **Does it change my Claude Code or Codex setup?** It adds one plugin to Claude Code. Codex gets a folder of its own.
 
 ## Contributing
 
 Bug reports and ideas are welcome in [Issues](https://github.com/Whaybench/whaybench/issues). For code, see
-[AGENTS.md](AGENTS.md).
+[Development](docs/development.md) and [AGENTS.md](AGENTS.md).
 
 ## Support
 

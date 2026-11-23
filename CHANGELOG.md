@@ -7,6 +7,11 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- Documentation in `docs/`: install, a first conversation, seven guides (window, sessions, conversation map, view and
+  files, projects, Briefsafe, agents and add-ons), command and settings reference, security, troubleshooting and
+  development. `docs/codex.md` went into them, and both READMEs are shorter and link to them.
+
 ### Fixed
 - A picture taken while a project is open that cannot be removed when its time is up is tried again, and the status line
   says so; one whose removal cannot be noted is removed at once. Before, one failure left it for good.
