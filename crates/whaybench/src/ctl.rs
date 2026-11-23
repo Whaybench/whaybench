@@ -112,8 +112,8 @@ enum Refused { Rule(String), Write(String) }
 
 /// Types text in the tab that shows session `id`. From another conversation tab, that is from its agent: said so, and
 /// never a command or a shell line; when the answer comes, the person is taken back to the tab that asked.
-/// `left`: when it was left to be typed.
-fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool, left: i64) -> Result<(), Refused> {
+/// `left`: when it was left to be typed, and the tab it was asked from as that tab's `session wait` names itself.
+fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool, left: (i64, &str)) -> Result<(), Refused> {
     // A conversation that carried on (a restart, /background) has a new number: the one it was given is followed.
     let now = sessions::current_id(data, id);
     let tab = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(now.as_str()));
@@ -122,6 +122,7 @@ fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool, l
         return Err(Refused::Rule(wb_core::i18n::f("not-run-no-conversation-tab-open", &[("head", (head).to_string())])));
     };
     // Typing in one's own tab is the agent's own; a request from ask/ names its sender itself, so it is always marked.
+    let (left, asker) = left;
     let from = from.filter(|f| asked || *f != tab.tab);
     let text = match from {
         Some(f) => from_other(text, &sessions::session_of_tab(data, f).map(|s| wb_core::agents::session_label(&data.root, &s)).unwrap_or_else(|| f.to_string())).map_err(Refused::Rule)?,
@@ -130,7 +131,6 @@ fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool, l
     let dir = sessions::tab_inbox(data, &tab.tab);
     let name = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     // What becomes of it is noted for the asker's `session wait` (before the tab can take it).
-    let asker = from.unwrap_or("");
     let v = serde_json::json!({"text": text, "enter": true, "other": from.is_some(), "asked": {"id": id, "tab": asker, "left": left}});
     sessions::asked::note(data, id, asker, left, sessions::asked::Became::Left);
     if let Err(e) = fs::create_dir_all(&dir).and_then(|_| write_atomic(&dir.join(format!("{name}.json")), v.to_string().as_bytes())) { return Err(Refused::Write(e.to_string())); }
@@ -179,8 +179,9 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
         let (to, text) = (v["to"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
         let mut from = v["from"].as_str().unwrap_or("another conversation").to_string();
         let left = v["left"].as_i64().unwrap_or_else(now_ms);
+        let asker = v["from"].as_str().unwrap_or("");
         // Told to the asker's `session wait`, for a conversation of the root it was asked in.
-        let refused = |from: &str| if wb_core::roots::known_session(data, to).is_some_and(|k| k.root == root.root) { sessions::asked::note(data, to, from, left, sessions::asked::Became::Refused) };
+        let refused = || if wb_core::roots::known_session(data, to).is_some_and(|k| k.root == root.root) { sessions::asked::note(data, to, asker, left, sessions::asked::Became::Refused) };
         if let Some(pid) = project {
             // Where it would land in the end (after moves), and where it is asked from, must both be this project's own;
             // the sender is the project, not what the request says; no control bytes reach a terminal.
@@ -189,7 +190,7 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
             let clean = !text.chars().any(|c| c.is_control() && c != '\n' && c != '\t');
             if !mine(to) || !mine(&landing) || !clean {
                 record::warn("request", "agent's request not delivered", "a project's agent may type only plain text in its own project's conversations", &[("session", if wb_core::map::safe_id(to).is_ok() { to.to_string() } else { "?".into() }), ("project", pid.to_string())]);
-                refused(&from);
+                refused();
                 continue;
             }
             // A tab of this project may be named (its conversation is said, and the person taken back to it); else the project.
@@ -198,13 +199,13 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
             }
         }
         let from = from.as_str();
-        match deliver(data, to, text, Some(from), true, left) {
+        match deliver(data, to, text, Some(from), true, (left, asker)) {
             Ok(()) => {
                 record::decide("request", "asked by an agent", "a sandboxed agent's request, checked here", &[("session", to.to_string()), ("from", from.to_string())]);
             }
             // A project's request: a fixed reason (the error may quote its text).
             Err(Refused::Rule(e) | Refused::Write(e)) => {
-                refused(from);
+                refused();
                 record::warn("request", "agent's request not delivered", if project.is_some() { "refused for a project's request" } else { &e }, &[("session", to.to_string()), ("from", from.to_string())]);
             }
         }
@@ -291,7 +292,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 // What the host would not type: said here, where the agent sees it.
                 if text.chars().any(|c| c.is_control() && c != '\n' && c != '\t') { return Err("the text has control characters (colour codes, carriage returns): send plain text".into()); }
             }
-            let tried = if in_project { Err(Refused::Write(String::new())) } else { deliver(data, id, text, from.as_deref(), false, left) };
+            let tried = if in_project { Err(Refused::Write(String::new())) } else { deliver(data, id, text, from.as_deref(), false, (left, from.as_deref().unwrap_or(""))) };
             match tried {
                 // An agent in a sandbox (Codex) may not write other tabs' input: it leaves a request in ask/, which
                 // Whaybench, outside the sandbox, checks the same way and delivers. A refusal stays a refusal.
@@ -665,7 +666,7 @@ mod tests {
         let ask = |n: &str, to: &str, text: &str| write_atomic(&ask_dir(&stub.root()).join(n), serde_json::json!({"to": to, "text": text, "from": "t-host"}).to_string().as_bytes()).unwrap();
         ask("1.json", "s-host", "to the host");
         ask("2.json", "p2", "through a forged move");
-        ask("3.json", "p1", "\u{1b}[2J clear");
+        write_atomic(&ask_dir(&stub.root()).join("3.json"), serde_json::json!({"to": "p1", "text": "\u{1b}[2J clear", "from": "t-other"}).to_string().as_bytes()).unwrap();
         ask("4.json", "p1", "hi");
         deliver_asked(&data);
         assert!(fs::read_dir(sessions::tab_inbox(&data, "t-host")).map(|d| d.count()).unwrap_or(0) == 0, "nothing reaches the host's tab");
@@ -675,8 +676,8 @@ mod tests {
         assert!(typed[0].contains("project Up") && typed[0].ends_with("hi"), "the sender is the project: {}", typed[0]);
         // What became of each, for the asker's wait: kept in the project, never in the host's root.
         use sessions::asked::{Became, read};
-        assert_eq!(read(&data, "p1", "t-host").map(|r| r.1), Some(Became::Refused), "not plain text");
-        assert_eq!(read(&data, "p1", "-").map(|r| r.1), Some(Became::Left));
+        assert_eq!(read(&data, "p1", "t-other").map(|r| r.1), Some(Became::Refused), "not plain text");
+        assert_eq!(read(&data, "p1", "t-host").map(|r| r.1), Some(Became::Left));
         assert!(!data.cache().join("asked").exists());
     }
 
@@ -687,7 +688,7 @@ mod tests {
         fs::create_dir_all(sessions::sessions_dir(&data)).unwrap();
         write_atomic(&sessions::sessions_dir(&data).join("s-old.json"), br#"{"id":"s-old","movedTo":"s-new"}"#).unwrap();
         sessions::write_tab(&data, "t-new", Some("s-new"), false);
-        assert!(deliver(&data, "s-old", "hello", None, false, 1).is_ok());
+        assert!(deliver(&data, "s-old", "hello", None, false, (1, "")).is_ok());
         assert_eq!(fs::read_dir(sessions::tab_inbox(&data, "t-new")).unwrap().count(), 1);
     }
     fn w(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }

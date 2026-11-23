@@ -332,7 +332,7 @@ struct Job {
 }
 
 /// A step that waits for the keyring's password, asked in a dialog.
-struct Asking { id: String, kind: String, what: String, args: Vec<String>, input: Option<String>, new: bool, /** Why the last try did not work. */ problem: Option<String>, /** It was the password. */ wrong: bool }
+struct Asking { /** What was shown when the step began. */ from: String, id: String, kind: String, what: String, args: Vec<String>, input: Option<String>, new: bool, /** Why the last try did not work. */ problem: Option<String>, /** It was the password. */ wrong: bool }
 
 /// Briefsafe projects are listed by this key, apart from the host's projects' ids.
 const BS: &str = "bs:";
@@ -434,17 +434,17 @@ fn poll_job(p: &mut P) -> bool {
     let keyring = !late && !ok && [wb_core::secret::LOCKED, wb_core::secret::NOT_MADE].iter().any(|k| said.contains(k));
     if job.kind == "unlock" {
         if let Some(a) = p.after_unlock.take() {
-            if ok { p.ask_keyring = None; p.stamp.clear(); let args: Vec<&str> = a.args.iter().map(String::as_str).collect(); start_job(p, &a.id, &a.kind, &a.what, &args, a.input.clone()); }
+            if ok { p.ask_keyring = None; p.stamp.clear(); let args: Vec<&str> = a.args.iter().map(String::as_str).collect(); start_job(p, &a.id, &a.kind, &a.what, &args, a.input.clone()); if let Some(j) = &mut p.job { j.from = a.from; } }
             else {
                 let wrong = !late && said.contains(wb_core::secret::LOCKED);
-                let problem = if wrong { wb_core::i18n::t("keyring-wrong").to_string() } else if late { wb_core::i18n::t("briefsafe-too-long").to_string() } else { said };
+                let problem = if wrong { wb_core::i18n::t("keyring-wrong").to_string() } else if late { wb_core::i18n::t("briefsafe-too-long").to_string() } else if said.is_empty() { wb_core::i18n::t("keyring-waits").to_string() } else { said };
                 p.ask_keyring = Some(Asking { wrong, problem: Some(problem), ..a });
             }
         }
         return true;
     }
     if keyring {
-        p.ask_keyring = Some(Asking { new: said.contains(wb_core::secret::NOT_MADE), id: job.id, kind: job.kind, what: job.what, args: job.args, input: job.input, problem: None, wrong: false });
+        p.ask_keyring = Some(Asking { from: job.from, new: said.contains(wb_core::secret::NOT_MADE), id: job.id, kind: job.kind, what: job.what, args: job.args, input: job.input, problem: None, wrong: false });
         p.stamp.clear();
         return true;
     }
@@ -851,7 +851,7 @@ fn ask_keyring(s_: &Shared) {
     row.set_halign(gtk::Align::End);
     let (cancel, ok) = (gtk::Button::with_label(t("cancel")), gtk::Button::with_label(t(if a.new { "create" } else { "keyring-unlock" })));
     // The password is lost: a new keyring, the old one kept beside it.
-    let again = (a.id.clone(), a.kind.clone(), a.what.clone(), a.args.clone(), a.input.clone());
+    let again = (a.from.clone(), a.id.clone(), a.kind.clone(), a.what.clone(), a.args.clone(), a.input.clone());
     let (wrong, new) = (a.wrong, a.new);
     let a = Rc::new(RefCell::new(Some(a)));
     if wrong {
@@ -862,8 +862,8 @@ fn ask_keyring(s_: &Shared) {
             crate::common::confirm(&win2, wb_core::i18n::t("keyring-anew-confirm"), &[], wb_core::i18n::t("keyring-anew"), move || {
                 held.borrow_mut().take();
                 w.close();
-                let (id, kind, what, args, input) = a2.clone();
-                { let mut p = s2.borrow_mut(); p.keyring_anew = true; p.ask_keyring = Some(Asking { id, kind, what, args, input, new: true, problem: None, wrong: false }); }
+                let (from, id, kind, what, args, input) = a2.clone();
+                { let mut p = s2.borrow_mut(); p.keyring_anew = true; p.ask_keyring = Some(Asking { from, id, kind, what, args, input, new: true, problem: None, wrong: false }); }
                 let s3 = s2.clone();
                 glib::idle_add_local_once(move || ask_keyring(&s3));
             });

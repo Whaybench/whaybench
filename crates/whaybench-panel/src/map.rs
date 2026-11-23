@@ -91,8 +91,10 @@ pub fn update_request(scope: Option<(&str, &str)>, extra: &str, style: Option<&m
 fn outline(tree: &Tree, n: &Value, depth: usize, detail: bool, out: &mut Vec<String>) {
     let mut extra = String::new();
     for k in ["kind", "reason", "state"] { if !s(n, k).is_empty() { extra += &format!(" [{k}: {}]", s(n, k)); } }
-    if detail && !s(n, "detail").is_empty() { extra += &format!(" [detail: {}]", s(n, "detail").split_whitespace().collect::<Vec<_>>().join(" ").chars().take(1000).collect::<String>()); }
-    out.push(format!("{}- {}{}{extra}", "  ".repeat(depth), s(n, "label"), if is_open(n) { wb_core::i18n::t("open") } else { "" }));
+    if detail && !s(n, "detail").is_empty() { extra += &format!(" [detail: {}]", s(n, "detail").split_whitespace().collect::<Vec<_>>().join(" ")); }
+    // (Typed into a terminal: no control characters.)
+    let line = format!("{}- {}{}{extra}", "  ".repeat(depth), s(n, "label"), if is_open(n) { wb_core::i18n::t("open") } else { "" });
+    out.push(line.chars().filter(|c| !c.is_control()).collect());
     for c in tree.kids.get(s(n, "id")).into_iter().flatten() { outline(tree, c, depth + 1, detail, out); }
 }
 
@@ -135,7 +137,7 @@ pub fn reflect_request(pid: &str, work: &str, flow: &[String], lines: &[String],
 /// it is of, if that runs), which writes it in the project. `origin`: the map's conversation and the node.
 fn reflect_briefsafe(d: &Data, sub: &Items, map_project: Option<&str>, origin: Option<(&str, &str)>, label: &str, flow: &[String], lines: &[String]) {
     for st in wb_core::roots::stubs(d) {
-        let own = origin.filter(|(s, _)| map_project == Some(st.id.as_str()) && !s.is_empty()).map(|(s, n)| (s.to_string(), n.to_string()));
+        let own = origin.filter(|(s, _)| map_project == Some(st.id.as_str()) && wb_core::roots::known_session(d, s).is_some_and(|k| k.root == st.root().root)).map(|(s, n)| (s.to_string(), n.to_string()));
         let (d2, label2, f2, l2, st2) = (d.clone(), label.to_string(), flow.to_vec(), lines.to_vec(), st.clone());
         sub.add(&st.name, st.open() && map_project.is_none_or(|m| m == st.id), move || {
             if !st2.open() { return status::say(&d2, wb_core::i18n::t("briefsafe-project-closed"), 8); }
@@ -289,7 +291,7 @@ fn imported_menu(d: &Data, data: &Value, node: Option<&Value>, path: &str, title
                 else { st.queue_drop(&pid, &q); status::say(&d2, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(&s2, 8))]), 8); }
             });
         }
-        reflect_briefsafe(d, &sub, map_project.as_deref(), None, &label, &flow, &told);
+        reflect_briefsafe(d, &sub, map_project.as_deref(), Some((s(data, "sessionId"), &id)), &label, &flow, &told);
         // (No project: nothing to open.)
         if gtk::gio::prelude::MenuModelExt::n_items(&sub.menu) > 0 { refer.menu.append_submenu(Some(wb_core::i18n::t("reflect-in-project")), &sub.menu); }
         items.menu.append_section(None, &refer.menu);

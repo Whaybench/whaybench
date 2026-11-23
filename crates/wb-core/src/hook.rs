@@ -23,6 +23,15 @@ fn state_file(data: &Path, kind: &str, sid: &str) -> std::path::PathBuf { data.j
 
 /// One event; the result is what the agent reads on stdout.
 pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
+    let done = handle(data, a, event);
+    // Whatever of a turn's end could not be kept, the turn is over: else it counts as working for hours.
+    if done.is_err() && event["hook_event_name"] == "Stop" && let Some(sid) = event["session_id"].as_str().filter(|s| safe_id(s).is_ok()) {
+        let _ = session_record::state(data, sid, "done", None);
+    }
+    done
+}
+
+fn handle(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     let sid = safe_id(text(event, "session_id")?)?;
     let name = text(event, "hook_event_name")?;
     if !EVENTS.contains(&name) { return Err("unsupported hook event".into()); }
@@ -86,9 +95,8 @@ pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     match name {
         "Stop" => {
             crate::ask::clear_session(data, sid, crate::ask::Clear::TurnEnded);
-            let kept = stop(data, a, sid, event, &mut record);
+            stop(data, a, sid, event, &mut record)?;
             session_record::state(data, sid, state, note)?;
-            kept?;
             if a.name != crate::agents::CLAUDE && crate::agents::load(data, a.name).is_ok_and(|g| g.usage.as_deref() == Some("codex-rollout")) {
                 crate::usage::from_codex_rollout(data, sid, a.name, event);
             }
@@ -680,6 +688,19 @@ mod tests {
         let note = fallback(&ev("s", "UserPromptSubmit", json!({}))).unwrap();
         assert_eq!(note["hookSpecificOutput"]["additionalContext"], i18n::ai("map-note").to_string());
         assert!(fallback(&ev("s", "Stop", json!({}))).is_none());
+    }
+
+    #[test]
+    fn a_turn_whose_end_could_not_be_kept_is_over_all_the_same() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
+        for name in ["SessionStart", "UserPromptSubmit"] { run(dir.path(), &a, &ev("s", name, json!({"prompt": "hi"}))).unwrap(); }
+        // Its answers folder cannot be written to: a file is in its place.
+        let _ = fs::remove_dir_all(dir.path().join("answers"));
+        fs::write(dir.path().join("answers"), "").unwrap();
+        assert!(run(dir.path(), &a, &ev("s", "Stop", json!({"last_assistant_message": "x"}))).is_err());
+        let d = crate::paths::Data::new(dir.path().to_path_buf());
+        assert_eq!(crate::sessions::state_of(&d, "s").as_deref(), Some("done"));
     }
 
     #[test]

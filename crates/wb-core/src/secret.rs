@@ -126,12 +126,19 @@ fn keyring_file(path: &str) -> String {
 pub fn unlock_with(password: &str, anew: bool) -> Result<(), String> {
     use std::{io::Write, process::{Command, Stdio}};
     if password.is_empty() { return Err("no password".into()); }
-    let path = bus(async { default_path(&Connection::session().await?).await }).map(|p| p.to_string()).unwrap_or_default();
+    let path = bus(async { default_path(&Connection::session().await?).await }).map(|p| p.to_string());
+    // Not known which one is the default: none is set aside for it.
+    if anew && let Err(e) = &path { return Err(e.clone()); }
+    let path = path.unwrap_or_default();
     let name = if path.len() > 1 { keyring_file(&path) } else { "login".into() };
     if !anew && name != "login" && state() == State::Locked {
-        // A wrong password is an answer; what cannot be asked at all (another program's keyring) is said.
-        if let Err(e) = unlock_path(&path, password) && (e == SILENT || e.contains("UnknownMethod") || e.contains("UnknownInterface")) { return Err(e); }
-        return if state() == State::Open { Ok(()) } else { Err(LOCKED.into()) };
+        // A wrong password is gnome-keyring's answer; anything else is said as it came.
+        return match unlock_path(&path, password) {
+            Err(e) if e.contains("org.gnome.keyring.Error.Denied") => Err(LOCKED.into()),
+            Err(e) => Err(e),
+            Ok(()) if state() == State::Open => Ok(()),
+            Ok(()) => Err(LOCKED.into()),
+        };
     }
     if anew && state() != State::New {
         let home = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()).map(std::path::PathBuf::from)

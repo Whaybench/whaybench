@@ -42,6 +42,11 @@ struct Relay {
     child: libc::pid_t,
     running: bool,
     started: Instant,
+    started_at: std::time::SystemTime,
+    /// The agent's first hook of this run has come (looked at for a project's Claude Code).
+    hooked: bool,
+    /// When text was last typed in from outside (ms), until its turn is seen.
+    typed_at: Option<i64>,
     screen: vt100::Parser,
     titles: Titles,
     title: String,
@@ -78,6 +83,8 @@ impl Relay {
     /// right before the program starts, or Claude Code's input line stays one line high.
     fn start(&mut self, args: &[String]) -> Result<(), String> {
         self.started = Instant::now();
+        self.started_at = std::time::SystemTime::now();
+        self.hooked = false;
         let size = size_of(0);
         let agent = wb_core::agents::active().map(|id| wb_core::agents::load(&self.data.root, &id)).transpose().map_err(|e| e.to_string())?;
         let addon = agent.is_some();
@@ -380,8 +387,9 @@ impl Relay {
                 let file = sessions::alive_dir(&at).join(s);
                 // A project's Claude Code from its first hook on: before, it may be showing a start screen (sign-in,
                 // trust), which a request must not be typed into.
-                let ready = wb_core::agents::other() || paths::meta(&file).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().unwrap_or_default() <= self.started.elapsed());
-                if ready {
+                // Once seen it stays so: the computer may sleep, or its clock be set, meanwhile.
+                self.hooked = self.hooked || paths::meta(&file).and_then(|m| m.modified()).is_ok_and(|t| t >= self.started_at);
+                if wb_core::agents::other() || self.hooked {
                     let _ = paths::create_dir_all(&sessions::alive_dir(&at));
                     let _ = paths::write_atomic(&file, self.child.to_string());
                 }
@@ -461,23 +469,25 @@ impl Relay {
         // Do not paste a queued prompt into a permission dialog or an active turn, whatever the agent. A command
         // (/exit when the person ends the session) goes in at once: it must not wait for the turn.
         let commands_only = {
-            let mut waiting = false;
+            // A project's Claude Code before its first hook may be at a start screen: its last state is of last time.
+            let mut waiting = !wb_core::agents::other() && !self.hooked && sessions::tab_project(&self.data, &self.tab).is_some();
             if let Some(s) = &self.session {
-                let ready = paths::read_text(&sessions::state_dir(&wb_core::roots::for_session(&self.data, s)).join(format!("{s}.json"))).ok()
-                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-                    .is_some_and(|v| v["state"] == "done");
-                waiting = !ready;
+                let state = paths::read_text(&sessions::state_dir(&wb_core::roots::for_session(&self.data, s)).join(format!("{s}.json"))).ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).unwrap_or_default();
+                // One text a turn: after one, the next waits until its turn is seen (or none comes).
+                if self.typed_at.is_some_and(|at| !turn_pending(at, &state, wb_core::clock::now_ms())) { self.typed_at = None; }
+                waiting |= state["state"] != "done" || self.typed_at.is_some();
             }
             waiting
         };
+        let mut commands_only = commands_only;
         let dir = sessions::tab_inbox(&self.data, &self.tab);
-        for f in fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let v = fs::read_to_string(f.path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+        for (path, v) in inbox(&dir) {
             // While a held question waits for the person, another conversation's words wait too: a prompt takes it away.
             if v.as_ref().is_some_and(|v| v["other"] == true)
                 && self.session.as_ref().is_some_and(|s| wb_core::ask::held(&wb_core::roots::for_session(&self.data, s).root, s)) { continue; }
             if commands_only && !v.as_ref().and_then(|v| v["text"].as_str()).is_some_and(|t| t.trim_start().starts_with('/')) { continue; }
-            let _ = fs::remove_file(f.path());
+            let _ = fs::remove_file(&path);
             let Some(v) = v else { continue };
             sessions::asked::note_request(&self.data, &v, self.running);
             if !self.running { continue; }
@@ -497,6 +507,7 @@ impl Relay {
                 // Claude Code reads pasted text and Enter apart only with a moment between them.
                 std::thread::sleep(Duration::from_millis(150));
                 write_all(self.master, b"\r");
+                if !text.trim_start().starts_with('/') { self.typed_at = Some(wb_core::clock::now_ms()); commands_only = true; }
             }
         }
     }
@@ -550,13 +561,6 @@ impl Relay {
 
     fn finish(&mut self) {
         let of_project = sessions::tab_project(&self.data, &self.tab);
-        // What was still to be typed in is not: told to what asked, and to the person.
-        let left: Vec<serde_json::Value> = fs::read_dir(sessions::tab_inbox(&self.data, &self.tab)).into_iter().flatten().flatten()
-            .filter_map(|f| fs::read_to_string(f.path()).ok().and_then(|t| serde_json::from_str(&t).ok())).collect();
-        for v in &left { sessions::asked::note_request(&self.data, v, false); }
-        if left.iter().any(|v| !v["text"].as_str().unwrap_or("").starts_with('/')) {
-            wb_core::status::say(&self.data, wb_core::i18n::t("request-lost-with-tab"), 12);
-        }
         if self.running {
             unsafe { libc::kill(self.child, libc::SIGHUP); }
             // In a project's container the agent is not the child's own: it is ended there.
@@ -569,8 +573,29 @@ impl Relay {
             && let Some(s) = &self.session { sessions::mark_off(&self.data, s); }
         let _ = fs::remove_file(sessions::tab_file(&self.data, &self.tab));
         sessions::set_tab_project(&self.data, &self.tab, None);
+        // No request finds the tab any more. What was still to be typed in is not: told to what asked, and to the person.
+        let left: Vec<serde_json::Value> = inbox(&sessions::tab_inbox(&self.data, &self.tab)).into_iter().filter_map(|(_, v)| v).collect();
+        for v in &left { sessions::asked::note_request(&self.data, v, false); }
+        if left.iter().any(|v| !v["text"].as_str().unwrap_or("").starts_with('/')) {
+            wb_core::status::say(&self.data, wb_core::i18n::t("request-lost-with-tab"), 12);
+        }
         let _ = fs::remove_dir_all(sessions::tab_inbox(&self.data, &self.tab));
     }
+}
+
+/// The requests waiting in a tab's inbox in the order to type them: the person's own (an answer to a held question is
+/// one) before other conversations', each oldest first (a name is its time).
+fn inbox(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Option<serde_json::Value>)> {
+    let mut all: Vec<_> = fs::read_dir(dir).into_iter().flatten().flatten().map(|f| f.path())
+        .map(|p| { let v = fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()); (p, v) }).collect();
+    all.sort_by_key(|(p, v)| (v.as_ref().is_some_and(|v| v["other"] == true), p.clone()));
+    all
+}
+
+/// Whether the turn of a text typed in at `at` is still to be seen: the agent says so by its state, or no turn comes of
+/// it (10 seconds).
+fn turn_pending(at: i64, state: &serde_json::Value, now: i64) -> bool {
+    state["state"] == "done" && state["at"].as_i64().unwrap_or(0) <= at && (0..10_000).contains(&(now - at))
 }
 
 fn stop_copy(old: &str) {
@@ -672,7 +697,7 @@ fn main() {
         .then(|| fs::read_to_string("/proc/sys/kernel/random/uuid").ok().map(|u| u.trim().to_string())).flatten();
     let session = attach.clone().or_else(|| resume.clone()).or_else(|| new_id.clone());
     let mut relay = Relay {
-        data, tab, session, attached: attach.is_some(), master: -1, child: 0, running: false, started: Instant::now(),
+        data, tab, session, attached: attach.is_some(), master: -1, child: 0, running: false, started: Instant::now(), started_at: std::time::SystemTime::now(), hooked: false, typed_at: None,
         screen: vt100::Parser::new(40, 120, 0), titles: Titles::default(), title: String::new(),
         leave_at: None, closing: false, map_from, resumed_at: None,
     };
@@ -703,3 +728,18 @@ fn main() {
     relay.finish();
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn one_text_a_turn_the_persons_first_then_oldest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        for (n, t) in [("20", r#"{"text":"b","other":true}"#), ("10", r#"{"text":"a","other":true}"#), ("30", r#"{"text":"answer"}"#)] { fs::write(dir.path().join(format!("{n}.json")), t).unwrap(); }
+        let order: Vec<String> = inbox(dir.path()).into_iter().map(|(_, v)| v.unwrap()["text"].as_str().unwrap().to_string()).collect();
+        assert_eq!(order, ["answer", "a", "b"]);
+        let st = |s: &str, at: i64| serde_json::json!({"state": s, "at": at});
+        assert!(turn_pending(100, &st("done", 50), 200), "its hook has not come");
+        assert!(!turn_pending(100, &st("working", 150), 200) && !turn_pending(100, &st("done", 180), 200), "its turn began, or is over");
+        assert!(!turn_pending(100, &st("done", 50), 20_000), "no turn came of it");
+    }
+}

@@ -87,7 +87,7 @@ fn keyring_open(d: &Data) -> Res<()> {
     let mut said = false;
     let open = wb_core::secret::ensure_open(std::time::Duration::from_secs(180), || { said = true; wb_core::status::say(d, wb_core::i18n::t("keyring-waiting"), 180) });
     // Over, either way: the line does not go on asking.
-    if said { wb_core::status::say(d, "", 0); }
+    if said { wb_core::status::unsay(d, wb_core::i18n::t("keyring-waiting")); }
     // Where Whaybench asks the password itself, the Projects panel does: an agent's command says so.
     open.map_err(|e| if [wb_core::secret::LOCKED, wb_core::secret::NOT_MADE].contains(&e.as_str()) { format!("{e}: its password is asked in the Projects panel, at New project or at Log in of an encrypted project; tell the person, then run this again") } else { e })
 }

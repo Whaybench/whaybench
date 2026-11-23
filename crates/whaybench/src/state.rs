@@ -624,7 +624,11 @@ impl App {
     pub fn person_chose(&mut self, pid: u64) {
         let Some(tab) = self.surface.get(pid).and_then(|p| self.terms.get(&p.tab().id)).cloned() else { return };
         self.brought.remove(&tab);
-        if let Some((front, Some(s))) = &self.focused_term && *front == tab { wb_core::sessions::set_focus(&self.data, s, wb_core::i18n::t("input")); }
+        match &self.focused_term {
+            Some((front, Some(s))) if *front == tab => wb_core::sessions::set_focus(&self.data, s, wb_core::i18n::t("input")),
+            Some((front, None)) if *front == tab => wb_core::sessions::set_focus_empty(&self.data, wb_core::i18n::t("input"), false),
+            _ => {}
+        }
     }
 
     /// Closes a conversation tab the way its close button does.
@@ -675,7 +679,7 @@ impl App {
         if self.focused_term.as_ref() != Some(&pair) {
             match &pair.1 {
                 Some(s) => wb_core::sessions::set_focus_by(&self.data, s, wb_core::i18n::t("input"), self.brought.contains(&pair.0)),
-                None => wb_core::sessions::set_focus_empty(&self.data, wb_core::i18n::t("input")),
+                None => wb_core::sessions::set_focus_empty(&self.data, wb_core::i18n::t("input"), self.brought.contains(&pair.0)),
             }
             self.focused_term = Some(pair);
         }

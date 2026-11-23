@@ -160,6 +160,7 @@ mod tests {
         assert_eq!(draft_goes_to(Some("a"), Some("b"), true), s("a"), "an agent brought b to the front");
         assert_eq!(draft_goes_to(Some("a"), Some("b"), false), s("b"), "the person chose b");
         assert_eq!(draft_goes_to(None, Some("b"), true), s("b"), "begun with no conversation in front");
-        assert_eq!(draft_goes_to(Some("a"), None, false), None);
+        assert_eq!(draft_goes_to(Some("a"), None, true), s("a"), "an agent opened a tab with no session yet");
+        assert_eq!(draft_goes_to(Some("a"), None, false), None, "the person did");
     }
 }

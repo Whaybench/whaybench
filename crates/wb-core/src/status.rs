@@ -15,6 +15,12 @@ pub fn say(d: &Data, text: &str, seconds: u64) {
     let _ = write(&status_file(d), json!({"text": text, "until": now_ms() + seconds as u128 * 1000}).to_string());
 }
 
+/// Takes a message away before its time, if it is still the one there.
+pub fn unsay(d: &Data, text: &str) {
+    let there = fs::read(status_file(d)).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+    if there.is_some_and(|v| v["text"] == text) { let _ = fs::remove_file(status_file(d)); }
+}
+
 /// The message to show now, if any: the newest of the host's and the open projects' (each says in its own root).
 pub fn current(d: &Data) -> Option<String> {
     crate::roots::all_of(d).iter().filter_map(|r| {

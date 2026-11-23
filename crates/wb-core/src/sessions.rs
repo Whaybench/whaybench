@@ -482,10 +482,15 @@ fn latest_id(d: &Data) -> Option<String> {
 
 /// A conversation tab without a session yet is in front (an agent whose hooks have not told it): the panels show
 /// nothing rather than the session seen before, which would pass for this tab's.
-pub fn set_focus_empty(d: &Data, who: &str) {
-    if read_json(&focus_file(d)).is_some_and(|v| v["sessionId"].is_null()) { return; }
+pub fn set_focus_empty(d: &Data, who: &str, agent: bool) {
+    let v = if agent { serde_json::json!({"sessionId": null, "agent": true}) } else { serde_json::json!({"sessionId": null}) };
+    if let Some(was) = read_json(&focus_file(d)).filter(|v| v["sessionId"].is_null()) {
+        // The person chooses what an agent had brought.
+        if !agent && was["agent"] == true { let _ = write_atomic(&focus_file(d), v.to_string()); }
+        return;
+    }
     record::decide("session", "session chosen", "a tab without a session in front", &[("session", String::new()), ("by", who.to_string())]);
-    let _ = write_atomic(&focus_file(d), serde_json::json!({"sessionId": null}).to_string());
+    let _ = write_atomic(&focus_file(d), v.to_string());
 }
 
 /// Whether the tab in front has no session yet (set_focus_empty).
@@ -627,7 +632,7 @@ mod tests {
         let d = data("empty-focus");
         fs::write(latest_map(&d), r#"{"sessionId":"older"}"#).unwrap();
         assert_eq!(target(&d).as_deref(), Some("older"), "nothing chosen: the map that changed last");
-        set_focus_empty(&d, "test");
+        set_focus_empty(&d, "test", false);
         assert!(target(&d).is_none() && focus(&d).is_none(), "not the session seen before");
         set_focus(&d, "s1", "test");
         assert_eq!(target(&d).as_deref(), Some("s1"));
