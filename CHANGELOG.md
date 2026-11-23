@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-24
+
 ### Added
 - Documentation in `docs/`: install, a first conversation, seven guides (window, sessions, conversation map, view and
   files, projects, Briefsafe, agents and add-ons), command and settings reference, security, troubleshooting and
