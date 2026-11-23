@@ -30,6 +30,9 @@ names another step.
   - The keyring: a locked one is waited for at its own window; on Windows (gnome-keyring) Whaybench asks the password
     itself, makes the keyring the first time and can make a new one when the password is lost
     (`whaybench-project unlock-keyring`).
+  - A project's conversations talk to each other: `whaybench ctl session list`, `type` and `wait` work in its
+    container, the other commands say so. Input and requests reach a project's Claude Code while it waits (it counted as
+    stopped after 30 seconds). The time of day in a project is the computer's.
   - Conversation map → Reflect in project puts a node in a logged-in project: the request goes to the project's
     running conversation, which writes it there. Reflect in project → New project is gone.
   - Encryption keeps the project's data (documents, map, history, memory, conversations) with gocryptfs under a key in

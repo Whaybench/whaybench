@@ -185,7 +185,10 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
                 record::warn("request", "agent's request not delivered", "a project's agent may type only plain text in its own project's conversations", &[("session", if wb_core::map::safe_id(to).is_ok() { to.to_string() } else { "?".into() }), ("project", pid.to_string())]);
                 continue;
             }
-            from = wb_core::roots::stubs(data).into_iter().find(|s| s.id == pid).map_or_else(|| pid.to_string(), |s| format!("project {}", s.name));
+            // A tab of this project may be named (its conversation is said, and the person taken back to it); else the project.
+            if sessions::tab_project(data, &from).as_deref() != Some(pid) {
+                from = wb_core::roots::stubs(data).into_iter().find(|s| s.id == pid).map_or_else(|| pid.to_string(), |s| format!("project {}", s.name));
+            }
         }
         let from = from.as_str();
         match deliver(data, to, text, Some(from), true) {
@@ -210,7 +213,17 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
     // project's own folder (the host delivers what it leaves in ask/); the rest needs the host's Whaybench.
     let in_project = wb_core::roots::is_project_root(data);
     let here = matches!(words.first().map(String::as_str), Some("type" | "wait"));
-    if !(in_project && here) && !running(data) { return Err(format!("not running with data directory {}", data.root.display())); }
+    if in_project && words.first().map(String::as_str) == Some("list") {
+        for r in sessions::all(data).iter().filter(|r| r["movedTo"].as_str().unwrap_or("").is_empty()) {
+            let id = r["id"].as_str().unwrap_or("");
+            println!("{id} · {} · {} · {}", wb_core::agents::name_of(&data.root, r["agent"].as_str()), if sessions::alive(data, id) { "running" } else { "not running" }, sessions::session_name(data, id));
+        }
+        return Ok(());
+    }
+    if in_project && !here {
+        return Err("in a Briefsafe project only these work: `whaybench ctl session list` (the project's conversations), `session type ID \"TEXT\"`, `session wait ID [SECONDS]`".into());
+    }
+    if !in_project && !running(data) { return Err(format!("not running with data directory {}", data.root.display())); }
     match words.first().map(String::as_str) {
         Some("new") => {
             // `--project ID`: a new conversation in that Briefsafe project (it must be open; the tab refuses otherwise).
@@ -256,7 +269,14 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             let id = words.get(1).ok_or("session type needs an id")?;
             let text = words.get(2).ok_or("session type needs text")?;
             let from = std::env::var("WHAYBENCH_TAB").ok();
-            // From a project's conversation: always through ask/ (the host checks it is this project's own).
+            // From a project's conversation: always through ask/ (the host checks it is this project's own). One that
+            // cannot take it is said now, not left to a wait for an answer.
+            if in_project {
+                let now = sessions::current_id(data, id);
+                if wb_core::roots::known_session(data, &now).is_none() { return Err(format!("{id} is not a conversation of this project (`whaybench ctl session list`)")); }
+                if !sessions::alive(data, &now) { return Err(format!("{id} is not running: its tab is closed, the person opens it in the Projects panel")); }
+                from_other(text, "this project").map_err(|e| e.to_string())?;
+            }
             let tried = if in_project { Err(Refused::Write(String::new())) } else { deliver(data, id, text, from.as_deref(), false) };
             match tried {
                 // An agent in a sandbox (Codex) may not write other tabs' input: it leaves a request in ask/, which

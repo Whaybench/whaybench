@@ -368,15 +368,16 @@ impl Relay {
                 self.session = Some(found);
                 self.save_tab();
             }
-        if wb_core::agents::other() {
-            if self.running
-                && let Some(s) = &self.session {
-                    // In the session's own root: a project's conversation is the project's.
-                    let at = wb_core::roots::for_session(&self.data, s);
-                    let _ = paths::create_dir_all(&sessions::alive_dir(&at));
-                    let _ = paths::write_atomic(&sessions::alive_dir(&at).join(s), self.child.to_string());
-                }
-        } else {
+        // That it runs: an add-on agent's, and a project's Claude Code (in its container, so not in the list the host
+        // asks Claude Code for). A project's tab writes it in the project, whose record may not be there yet.
+        let project = sessions::tab_project(&self.data, &self.tab).and_then(|id| wb_core::roots::stubs(&self.data).into_iter().find(|s| s.id == id)).map(|s| s.root());
+        if (wb_core::agents::other() || project.is_some()) && self.running
+            && let Some(s) = &self.session {
+                let at = project.unwrap_or_else(|| wb_core::roots::for_session(&self.data, s));
+                let _ = paths::create_dir_all(&sessions::alive_dir(&at));
+                let _ = paths::write_atomic(&sessions::alive_dir(&at).join(s), self.child.to_string());
+            }
+        if !wb_core::agents::other() {
             self.resumed_somewhere();
             self.follow_move();
         }

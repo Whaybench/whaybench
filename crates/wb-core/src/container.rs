@@ -71,7 +71,8 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
     let path = |p: &Path| p.to_string_lossy().to_string();
     let data = path(&s.open_at);
     // No capabilities and no gaining of privileges: the agents work as the person, in their project.
-    let mut a: Vec<String> = ["run", "-d", "--init", "--name", &name(s), "--userns=keep-id", "--security-opt", "label=disable",
+    // The time of day is the computer's (a container's is UTC).
+    let mut a: Vec<String> = ["run", "-d", "--init", "--name", &name(s), "--userns=keep-id", "--security-opt", "label=disable", "--tz=local",
         "--cap-drop=ALL", "--security-opt=no-new-privileges"].map(String::from).to_vec();
     // A vault (a FUSE mount) opens inside a folder of the person's own, bound in its place over `cache/open`: the
     // container's runtime cannot look at the FUSE mount itself, and `rslave` shows the vault opened there. Read-only:
