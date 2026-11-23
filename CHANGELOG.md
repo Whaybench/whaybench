@@ -59,6 +59,12 @@ names another step.
   that closes is said in the status line, and another conversation's text waits while a Codex question waits for the
   person.
 
+### Fixed
+- A map style from elsewhere chosen with a node menu item of another style is confirmed first, as one chosen in the style
+  menu is: before, its instructions went to the session unread.
+- Windows: `install.ps1` runs only the `setup-wsl.sh` that came with it; one fetched from the network was run as root
+  unchecked (WhaybenchSetup.exe brings its own and was not affected). `WhaybenchSetup.exe` is signed with minisign too.
+
 ## [0.9.0] - 2026-11-21
 
 ### Added

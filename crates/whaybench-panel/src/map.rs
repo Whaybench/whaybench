@@ -882,7 +882,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         f
     };
     show_style(&stack, &web, &panel, &d, scope.as_ref(), &on_web);
-    let win2 = win.clone();
+    let (win2, win3) = (win.clone(), win.clone());
     every(1000, move || {
         // From the menu bar and the project panel; a branch panel takes none.
         if branch_root(scope.as_ref()).is_none() {
@@ -939,7 +939,14 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         if INDENT.with(Cell::get) != unit { INDENT.with(|c| c.set(unit)); draw(&list, &panel, &d, scope.as_ref()); }
         // The style may have changed from a menu, or its folder may be gone.
         let now = mapstyles::current(&d, panel_key(scope.as_ref()));
-        if panel.borrow().style != now {
+        // Chosen without its instructions confirmed (a node menu item): back to the one before until they are.
+        let unread = mapstyles::find(&d, &now).filter(|x| panel.borrow().style != now && !mapstyles::allowed(&d, x));
+        if let Some(style) = unread {
+            let key = panel_key(scope.as_ref()).to_string();
+            mapstyles::set_current(&d, &key, &panel.borrow().style);
+            let (d2, id) = (d.clone(), now.clone());
+            confirm_style(&win3, &d, style, move || mapstyles::set_current(&d2, &key, &id));
+        } else if panel.borrow().style != now {
             { let mut p = panel.borrow_mut(); p.style = now.clone(); p.page.clear(); }
             change.set_label(&mapstyles::find(&d, &now).map_or(wb_core::i18n::t("change").to_string(), |x| wb_core::i18n::f("change-2", &[("a1", (cut(&x.name, 8)).to_string())])));
             show_style(&stack, &web, &panel, &d, scope.as_ref(), &on_web);

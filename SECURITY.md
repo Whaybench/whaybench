@@ -15,12 +15,17 @@ Only the latest release gets fixes. Whaybench downloads a new release by itself 
 
 ## Checking a release
 
-Every release is signed with minisign. The public key:
+The files of every release are signed with minisign (`WhaybenchSetup.exe` from the release after 0.9.0 on). The
+public key:
 
     RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia
 
-`install.sh` and the built-in updater check the package against this key; with `minisign` installed, check a
-downloaded package yourself:
+- The built-in updater checks `install.sh` and the package against this key, always.
+- `install.sh` checks the package against it when `minisign` is installed; without it, only the checksum, and it says
+  so. Run straight from the network (`curl ... | sh`), `install.sh` itself is not checked.
+- On Windows, the setup inside WSL installs `minisign` and checks `install.sh` before it runs it.
+
+With `minisign` installed, check a downloaded file yourself (its `.minisig` beside it):
 
     minisign -Vm whaybench-x86_64-linux.tar.gz -P RWTwDOf9rBKzxEepAVlbLTan2g/RQFDuCZeqmU4Q+dNwf+wF+3a2Sfia
 
