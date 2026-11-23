@@ -73,7 +73,7 @@ fn token(words: &[String]) -> Result<(), String> {
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut t).map_err(|e| e.to_string())?;
             // A token has no spaces; one copied off the terminal can carry some (line wraps, the TUI's drawing).
             let t: String = t.split_whitespace().collect();
-            if t.is_empty() { return Err("give the token from `claude setup-token` on standard input".into()); }
+            if !secret::claude_token_shaped(&t) { return Err("give the token from `claude setup-token` (sk-ant-…) on standard input".into()); }
             secret::set(CLAUDE_TOKEN, secret::CLAUDE_TOKEN_LABEL, &t)?;
             println!("stored");
         }

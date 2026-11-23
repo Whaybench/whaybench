@@ -8,6 +8,11 @@ pub const CLAUDE_TOKEN: &str = "claude-token";
 /// How the keyring's own tools name it.
 pub const CLAUDE_TOKEN_LABEL: &str = "Whaybench: Claude Code token for project containers";
 
+/// Whether text looks like a token from `claude setup-token`: `sk-ant-`, then only letters, digits, `-` and `_`.
+pub fn claude_token_shaped(t: &str) -> bool {
+    t.len() > 20 && t.starts_with("sk-ant-") && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 const LIMIT: Duration = Duration::from_secs(15);
 
 fn attributes(name: &str) -> HashMap<&str, &str> { HashMap::from([("application", "whaybench"), ("secret", name)]) }
