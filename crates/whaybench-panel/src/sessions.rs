@@ -124,7 +124,7 @@ fn describe(d: &Data, info: &Value, asking: &std::collections::BTreeSet<String>)
     (title, parts.join(" · "))
 }
 
-/// `only`: one Briefsafe project's conversations alone, as the Projects panel lists them ("" lists none).
+/// `only`: one Briefsafe project's conversations alone, as the project panel lists them ("" lists none).
 struct View { query: String, show_hidden: bool, signature: String, first: Option<String>, only: Option<String> }
 
 fn row(title: &str, sub: &str, note: Option<&str>, faded: bool) -> gtk::ListBoxRow {

@@ -159,21 +159,20 @@ pub fn terminal_command(open: &TermOpen, data: &paths::Data) -> Result<(String, 
 }
 
 /// The tab's agent, as variables for the relay and all it starts: the one asked for, else the agent of the session it
-/// opens or takes its map from, else Claude Code. An add-on's settings folder is made ready here.
+/// opens or takes its map from, else Claude Code. An add-on's settings folder is made by the relay, once the person has
+/// confirmed the add-on.
 fn agent_env(open: &TermOpen, data: &paths::Data) -> Result<String, String> {
     let of_session = || [&open.attach, &open.resume, &open.map_from].into_iter().flatten()
         .find_map(|s| wb_core::sessions::record_of(data, s)?.get("agent")?.as_str().map(String::from));
     let id = open.agent.clone().or_else(of_session).unwrap_or_else(|| wb_core::agents::CLAUDE.into());
     if id == wb_core::agents::CLAUDE { return Ok(format!("{}={id}", wb_core::agents::ENV_AGENT)); }
-    let agent = wb_core::agents::load(&data.root, &id).map_err(|e| e.to_string())?;
-    // This process runs for days and updates replace its file: the hooks must name the path, not the old file.
-    let exe = paths::own_exe().map_err(|e| e.to_string())?;
-    let mut env = format!("{}={id}", wb_core::agents::ENV_AGENT);
-    if let Some((var, folder)) = agent.prepare(&data.root, &exe).map_err(|e| e.to_string())? {
-        env += &format!(" {var}={}", wb_core::agents::shell_quote(&folder).map_err(|e| e.to_string())?);
-    }
-    if let Some(command) = &agent.trust { wb_core::status::say(data, &wb_core::i18n::f("agent-hooks", &[("name", agent.name.clone()), ("command", command.clone())]), 8); }
-    Ok(env)
+    wb_core::agents::load(&data.root, &id).map_err(|e| e.to_string())?;
+    Ok(format!("{}={id}", wb_core::agents::ENV_AGENT))
+}
+
+/// A command for the log: a viewer's terminal without what it shows (a project's file names are its content).
+fn without_shown(command: &str) -> &str {
+    if command.contains(&format!("--class {} ", wb_core::view::TERM_APP)) { command.split(" -e ").next().unwrap_or("") } else { command }
 }
 
 /// An app that belongs in a panel: it gets our socket, the data directory and the run.
@@ -350,7 +349,7 @@ fn start_app(command: &str, socket: &OsStr, data: &paths::Data, run: &str) -> Op
         Ok(c) => {
             // A command naming a project's open place carries its file names: only the program is logged.
             let open = data.cache().join("open");
-            let logged = if command.contains(&*open.to_string_lossy()) { command.split_whitespace().next().unwrap_or("").to_string() } else { command.to_string() };
+            let logged = if command.contains(&*open.to_string_lossy()) { command.split_whitespace().next().unwrap_or("") } else { without_shown(command) }.to_string();
             record::decide("screen", "app started", "a requested app", &[("command", logged), ("process", c.id().to_string())]);
             Some(c)
         }
@@ -413,6 +412,13 @@ mod agent_tests {
     use super::*;
 
     #[test]
+    fn a_viewers_terminal_is_logged_without_what_it_shows() {
+        let viewer = format!("exec alacritty --class {} --config-file '/c' -e 'podman' 'exec' '-it' 'up' 'less' '+G' '/tmp/client.log'", wb_core::view::TERM_APP);
+        assert_eq!(without_shown(&viewer), format!("exec alacritty --class {} --config-file '/c'", wb_core::view::TERM_APP));
+        for other in ["firefox --new-tab 'https://a.example'", "exec alacritty --class whaybench-term-1 --config-file '/c' -e '/w' --tab 1"] { assert_eq!(without_shown(other), other); }
+    }
+
+    #[test]
     fn a_tab_runs_the_agent_asked_for_else_its_sessions_else_claude_code() {
         let dir = tempfile::tempdir().unwrap();
         let data = paths::Data::new(dir.path().to_path_buf());
@@ -423,11 +429,9 @@ mod agent_tests {
         let env = |open: TermOpen| agent_env(&open, &data).unwrap();
         assert_eq!(env(TermOpen::default()), "WHAYBENCH_AGENT=claude");
         assert_eq!(env(TermOpen { resume: Some("cl".into()), ..Default::default() }), "WHAYBENCH_AGENT=claude");
-        let codex = env(TermOpen { resume: Some("cx".into()), ..Default::default() });
-        assert!(codex.starts_with("WHAYBENCH_AGENT=codex CODEX_HOME="), "{codex}");
-        assert!(env(TermOpen { agent: Some("codex".into()), ..Default::default() }).starts_with("WHAYBENCH_AGENT=codex "));
-        let hooks = std::fs::read_to_string(dir.path().join("codex/hooks.json")).unwrap();
-        assert!(!hooks.contains("(deleted)"), "the hooks name the program's path");
+        assert_eq!(env(TermOpen { resume: Some("cx".into()), ..Default::default() }), "WHAYBENCH_AGENT=codex");
+        assert_eq!(env(TermOpen { agent: Some("codex".into()), ..Default::default() }), "WHAYBENCH_AGENT=codex");
+        assert!(!dir.path().join("codex").exists(), "nothing is written before the person confirms the add-on");
         // Claude Code asked for, on a Codex session's map: Claude Code.
         assert_eq!(env(TermOpen { map_from: Some("cx".into()), agent: Some("claude".into()), ..Default::default() }), "WHAYBENCH_AGENT=claude");
         std::fs::remove_dir_all(dir.path().join("addons/agents/codex")).unwrap();

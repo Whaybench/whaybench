@@ -70,6 +70,22 @@ fn resolve_target(target: &str) -> Result<String, String> {
     if Path::new(&a).exists() { Ok(a) } else { Err(wb_core::i18n::f("file-not-found", &[("a", (a).to_string())])) }
 }
 
+/// A project's temporary files are its container's own: the view, outside it, is shown a copy in the project's data.
+/// What a terminal shows is read where it is.
+fn in_reach(d: &Data, who: Option<&str>, target: String) -> Result<String, String> {
+    let p = &view::local_path(&target);
+    let temporary = p.starts_with("/tmp") || p.starts_with(std::env::temp_dir());
+    if !wb_core::roots::is_project_root(d) || !p.is_file() { return Ok(target); }
+    // By its path: a file address is a page's.
+    if view::system_viewer(p).is_some() { return Ok(p.to_string_lossy().to_string()); }
+    if !temporary || p.starts_with(&d.root) { return Ok(target); }
+    let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0);
+    let dir = d.root.join("show").join(who.unwrap_or("shared")).join("views").join(ns.to_string());
+    let copy = dir.join(p.file_name().unwrap_or_default());
+    std::fs::create_dir_all(&dir).and_then(|_| std::fs::copy(p, &copy)).map_err(|e| format!("{target}: {e}"))?;
+    Ok(copy.to_string_lossy().to_string())
+}
+
 fn flag(args: &[String], name: &str) -> bool { args.iter().any(|a| a == name) }
 
 fn link_text(l: &Link) -> String {
@@ -108,7 +124,7 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
                 let f = dir.join(format!("{}.html", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_millis()).unwrap_or(0)));
                 std::fs::write(&f, html).map_err(|e| e.to_string())?;
                 f.to_string_lossy().to_string()
-            } else { resolve_target(target)? };
+            } else { in_reach(d, who.as_deref(), resolve_target(target)?)? };
             // A web address opens in the browser tab, where the person's sign-ins are; the view keeps pages and files.
             if firefox || what.starts_with("http://") || what.starts_with("https://") {
                 if wb_core::roots::is_project_root(d) { return Err(wb_core::i18n::t("briefsafe-view-host-only").into()); }
@@ -176,10 +192,10 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
             if v.get("page").is_none() { return Err(wb_core::i18n::t("no-pdf-in-firefox-for-the").into()); }
             println!("{}", wb_core::i18n::f("page-2", &[("url", (url).to_string()), ("a1", (v["page"].as_str().unwrap_or("?")).to_string()), ("a2", (v["pages"].as_str().unwrap_or("?")).to_string())]));
             if args.iter().any(|a| a == "--text") {
-                let path = url.strip_prefix("file://").unwrap_or("").split('#').next().unwrap_or("").to_string();
+                if !url.starts_with("file://") { return Err(wb_core::i18n::t("not-a-pdf-opened-from-a").into()); }
                 let page = v["page"].as_str().unwrap_or("1").to_string();
-                if path.is_empty() { return Err(wb_core::i18n::t("not-a-pdf-opened-from-a").into()); }
-                let o = Command::new("pdftotext").args(["-f", &page, "-l", &page, "-layout", &path, "-"]).output().map_err(|e| e.to_string())?;
+                let o = Command::new("pdftotext").args(["-f", &page, "-l", &page, "-layout"]).arg(view::local_path(url)).arg("-").output().map_err(|e| format!("pdftotext: {e}"))?;
+                if !o.status.success() { return Err(format!("pdftotext: {}", String::from_utf8_lossy(&o.stderr).trim())); }
                 print!("{}", String::from_utf8_lossy(&o.stdout));
             }
             Ok(())
@@ -203,4 +219,30 @@ fn main() {
     paths::private_files();
     let Some(root) = paths::resolve(None, |k| std::env::var(k).ok()) else { eprintln!("error: no data directory"); std::process::exit(1) };
     if let Err(e) = run(std::env::args().skip(1).collect(), &Data::new(root)) { eprintln!("{e}"); std::process::exit(1); }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_projects_temporary_file_is_shown_from_a_copy_in_its_data_and_a_hosts_where_it_is() {
+        let dir = std::env::temp_dir().join(format!("wb-reach-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (page, log) = (dir.join("a b.html"), dir.join("build.log"));
+        std::fs::write(&page, "<p>x").unwrap();
+        std::fs::write(&log, "line").unwrap();
+        let (project, host) = (Data::new(dir.join("data/cache/open/up")), Data::new(dir.join("data")));
+        let of = |d: &Data, t: &str| in_reach(d, Some("s1"), t.to_string()).unwrap();
+        let at = page.to_string_lossy().to_string();
+        for target in [at.clone(), format!("file://{}", at.replace(' ', "%20"))] {
+            let copy = of(&project, &target);
+            assert!(copy.starts_with(&*project.root.to_string_lossy()) && copy.ends_with("/a b.html"), "{copy}");
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), "<p>x");
+            assert_eq!(of(&project, &copy), copy, "its own data: where it is");
+        }
+        for same in [log.to_string_lossy().to_string(), "https://a.example/x.html".into(), "/usr/bin".into()] { assert_eq!(of(&project, &same), same); }
+        assert_eq!(of(&project, &format!("file://{}", log.display())), log.to_string_lossy());
+        assert_eq!(of(&host, &at), at);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

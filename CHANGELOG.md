@@ -7,6 +7,34 @@ names another step.
 
 ## [Unreleased]
 
+### Fixed
+- A picture taken while a project is open that cannot be removed when its time is up is tried again, and the status line
+  says so; one whose removal cannot be noted is removed at once. Before, one failure left it for good.
+- In a git worktree or a submodule a project's `.whaybench` is kept out of commits too, and in the repositories around
+  its folder; for a project made before, when it is opened.
+- Requests to a project's tab (a map reflection, an input) wait in memory until they are typed in, not as plain text in
+  the host's data folder; what a tab that crashed left waiting is removed at the next start.
+- Windows: the setup installs `psmisc` (`fuser`), which restoring a snapshot needs; without it the error names it.
+- `whaybench-view where --text` reads a PDF whose path has spaces or letters of other scripts, and says when it could
+  not be read.
+- An empty tab of an add-on agent (Codex) comes back as that agent's after a restart, not as Claude Code's.
+- The check before a project is encrypted looks for `gocryptfs-xray` too, so making one does not fail halfway.
+- A node deleted before the one above it comes back by its own restore, also after the one above was deleted alone.
+- What a terminal in the view shows is not in the log.
+- End session on a conversation of another terminal says that it works there and leaves it in the list; before, it was
+  only hidden and said to be ended.
+- Opening a conversation of another terminal says only what is so: it works there and takes no input here.
+- An agent add-on's settings folder is made once the person has confirmed the add-on, not before: a refusal leaves nothing.
+- In a Briefsafe project `whaybench-view open` shows logs, archives and binaries: their terminal opens, with the viewer
+  running in the project's container; a file of the container's `/tmp` is shown too. Both were only said to be asked for.
+- In a Briefsafe project a Markdown or text file of its data is drawn as such in the view, not as an HTML page.
+- A node's state (or another field) the person set is not overwritten by an agent that has not been told of it yet: that
+  field stays and the agent is told so. A node the person deleted is not brought back by an agent.
+- The map's Delete counts what is under a node in the whole memory, as the notifications panel does, and Delete node alone
+  deletes only that node: before, one with nothing under it on this map took along what another session's map had there.
+- SECURITY.md says what Whaybench does and does not do, without the stronger claim about its settings and browser data.
+- `install.sh --rollback` goes back only to a version whose files are all there, unchanged, and whose program runs.
+
 ## [0.9.2] - 2026-11-23
 
 ### Changed

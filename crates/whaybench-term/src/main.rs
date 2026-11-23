@@ -181,6 +181,8 @@ impl Relay {
             // the command line already, the map itself is told at the start instead.
             if carry_prompt.is_none() { env.push(("WHAYBENCH_MAP_PROMPT".into(), wb_core::i18n::ai("map-carry-prompt").into())); }
         }
+        // An add-on agent's own settings folder, made here: the person has confirmed the add-on by now.
+        if let (Some(a), None) = (&agent, &project) { env.extend(addon_home(&self.data, a)?); }
         // A Briefsafe project's conversation runs in the project's container (spec 3.22), with its data folder and
         // the Claude Code token from the keyring; every value goes through podman's own environment.
         if let Some(s) = &project {
@@ -561,6 +563,8 @@ impl Relay {
 
     fn finish(&mut self) {
         let of_project = sessions::tab_project(&self.data, &self.tab);
+        // Found by the tab's project, which is forgotten below.
+        let waiting = sessions::tab_inbox(&self.data, &self.tab);
         if self.running {
             unsafe { libc::kill(self.child, libc::SIGHUP); }
             // In a project's container the agent is not the child's own: it is ended there.
@@ -574,12 +578,12 @@ impl Relay {
         let _ = fs::remove_file(sessions::tab_file(&self.data, &self.tab));
         sessions::set_tab_project(&self.data, &self.tab, None);
         // No request finds the tab any more. What was still to be typed in is not: told to what asked, and to the person.
-        let left: Vec<serde_json::Value> = inbox(&sessions::tab_inbox(&self.data, &self.tab)).into_iter().filter_map(|(_, v)| v).collect();
+        let left: Vec<serde_json::Value> = inbox(&waiting).into_iter().filter_map(|(_, v)| v).collect();
         for v in &left { sessions::asked::note_request(&self.data, v, false); }
         if left.iter().any(|v| !v["text"].as_str().unwrap_or("").starts_with('/')) {
             wb_core::status::say(&self.data, wb_core::i18n::t("request-lost-with-tab"), 12);
         }
-        let _ = fs::remove_dir_all(sessions::tab_inbox(&self.data, &self.tab));
+        let _ = fs::remove_dir_all(waiting);
     }
 }
 
@@ -596,6 +600,13 @@ fn inbox(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Option<serde_json::V
 /// it (10 seconds).
 fn turn_pending(at: i64, state: &serde_json::Value, now: i64) -> bool {
     state["state"] == "done" && state["at"].as_i64().unwrap_or(0) <= at && (0..10_000).contains(&(now - at))
+}
+
+/// An add-on agent's settings folder on the host, made ready, and the variable that names it. Its hooks name the
+/// program's path (this process can outlive an update of its file).
+fn addon_home(data: &Data, agent: &wb_core::agents::Agent) -> Result<Option<(String, String)>, String> {
+    let exe = paths::own_exe().map_err(|e| e.to_string())?.with_file_name("whaybench");
+    Ok(agent.prepare(&data.root, &exe).map_err(|e| e.to_string())?.map(|(var, folder)| (var, folder.to_string_lossy().to_string())))
 }
 
 fn stop_copy(old: &str) {
@@ -711,11 +722,13 @@ fn main() {
         _ => new_id.map(|id| vec!["--session-id".into(), id]).unwrap_or_default(),
     };
     // An add-on agent runs a program as the person: one not as the program brings it is shown and asked first.
-    if let Some(agent) = wb_core::agents::active().and_then(|id| wb_core::agents::load(&relay.data.root, &id).ok())
-        && !agent.trusted(&relay.data.root) && !confirm_agent(&relay.data, &agent) {
+    if let Some(agent) = wb_core::agents::active().and_then(|id| wb_core::agents::load(&relay.data.root, &id).ok()) {
+        if !agent.trusted(&relay.data.root) && !confirm_agent(&relay.data, &agent) {
             record::decide("session", "agent not started", "the person did not confirm the add-on", &[("agent", agent.id.clone())]);
             std::process::exit(0);
         }
+        if let Some(command) = &agent.trust { wb_core::status::say(&relay.data, &wb_core::i18n::f("agent-hooks", &[("name", agent.name.clone()), ("command", command.clone())]), 8); }
+    }
     if let Err(e) = relay.start(&argv) {
         record::error("session", "program not started", &[("error", e.clone())]);
         // The tab closes with the program: the reason stays in the status bar (an agent not installed, for one).
@@ -731,6 +744,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_add_on_agents_folder_has_hooks_that_name_the_program() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = Data::new(dir.path().to_path_buf());
+        wb_core::addons::install_bundled(&data);
+        let (var, folder) = addon_home(&data, &wb_core::agents::load(&data.root, "codex").unwrap()).unwrap().unwrap();
+        assert_eq!((var.as_str(), folder), ("CODEX_HOME", dir.path().join("codex").to_string_lossy().to_string()));
+        let hooks = fs::read_to_string(dir.path().join("codex/hooks.json")).unwrap();
+        assert!(hooks.contains("/whaybench' hook codex") && !hooks.contains("(deleted)"), "{hooks}");
+    }
+
     #[test]
     fn one_text_a_turn_the_persons_first_then_oldest_first() {
         let dir = tempfile::tempdir().unwrap();

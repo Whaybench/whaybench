@@ -287,7 +287,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             if in_project {
                 let now = sessions::current_id(data, id);
                 if wb_core::roots::known_session(data, &now).is_none() { return Err(format!("{id} is not a conversation of this project (`whaybench ctl session list`)")); }
-                if !sessions::alive(data, &now) { return Err(format!("{id} is not running: its tab is closed, the person opens it in the Projects panel")); }
+                if !sessions::alive(data, &now) { return Err(format!("{id} is not running: its tab is closed, the person opens it in the project panel")); }
                 from_other(text, "this project").map_err(|e| e.to_string())?;
                 // What the host would not type: said here, where the agent sees it.
                 if text.chars().any(|c| c.is_control() && c != '\n' && c != '\t') { return Err("the text has control characters (colour codes, carriage returns): send plain text".into()); }
@@ -361,6 +361,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             // A background session is stopped, one the tab runs gets /exit; then the tab goes.
             let id = &sessions::current_id(data, words.get(1).ok_or("session end needs an id")?);
             let tab = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(id.as_str()));
+            if tab.is_none() && elsewhere(data, id) { return Err(wb_core::i18n::t("working-in-another-terminal").into()); }
             if sessions::background(id) {
                 sessions::stop(id);
             } else if let Some(t) = &tab {
@@ -380,6 +381,9 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
         _ => Err("session needs new, show, type or end".into()),
     }
 }
+
+/// Whether a session no tab shows works in a terminal that is not Whaybench's: there it cannot be ended from here.
+fn elsewhere(data: &Data, id: &str) -> bool { !sessions::background(id) && sessions::alive(data, id) }
 
 /// A session chosen: its tab, or attached in a new one, or started again in one.
 pub fn show_session(data: &Data, id: &str) -> Result<(), String> {
@@ -402,7 +406,7 @@ fn open_session_of(data: &Data, id: &str, project: Option<String>) -> Result<(),
     }
     match sessions::agent(id) {
         Some(a) if a.get("kind").and_then(|k| k.as_str()) == Some("interactive") => {
-            Err(wb_core::i18n::t("running-in-another-terminal-type-bg").into())
+            Err(wb_core::i18n::t("working-in-another-terminal-no-input").into())
         }
         Some(_) => post(data, &Request::OpenTerm { open: TermOpen { attach: Some(id.to_string()), project, by_agent: by_agent(), ..Default::default() } }),
         None => {
@@ -424,6 +428,9 @@ struct Reattach {
     /// The Briefsafe project of each tab, in the same order (none for the host's).
     #[serde(default)]
     projects: Vec<Option<String>>,
+    /// The add-on agent of each tab, in the same order (none for Claude Code).
+    #[serde(default)]
+    agents: Vec<Option<String>>,
 }
 
 fn now_secs() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -435,8 +442,9 @@ pub fn remember_tabs(data: &Data) {
     let mut open = sessions::open_tabs(data);
     open.sort_by(|a, b| a.tab.cmp(&b.tab));
     let projects = open.iter().map(|t| sessions::tab_project(data, &t.tab)).collect();
+    let agents = open.iter().map(|t| t.agent.clone()).collect();
     let tabs = open.into_iter().map(|t| t.session.filter(|s| sessions::has_conversation(data, s))).collect();
-    let text = serde_json::to_string(&Reattach { at: now_secs(), tabs, projects }).unwrap_or_default();
+    let text = serde_json::to_string(&Reattach { at: now_secs(), tabs, projects, agents }).unwrap_or_default();
     let _ = write_atomic(&data.cache().join("reattach.json"), text.as_bytes());
 }
 
@@ -446,8 +454,9 @@ pub fn open_first_tabs(data: &Data) {
     let saved = fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Reattach>(&t).ok());
     let _ = fs::remove_file(&file);
     let at = saved.as_ref().map_or(0, |s| s.at);
-    let (tabs, mut projects) = saved.map(|r| (r.tabs, r.projects)).unwrap_or_default();
+    let (tabs, mut projects, mut agents) = saved.map(|r| (r.tabs, r.projects, r.agents)).unwrap_or_default();
     projects.resize(tabs.len(), None);
+    agents.resize(tabs.len(), None);
     if tabs.is_empty() {
         let _ = post(data, &Request::OpenTerm { open: TermOpen::default() });
         return;
@@ -465,7 +474,7 @@ pub fn open_first_tabs(data: &Data) {
             if tabs.iter().flatten().all(ready) { break; }
             std::thread::sleep(Duration::from_millis(300));
         }
-        for (i, (s, project)) in tabs.into_iter().zip(projects).enumerate() {
+        for (i, ((s, project), agent)) in tabs.into_iter().zip(projects).zip(agents).enumerate() {
             // One at a time, or the terminals race and the tabs come back in another order.
             if i > 0 { std::thread::sleep(Duration::from_millis(800)); }
             // A tab without a conversation comes back as what it was: an empty tab.
@@ -475,7 +484,7 @@ pub fn open_first_tabs(data: &Data) {
                 continue;
             }
             let Some(s) = s else {
-                let _ = post(&data, &Request::OpenTerm { open: TermOpen { project, ..Default::default() } });
+                let _ = post(&data, &Request::OpenTerm { open: TermOpen { project, agent, ..Default::default() } });
                 continue;
             };
             let now = sessions::locate(&data, &s);
@@ -538,6 +547,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
     fs::create_dir_all(ask_dir(data))?;
     // A request left by an earlier run is not for this one.
     for f in fs::read_dir(&dir)?.flatten() { let _ = fs::remove_file(f.path()); }
+    sessions::drop_dead_inboxes(data);
     crate::awake::start(data.clone());
     // The Windows start script could not attach the work disk (3.20): ~/work is on the distribution's own disk now.
     if std::env::var("WHAYBENCH_WORK_DISK").as_deref() == Ok("missing") { wb_core::status::say(data, wb_core::i18n::t("work-disk-missing"), 30); }
@@ -608,6 +618,44 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
 #[cfg(test)]
 mod tests {
     #[test]
+    fn an_empty_tabs_agent_is_remembered_and_a_note_from_before_still_reads() {
+        let data = Data::new(std::env::temp_dir().join(format!("wb-reattach-{}", std::process::id())));
+        for (tab, agent) in [("t1", serde_json::Value::Null), ("t2", "codex".into())] {
+            write_atomic(&sessions::tab_file(&data, tab), serde_json::json!({"tab": tab, "pid": std::process::id(), "agent": agent}).to_string().as_bytes()).unwrap();
+        }
+        remember_tabs(&data);
+        let read = |text: &str| serde_json::from_str::<Reattach>(text).unwrap();
+        let r = read(&fs::read_to_string(data.cache().join("reattach.json")).unwrap());
+        assert_eq!((r.tabs, r.agents), (vec![None, None], vec![None, Some("codex".to_string())]));
+        assert!(read(r#"{"at":1,"tabs":[null]}"#).agents.is_empty());
+        // And at the next start asked for as that agent's tab (`at` long past: nothing is waited for).
+        fs::create_dir_all(data.ctl()).unwrap();
+        fs::write(data.cache().join("reattach.json"), r#"{"at":1,"tabs":[null],"agents":["codex"]}"#).unwrap();
+        open_first_tabs(&data);
+        let asked = || fs::read_dir(data.ctl()).unwrap().flatten().find_map(|f| serde_json::from_slice::<Request>(&fs::read(f.path()).ok()?).ok());
+        let end = Instant::now() + Duration::from_secs(10);
+        while asked().is_none() && Instant::now() < end { std::thread::sleep(Duration::from_millis(20)); }
+        assert!(matches!(asked(), Some(Request::OpenTerm { open }) if open.agent.as_deref() == Some("codex")));
+        let _ = fs::remove_dir_all(&data.root);
+    }
+
+    #[test]
+    fn a_session_of_another_terminal_is_not_taken_for_ended() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = Data::new(dir.path().to_path_buf());
+        let (file, beat) = (sessions::sessions_dir(&data).join("s-else.json"), sessions::alive_dir(&data).join("s-else"));
+        write_atomic(&file, br#"{"id":"s-else"}"#).unwrap();
+        write_atomic(&beat, b"1").unwrap();
+        write_instance(&data, "run", "").unwrap();
+        let end = || session_command(&data, &["end".to_string(), "s-else".to_string()]);
+        assert_eq!(end(), Err(wb_core::i18n::t("working-in-another-terminal").to_string()));
+        assert!(!fs::read_to_string(&file).unwrap().contains("ended"), "it stays in the list");
+        write_atomic(&beat, b"0").unwrap();
+        assert_eq!(end(), Ok(()));
+        assert!(fs::read_to_string(&file).unwrap().contains("ended"), "stopped: hidden as before");
+    }
+
+    #[test]
     fn another_conversations_text_says_where_it_is_from_and_runs_no_command() {
         let t = super::from_other("does read work?", "Claude Code a3cf3125").unwrap();
         assert!(t.starts_with("[From the Claude Code a3cf3125 conversation") && t.ends_with("does read work?"), "{t}");
@@ -661,8 +709,10 @@ mod tests {
         // A record the agent wrote to steer text to the host's conversation.
         rec(&stub.root(), "p2", serde_json::json!({"movedTo": "s-host"}));
         sessions::write_tab(&data, "t-host", Some("s-host"), false);
-        sessions::write_tab(&data, "t-p", Some("p1"), false);
-        sessions::set_tab_project(&data, "t-p", Some("up"));
+        // Its own name: a project tab's requests wait in the runtime folder, the same for every data folder.
+        let tab_p = format!("test-p{}", std::process::id());
+        sessions::write_tab(&data, &tab_p, Some("p1"), false);
+        sessions::set_tab_project(&data, &tab_p, Some("up"));
         let ask = |n: &str, to: &str, text: &str| write_atomic(&ask_dir(&stub.root()).join(n), serde_json::json!({"to": to, "text": text, "from": "t-host"}).to_string().as_bytes()).unwrap();
         ask("1.json", "s-host", "to the host");
         ask("2.json", "p2", "through a forged move");
@@ -670,7 +720,7 @@ mod tests {
         ask("4.json", "p1", "hi");
         deliver_asked(&data);
         assert!(fs::read_dir(sessions::tab_inbox(&data, "t-host")).map(|d| d.count()).unwrap_or(0) == 0, "nothing reaches the host's tab");
-        let typed: Vec<String> = fs::read_dir(sessions::tab_inbox(&data, "t-p")).unwrap().flatten()
+        let typed: Vec<String> = fs::read_dir(sessions::tab_inbox(&data, &tab_p)).unwrap().flatten()
             .map(|f| serde_json::from_slice::<serde_json::Value>(&fs::read(f.path()).unwrap()).unwrap()["text"].as_str().unwrap().to_string()).collect();
         assert_eq!(typed.len(), 1, "{typed:?}");
         assert!(typed[0].contains("project Up") && typed[0].ends_with("hi"), "the sender is the project: {}", typed[0]);
@@ -679,6 +729,7 @@ mod tests {
         assert_eq!(read(&data, "p1", "t-other").map(|r| r.1), Some(Became::Refused), "not plain text");
         assert_eq!(read(&data, "p1", "t-host").map(|r| r.1), Some(Became::Left));
         assert!(!data.cache().join("asked").exists());
+        let _ = fs::remove_dir_all(sessions::tab_inbox(&data, &tab_p));
     }
 
     #[test]

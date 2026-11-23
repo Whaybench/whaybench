@@ -499,6 +499,14 @@ pub fn login_args(s: &Stub, agent: &crate::agents::Agent) -> Result<Vec<String>,
     Ok(a)
 }
 
+/// podman's arguments for a viewer (`less` on a log) in the project's container, on the terminal that runs podman.
+pub fn view_args(s: &Stub, argv: &[String]) -> Vec<String> {
+    let mut a: Vec<String> = ["exec", "-it", "--detach-keys=", "-e", "TERM"].map(String::from).into();
+    a.push(name(s));
+    a.extend(argv.iter().cloned());
+    a
+}
+
 /// Runs `work` with the project's container paused, if it runs (a snapshot of one moment).
 pub fn paused<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let podman = |what: &str| Command::new("podman").args([what, &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|x| x.success());

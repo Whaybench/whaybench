@@ -465,7 +465,11 @@ pub fn open_in_view(d: &Data, name: &str, target: &str, page: Option<u32>) -> st
 
 fn open_to(d: &Data, to: &str, target: &str, page: Option<u32>) -> std::io::Result<()> {
     if !is_web(target)
-        && let Some(argv) = system_viewer(Path::new(target)) { return terminal(d, &argv); }
+        && let Some(argv) = system_viewer(Path::new(target)) {
+            // A project's programs open no window: the view opens the terminal and runs this where they run.
+            if crate::roots::is_project_root(d) { return ask(d, to, &json!({"do": "terminal", "argv": argv})); }
+            return terminal(d, &argv);
+        }
     ask(d, to, &json!({"do": "show", "path": target, "page": page}))
 }
 
@@ -609,6 +613,20 @@ mod tests {
         for n in 0..60 { h.push(&format!("https://{n}.example"), "x"); }
         assert_eq!(h.items.len(), HISTORY_KEEP);
         let _ = std::fs::remove_dir_all(&d.root);
+    }
+
+    #[test]
+    fn a_projects_log_is_asked_of_the_view_not_of_a_window_nobody_opens() {
+        let host = scratch("req-term");
+        let d = Data::new(host.root.join("cache/open/up"));
+        let log = host.root.join("build.log");
+        std::fs::create_dir_all(&host.root).unwrap();
+        std::fs::write(&log, "line").unwrap();
+        open_for_session(&d, "A", &log.to_string_lossy(), None).unwrap();
+        let asked: Vec<Value> = std::fs::read_dir(requests_dir(&d, &for_session("A"))).unwrap().flatten().map(|f| serde_json::from_slice(&std::fs::read(f.path()).unwrap()).unwrap()).collect();
+        assert_eq!(asked, vec![json!({"do": "terminal", "argv": ["less", "+G", log.to_string_lossy()]})]);
+        assert!(!d.ctl().exists(), "nothing left where nobody reads");
+        let _ = std::fs::remove_dir_all(&host.root);
     }
 
     #[test]

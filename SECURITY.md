@@ -31,6 +31,10 @@ With `minisign` installed, check one of these files yourself (its `.minisig` bes
 
 ## What Whaybench trusts
 
-The agents in its tabs (Claude Code, Codex) run as you, with your files. Whaybench keeps its own data private (files
-600, folders 700), keeps agents out of its settings and the view panel's browser data, asks before an agent add-on
-runs for the first time, and marks text that one conversation sends to another.
+Whaybench runs on your computer within the boundary of your user account, and so do the agents in its tabs. Each agent
+follows its own permission settings; Whaybench starts Codex in its `workspace-write` sandbox.
+
+Whaybench keeps its data readable by your account only, asks before an agent add-on that did not come with it, or was
+changed, first runs, and marks text that one conversation sends to another.
+
+Pages are shown by WebKitGTK and Firefox. Whaybench does not check pages, files or links for harmful content.

@@ -72,7 +72,7 @@ fn flag(rest: &mut Vec<String>, name: &str) -> bool {
     had
 }
 
-const NOT_FROM_HERE: &str = "a project is not made from this session (it runs in a project or in a sandbox that may not write outside its folders): tell the person to make it with New project in the Projects panel";
+const NOT_FROM_HERE: &str = "a project is not made from this session (it runs in a project or in a sandbox that may not write outside its folders): tell the person to make it with New project in the project panel";
 
 /// A sandboxed session (Codex) may not write where a project is made: said so before anything is tried.
 fn writable(d: &Data) -> Res<()> {
@@ -88,8 +88,8 @@ fn keyring_open(d: &Data) -> Res<()> {
     let open = wb_core::secret::ensure_open(std::time::Duration::from_secs(180), || { said = true; wb_core::status::say(d, wb_core::i18n::t("keyring-waiting"), 180) });
     // Over, either way: the line does not go on asking.
     if said { wb_core::status::unsay(d, wb_core::i18n::t("keyring-waiting")); }
-    // Where Whaybench asks the password itself, the Projects panel does: an agent's command says so.
-    open.map_err(|e| if [wb_core::secret::LOCKED, wb_core::secret::NOT_MADE].contains(&e.as_str()) { format!("{e}: its password is asked in the Projects panel, at New project or at Log in of an encrypted project; tell the person, then run this again") } else { e })
+    // Where Whaybench asks the password itself, the project panel does: an agent's command says so.
+    open.map_err(|e| if [wb_core::secret::LOCKED, wb_core::secret::NOT_MADE].contains(&e.as_str()) { format!("{e}: its password is asked in the project panel, at New project or at Log in of an encrypted project; tell the person, then run this again") } else { e })
 }
 
 fn calling_session() -> String {
@@ -261,6 +261,8 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
                 return Err(e.to_string());
             }
             wb_core::container::tidy(&st2, isolated);
+            // A project from before this reached a worktree, or made a repository since. Not done: it opens all the same.
+            if let Err(e) = wb_store::projects::exclude_from_git(&st2.folder) { eprintln!("not kept out of git: {e}"); }
             Ok(())
             })();
             // Not opened: nothing of it is left open (a link from an earlier open whose container died, the vault).

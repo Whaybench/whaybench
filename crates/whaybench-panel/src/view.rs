@@ -175,7 +175,12 @@ fn lasting(v: &V, path: &str, own: bool) -> Option<String> {
         let path = path.strip_prefix("file://").unwrap_or(path);
         let real = std::fs::canonicalize(path).ok()?;
         if !in_project(&s, path) { wb_core::log::warn("view", "request refused", "a project's view asked for a path outside the project", &[("project", s.id.clone())]); return None; }
-        if real.starts_with(std::fs::canonicalize(s.stored().root).ok()?) { return keep_picture(v, &s.open_at.join(real.strip_prefix(std::fs::canonicalize(s.stored().root).ok()?).ok()?)).or(Some(path.to_string())); }
+        if let Ok(rel) = real.strip_prefix(std::fs::canonicalize(s.stored().root).ok()?) {
+            // Only a page is kept as one; a text or a picture is shown from where it is.
+            let low = path.to_lowercase();
+            let page = low.ends_with(".html") || low.ends_with(".htm");
+            return page.then(|| keep_picture(v, &s.open_at.join(rel))).flatten().or(Some(path.to_string()));
+        }
         return Some(real.to_string_lossy().to_string());
     }
     if view::is_web(path) || !p.is_file() || !(p.starts_with("/tmp") || p.starts_with(std::env::temp_dir())) { return Some(path.to_string()); }
@@ -271,6 +276,7 @@ fn incoming(v: &mut V) -> bool {
         }
     }
     for r in view::take_requests(&v.d, &view::for_session(&session)) {
+        if r["do"] == "terminal" { viewer(v, &r); continue; }
         if let Some(p) = r.get("path").and_then(Value::as_str) {
             let Some(kept) = lasting(v, p, false) else { continue };
             v.hist.push(&kept, &title_for(p));
@@ -279,6 +285,20 @@ fn incoming(v: &mut V) -> bool {
         }
     }
     came
+}
+
+/// A project session's file that a terminal shows (a log, an archive): the terminal is opened here, the program in it
+/// runs where the project's programs run and see the file.
+fn viewer(v: &V, request: &Value) {
+    let Some(s) = project_followed(v) else { return };
+    let Some(argv) = viewer_argv(&s, wb_core::container::opened_isolated(&s), request) else { return };
+    if let Err(e) = view::terminal(&v.d, &argv) { record::warn("view", "terminal not opened", &e.to_string(), &[("project", s.id.clone())]); }
+}
+
+fn viewer_argv(s: &wb_core::roots::Stub, isolated: bool, request: &Value) -> Option<Vec<String>> {
+    let argv: Vec<String> = request["argv"].as_array()?.iter().filter_map(|a| a.as_str().map(String::from)).collect();
+    if argv.is_empty() { return None; }
+    Some(if isolated { std::iter::once("podman".to_string()).chain(wb_core::container::view_args(s, &argv)).collect() } else { argv })
 }
 
 /// Another session, or another link: its own history, and what it made while another was on screen comes in now.
@@ -564,4 +584,17 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
         });
     }
     glib::timeout_add_local(std::time::Duration::from_millis(500), move || { tick(&s); glib::ControlFlow::Continue });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_projects_viewer_runs_in_its_container_where_it_has_one() {
+        let s = wb_core::roots::Stub::new(&Data::new("/d".into()), "up", "Up", Path::new("/w/up"));
+        let r = json!({"do": "terminal", "argv": ["less", "+G", "/tmp/a b.log"]});
+        assert_eq!(viewer_argv(&s, false, &r).unwrap(), ["less", "+G", "/tmp/a b.log"]);
+        assert_eq!(viewer_argv(&s, true, &r).unwrap(), ["podman", "exec", "-it", "--detach-keys=", "-e", "TERM", &wb_core::container::name(&s), "less", "+G", "/tmp/a b.log"]);
+        assert!(viewer_argv(&s, true, &json!({"argv": []})).is_none() && viewer_argv(&s, true, &json!({})).is_none());
+    }
 }

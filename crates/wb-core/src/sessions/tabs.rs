@@ -35,10 +35,31 @@ pub fn queue_prompt(d: &Data, id: &str, text: &str) -> bool {
 
 /// A tab's own record of what it shows, for the program and the other tabs.
 pub fn tab_file(d: &Data, tab: &str) -> PathBuf { tabs_dir(d).join(format!("{tab}.json")) }
-pub fn tab_inbox(d: &Data, tab: &str) -> PathBuf { tabs_dir(d).join(format!("{tab}.in")) }
+
+/// Where the requests to a tab wait. A project's are its content: in memory, not in the host's data folder (spec 3.22).
+/// Without a runtime folder (no vault opens there either) they wait where the host's do.
+pub fn tab_inbox(d: &Data, tab: &str) -> PathBuf {
+    let runtime = crate::vault::runtime_dir();
+    let of_project = tab_project(d, tab).is_some() && runtime.parent().is_some_and(Path::is_dir);
+    if of_project { runtime.join("tabs") } else { tabs_dir(d) }.join(format!("{tab}.in"))
+}
+
+/// At start: what still waits for a tab that ended without its own clean-up is not for anyone.
+pub fn drop_dead_inboxes(d: &Data) {
+    let open: Vec<String> = open_tabs(d).into_iter().map(|t| t.tab).collect();
+    for f in crate::paths::list_dir(&tabs_dir(d)) {
+        let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let Some(tab) = name.strip_suffix(".in").or_else(|| name.strip_suffix(".project")) else { continue };
+        if open.iter().any(|o| o == tab) { continue; }
+        // Both places: a project's waited in the host's data folder before.
+        for inbox in [tab_inbox(d, tab), tabs_dir(d).join(format!("{tab}.in"))] { let _ = fs::remove_dir_all(inbox); }
+        set_tab_project(d, tab, None);
+    }
+}
 
 pub fn write_tab(d: &Data, tab: &str, session: Option<&str>, attached: bool) {
-    let v = serde_json::json!({"tab": tab, "pid": std::process::id(), "session": session, "attached": attached});
+    // The agent the tab runs, for a tab that has no conversation to tell it by.
+    let v = serde_json::json!({"tab": tab, "pid": std::process::id(), "session": session, "attached": attached, "agent": crate::agents::active()});
     let _ = write_atomic(&tab_file(d, tab), v.to_string());
 }
 
@@ -57,7 +78,9 @@ pub fn set_tab_project(d: &Data, tab: &str, project: Option<&str>) -> bool {
 
 pub fn tab_project(d: &Data, tab: &str) -> Option<String> { fs::read_to_string(tab_project_file(d, tab)).ok().filter(|p| !p.is_empty()) }
 
-pub struct OpenTab { pub tab: String, pub session: Option<String>, pub attached: bool }
+pub struct OpenTab { pub tab: String, pub session: Option<String>, pub attached: bool,
+    /// Its add-on agent; none is Claude Code.
+    pub agent: Option<String> }
 
 /// Tabs whose relay still runs.
 pub fn open_tabs(d: &Data) -> Vec<OpenTab> {
@@ -71,6 +94,7 @@ pub fn open_tabs(d: &Data) -> Vec<OpenTab> {
             tab: v.get("tab").and_then(Value::as_str).unwrap_or_default().to_string(),
             session: v.get("session").and_then(Value::as_str).map(String::from),
             attached: v.get("attached").and_then(Value::as_bool).unwrap_or(false),
+            agent: v.get("agent").and_then(Value::as_str).map(String::from),
         });
     }
     out
@@ -111,6 +135,32 @@ mod tests {
         assert!(!d.cache().join("inbox/codex1.json").exists());
     }
     #[test]
+    fn a_projects_requests_wait_outside_the_hosts_data_and_go_with_a_dead_tab() {
+        let d = data("project-inbox");
+        // Its own name: the runtime folder is the same for every data folder.
+        let tab = format!("test{}", std::process::id());
+        rec(&d, "p1", serde_json::json!({"id":"p1"}));
+        fs::create_dir_all(alive_dir(&d)).unwrap();
+        fs::write(alive_dir(&d).join("p1"), "1").unwrap();
+        set_tab_project(&d, &tab, Some("up"));
+        write_tab(&d, &tab, Some("p1"), false);
+        assert!(queue_prompt(&d, "p1", "the project's words"));
+        let inbox = tab_inbox(&d, &tab);
+        assert_eq!(fs::read_dir(&inbox).unwrap().count(), 1);
+        if crate::vault::runtime_dir().parent().unwrap().is_dir() {
+            assert!(!inbox.starts_with(&d.root), "not in the host's data");
+            assert!(!tabs_dir(&d).join(format!("{tab}.in")).exists());
+        }
+        drop_dead_inboxes(&d);
+        assert!(inbox.exists(), "its tab runs");
+        // Left in the host's data by a version from before, and the tab dead.
+        let old = tabs_dir(&d).join(format!("{tab}.in"));
+        fs::create_dir_all(&old).unwrap();
+        fs::write(tab_file(&d, &tab), format!(r#"{{"tab":"{tab}","pid":999999999,"session":"p1"}}"#)).unwrap();
+        drop_dead_inboxes(&d);
+        assert!(!inbox.exists() && !old.exists() && tab_project(&d, &tab).is_none());
+    }
+    #[test]
     fn request_kinds() {
         assert_eq!(request_kind("[map update] text"), "map update");
         assert_eq!(request_kind("/exit now"), "command /exit");
@@ -125,5 +175,8 @@ mod tests {
         assert_eq!(open.len(), 1);
         assert_eq!((open[0].tab.as_str(), open[0].session.as_deref(), open[0].attached), ("t1", Some("s1"), true));
         assert!(!tab_file(&d, "t2").exists());
+        assert!(open[0].agent.is_none(), "Claude Code");
+        fs::write(tab_file(&d, "t1"), serde_json::json!({"tab": "t1", "pid": std::process::id(), "agent": "codex"}).to_string()).unwrap();
+        assert_eq!(open_tabs(&d)[0].agent.as_deref(), Some("codex"), "an empty tab's agent");
     }
 }

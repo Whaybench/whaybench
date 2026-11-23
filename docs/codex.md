@@ -12,7 +12,7 @@ Other tabs are Claude Code, and nothing on that path changes.
 
 | Part | What it does | Where |
 |---|---|---|
-| Opening a Codex tab | Prepares `<data>/codex` as Codex's folder (`CODEX_HOME`) as `agent.json` says and passes `WHAYBENCH_AGENT=codex` to everything the tab starts | `agent_env` in `crates/whaybench/src/start.rs`, `prepare` in `crates/wb-core/src/agents.rs`, `addons/agents/codex/` |
+| Opening a Codex tab | Prepares `<data>/codex` as Codex's folder (`CODEX_HOME`) as `agent.json` says and passes `WHAYBENCH_AGENT=codex` to everything the tab starts | `agent_env` in `crates/whaybench/src/start.rs`, `start` in `crates/whaybench-term/src/main.rs`, `prepare` in `crates/wb-core/src/agents.rs`, `addons/agents/codex/` |
 | Terminal relay | Starts the add-on's `command` and `args` (`codex --no-daemon --sandbox workspace-write`) instead of Claude Code; a session comes back with its `resume` (`codex resume ID`) | `Relay::start` in `crates/whaybench-term/src/main.rs`, `args` in `crates/wb-core/src/agents.rs` |
 | `whaybench hook codex` | Receives Codex's eight hooks (SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, Interrupt, SessionEnd). The same handler serves Claude Code's events (`whaybench hook claude`): the session record, state and heartbeat; at the start (and after a compaction) the map guidance, the view panel note and the whole memory list; on each prompt the memory changes and the files the person changed; after `apply_patch` the files it changed, as file records and memory events; at the end of a turn its count and answer | `crates/wb-core/src/hook.rs` |
 | `whaybench record SESSION\|- touch\|state\|alive\|off\|answer\|moved\|carry-from\|task` | Session record, state, heartbeat and answers, and tasks a program runs for the session where no hook sees them (`-`: the session of the agent the command runs under). Only these functions write those files, whatever the agent | `crates/wb-core/src/session_record.rs`, `task` in `crates/wb-core/src/hook.rs` |
@@ -70,7 +70,7 @@ Codex runs with `--sandbox workspace-write`. Five folders of the data folder are
 (`sandbox_workspace_write.writable_roots`): `view` and `show` for `whaybench-view`, `projects` for `whaybench-project`,
 `node-files` for `whaybench-files`, `ask` for `whaybench ctl session type` (Whaybench checks and delivers what is
 asked). A new project is made outside them (its folder, its key): Codex says to make it with New project in the
-Projects panel. Only these: with the whole data folder Codex could change its own settings or its
+project panel. Only these: with the whole data folder Codex could change its own settings or its
 add-on and undo the sandbox, or type into other tabs. Codex has no status line: when a turn ends, the hook reads the last `token_count` line of Codex's
 session file for the context and the 5-hour and weekly windows. The notifications panel shows Codex's windows for Codex
 sessions and Claude Code's for Claude Code sessions.

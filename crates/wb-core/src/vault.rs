@@ -18,9 +18,13 @@ pub fn key_name(s: &Stub) -> String { format!("vault-{}-{}", s.id, s.made) }
 pub fn run_dir(s: &Stub) -> PathBuf {
     // The person's runtime folder by their user number, not by a variable each program may have or not (it would
     // put the vault somewhere else, or in /tmp where another user could be first): the same for every program.
+    runtime_dir().join(format!("{}-{}", s.id, s.made))
+}
+
+/// Whaybench's folder in the person's runtime folder: in memory, private to the person, gone with the sign-in.
+pub fn runtime_dir() -> PathBuf {
     // Safety: getuid has no preconditions.
-    let uid = unsafe { libc::getuid() };
-    PathBuf::from(format!("/run/user/{uid}/whaybench")).join(format!("{}-{}", s.id, s.made))
+    PathBuf::from(format!("/run/user/{}/whaybench", unsafe { libc::getuid() }))
 }
 
 /// Where the vault is open: the project's data root then.
@@ -71,8 +75,7 @@ pub fn create(s: &Stub) -> Result<String, String> {
 /// view shows it whatever it follows, keeps it out of its lists and never reads it out to a tool.
 pub fn is_recovery_page(path: &str) -> bool {
     let p = Path::new(path.strip_prefix("file://").unwrap_or(path));
-    // Safety: getuid has no preconditions.
-    let base = PathBuf::from(format!("/run/user/{}/whaybench", unsafe { libc::getuid() }));
+    let base = runtime_dir();
     p.parent() == Some(base.as_path()) && p.file_name().is_some_and(|n| { let n = n.to_string_lossy(); n.starts_with("recovery-") && n.ends_with(".md") })
 }
 
@@ -115,6 +118,8 @@ pub fn missing() -> Option<String> {
     if !crate::container::podman_found() { return need("vault-needs-podman"); }
     if crate::container::host_image().is_none() { return need("vault-needs-image"); }
     if !runs("gocryptfs", "-version") { return need("vault-needs-gocryptfs"); }
+    // Only whether it is there: what it takes to ask its version differs between releases. The recovery key is read with it.
+    if Command::new("gocryptfs-xray").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_err() { return need("vault-needs-gocryptfs-xray"); }
     if !runs("fusermount3", "-V") { return need("vault-needs-fuse"); }
     match crate::secret::state() { crate::secret::State::Absent(e) => Some(crate::i18n::f("vault-needs-keyring", &[("why", e)])), _ => None }
 }

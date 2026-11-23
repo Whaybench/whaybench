@@ -1,5 +1,5 @@
 //! Projects: create, find by folder, and the tree of projects.
-use std::{collections::HashSet, fs, path::Path};
+use std::{collections::HashSet, fs, path::{Path, PathBuf}};
 
 use serde_json::{Value, json};
 
@@ -218,21 +218,41 @@ impl Store {
     }
 }
 
-/// Tests of the project store.
+/// Where a repository's `info/exclude` is. In a worktree or a submodule `.git` is a file naming a folder, and a
+/// worktree's folder names the one it shares with the others (`commondir`). None: not a repository git would open.
+fn git_dir(top: &Path) -> Option<PathBuf> {
+    let git = top.join(".git");
+    if git.is_dir() { return Some(git); }
+    let dir = top.join(fs::read_to_string(git).ok()?.strip_prefix("gitdir:")?.trim());
+    if !dir.join("HEAD").is_file() { return None; }
+    Some(match fs::read_to_string(dir.join("commondir")) { Ok(shared) => dir.join(shared.trim()), Err(_) => dir })
+}
+
 /// The project's data stays out of a git repository in its folder: `.whaybench/` in `.git/info/exclude`, so a
 /// commit of everything does not take it along. The repository's own files are not changed.
-fn exclude_from_git(dir: &Path) -> Res<()> {
-    // The repository the folder is in: its own, or one around it.
-    let Some(top) = dir.ancestors().find(|a| a.join(".git").is_dir()) else { return Ok(()) };
-    let git = top.join(".git");
+pub fn exclude_from_git(dir: &Path) -> Res<()> {
+    // The repository the folder is in, its own or one around it. Those further out too, where it can be done: they take
+    // in what the nearest does not cover (a project's snapshots are beside its folder).
+    let mut nearest = true;
+    for (top, git) in dir.ancestors().filter(|a| a.join(".git").exists()).filter_map(|a| Some((a, git_dir(a)?))) {
+        let done = exclude_in(top, &git, dir);
+        if nearest { done?; }
+        nearest = false;
+    }
+    Ok(())
+}
+
+fn exclude_in(top: &Path, git: &Path, dir: &Path) -> Res<()> {
     let file = git.join("info/exclude");
     // Missing is empty; one that cannot be read is not overwritten as if it were.
     let now = match fs::read_to_string(&file) { Ok(t) => t, Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(), Err(e) => return Err(format!("{}: {e}", file.display())) };
-    let rel = dir.strip_prefix(top).map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
+    // Names as they are, not as patterns.
+    let plain = |p: &Path| { let mut out = String::new(); for c in p.to_string_lossy().chars() { if "\\*?[".contains(c) { out.push('\\'); } out.push(c); } out };
+    let rel = dir.strip_prefix(top).map(plain).unwrap_or_default();
     let mut lines = vec![if rel.is_empty() { format!("/{}/", wb_core::roots::PROJECT_DATA) } else { format!("/{rel}/{}/", wb_core::roots::PROJECT_DATA) }];
     // In a repository around the folder its snapshots are inside too, each with a copy of the data.
     if !rel.is_empty() {
-        let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let name = dir.file_name().map(|n| plain(Path::new(n))).unwrap_or_default();
         let parent = Path::new(&rel).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
         lines.push(if parent.is_empty() { format!("/.{name}.snapshots/") } else { format!("/{parent}/.{name}.snapshots/") });
     }
@@ -266,6 +286,42 @@ mod tests {
         let p = st.set_folder("t", "/w/t", true).unwrap();
         assert_eq!((s(&p, "kind"), s(&p, "folder"), p["subvolume"].as_bool()), ("briefsafe", "/w/t", Some(true)));
         assert_eq!(st.get_project("t").unwrap(), p);
+    }
+
+    #[test]
+    fn a_projects_data_is_excluded_from_git_in_a_worktree_and_a_submodule_too() {
+        let t = std::env::temp_dir().join(format!("wb-exclude-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&t);
+        let put = |p: &str, text: &str| { let p = t.join(p); fs::create_dir_all(p.parent().unwrap()).unwrap(); fs::write(p, text).unwrap(); };
+        let exclude = |p: &str| fs::read_to_string(t.join(p)).unwrap_or_default();
+        // A repository around them all: what is in a worktree is that one's, not this one's.
+        fs::create_dir_all(t.join(".git")).unwrap();
+        put("main/.git/worktrees/w/HEAD", "ref: refs/heads/w\n");
+        put("main/.git/worktrees/w/commondir", "../..\n");
+        put("w/.git", &format!("gitdir: {}\n", t.join("main/.git/worktrees/w").display()));
+        fs::create_dir_all(t.join("w/up")).unwrap();
+        exclude_from_git(&t.join("w")).unwrap();
+        exclude_from_git(&t.join("w/up")).unwrap();
+        exclude_from_git(&t.join("w")).unwrap();
+        assert_eq!(exclude("main/.git/info/exclude"), "/.whaybench/\n/up/.whaybench/\n/.up.snapshots/\n");
+        put("main/.git/modules/s/HEAD", "ref: refs/heads/main\n");
+        put("main/s/.git", "gitdir: ../.git/modules/s\n");
+        exclude_from_git(&t.join("main/s")).unwrap();
+        assert_eq!(exclude("main/.git/modules/s/info/exclude"), "/.whaybench/\n");
+        // The repository around them has them out as well (a submodule's snapshots are its).
+        assert_eq!(exclude(".git/info/exclude"), "/w/.whaybench/\n/.w.snapshots/\n/w/up/.whaybench/\n/w/.up.snapshots/\n/main/s/.whaybench/\n/main/.s.snapshots/\n");
+        // A `.git` file that names no repository (a submodule copied elsewhere): git takes it for the one around it.
+        put("gone/.git", "gitdir: ../nonexistent\n");
+        exclude_from_git(&t.join("gone")).unwrap();
+        assert!(exclude(".git/info/exclude").ends_with("/gone/.whaybench/\n/.gone.snapshots/\n"));
+        // A name with letters git reads as a pattern: as git itself sees it.
+        let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(t.join("real")).args(args).output().unwrap();
+        fs::create_dir_all(t.join("real")).unwrap();
+        assert!(git(&["init", "-q"]).status.success());
+        put("real/a[1]*/.whaybench/f", "x");
+        exclude_from_git(&t.join("real/a[1]*")).unwrap();
+        assert!(git(&["check-ignore", "-q", "a[1]*/.whaybench/f"]).status.success());
+        let _ = fs::remove_dir_all(&t);
     }
 
     #[test]

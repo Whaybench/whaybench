@@ -32,32 +32,53 @@ fn stamp(path: &std::path::Path) -> Option<(u64, i64)> {
     std::fs::symlink_metadata(path).ok().filter(|m| m.is_file()).map(|m| (m.len(), m.mtime_nsec() + m.mtime() * 1_000_000_000))
 }
 
-/// Notes a picture to be removed after PROJECT_SHOT_KEEP.
-fn note_expiring(d: &wb_core::paths::Data, out: &std::path::Path) {
-    let Some((len, mtime)) = stamp(out) else { return };
-    let mut list: Vec<serde_json::Value> = wb_core::paths::read_kept(&expiring_file(d));
-    list.push(serde_json::json!({"path": out, "until": wb_core::clock::now_ms() + PROJECT_SHOT_KEEP.as_millis() as i64, "len": len, "mtime": mtime}));
-    let _ = wb_core::paths::write_atomic(&expiring_file(d), serde_json::Value::Array(list).to_string());
-    record::decide("screen", "picture to be removed", "taken while a Briefsafe project was open", &[("in", format!("{}s", PROJECT_SHOT_KEEP.as_secs()))]);
+/// Notes a picture to be removed after PROJECT_SHOT_KEEP. One that cannot be noted would stay for good: it goes at once.
+fn note_expiring(d: &wb_core::paths::Data, out: &std::path::Path) -> Result<(), String> {
+    let noted = try_note(d, out);
+    if noted.is_err() { let _ = std::fs::remove_file(out); }
+    noted
 }
 
-/// Removes the pictures whose time is up (also after a restart: the list is a file). One changed since is left.
+fn try_note(d: &wb_core::paths::Data, out: &std::path::Path) -> Result<(), String> {
+    let (len, mtime) = stamp(out).ok_or("the picture cannot be noted for its removal")?;
+    let mut list: Vec<serde_json::Value> = wb_core::paths::read_kept(&expiring_file(d));
+    list.push(serde_json::json!({"path": out, "until": wb_core::clock::now_ms() + PROJECT_SHOT_KEEP.as_millis() as i64, "len": len, "mtime": mtime}));
+    wb_core::paths::write_atomic(&expiring_file(d), serde_json::Value::Array(list).to_string()).map_err(|e| format!("the picture cannot be noted for its removal: {e}"))?;
+    record::decide("screen", "picture to be removed", "taken while a Briefsafe project was open", &[("in", format!("{}s", PROJECT_SHOT_KEEP.as_secs()))]);
+    Ok(())
+}
+
+/// Removes the pictures whose time is up (also after a restart: the list is a file). One changed since is left; one
+/// that could not be removed stays on the list for the next time.
 pub fn sweep_expiring(d: &wb_core::paths::Data) {
     let file = expiring_file(d);
     let list: Vec<serde_json::Value> = wb_core::paths::read_kept(&file);
     if list.is_empty() { return; }
     let now = wb_core::clock::now_ms();
-    let (due, keep): (Vec<_>, Vec<_>) = list.into_iter().partition(|e| e["until"].as_i64().unwrap_or(0) <= now);
-    for e in &due {
-        let path = std::path::Path::new(e["path"].as_str().unwrap_or(""));
-        if stamp(path) == Some((e["len"].as_u64().unwrap_or(u64::MAX), e["mtime"].as_i64().unwrap_or(-1))) {
-            match std::fs::remove_file(path) {
-                Ok(()) => record::detail("screen", "picture removed", &[("after", format!("{}s", PROJECT_SHOT_KEEP.as_secs()))]),
-                Err(err) => record::warn("screen", "picture not removed", &err.to_string(), &[]),
+    let (due, mut keep): (Vec<_>, Vec<_>) = list.into_iter().partition(|e| e["until"].as_i64().unwrap_or(0) <= now);
+    let mut changed = false;
+    for mut e in due {
+        let path = std::path::PathBuf::from(e["path"].as_str().unwrap_or(""));
+        let removed = match std::fs::symlink_metadata(&path) {
+            Ok(_) if stamp(&path) != Some((e["len"].as_u64().unwrap_or(u64::MAX), e["mtime"].as_i64().unwrap_or(-1))) => Ok(()),
+            Ok(_) => std::fs::remove_file(&path).map(|_| record::detail("screen", "picture removed", &[("after", format!("{}s", PROJECT_SHOT_KEEP.as_secs()))])),
+            Err(err) => Err(err),
+        };
+        match removed {
+            Err(err) if !matches!(err.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {
+                // Said once, then tried again at every sweep.
+                if e["said"] != true {
+                    record::warn("screen", "picture not removed, tried again", &err.to_string(), &[]);
+                    wb_core::status::say(d, &wb_core::i18n::f("shot-not-removed", &[("path", path.display().to_string())]), 15);
+                    e["said"] = true.into();
+                    changed = true;
+                }
+                keep.push(e);
             }
+            _ => changed = true,
         }
     }
-    if !due.is_empty() { let _ = wb_core::paths::write_atomic(&file, serde_json::Value::Array(keep).to_string()); }
+    if changed { let _ = wb_core::paths::write_atomic(&file, serde_json::Value::Array(keep).to_string()); }
 }
 
 pub fn write_png(out: &std::path::Path, w: u32, h: u32, rgba: &[u8]) -> Result<(), String> {
@@ -83,7 +104,7 @@ pub(super) fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: 
         });
         let chosen = by_app.or_else(|| shot.panel.and_then(|i| state.surface.panels.get(i).cloned()));
         let missing = shot.app.is_some() || shot.panel.is_some();
-        let done = match (chosen, missing) {
+        let mut done = match (chosen, missing) {
             (None, false) => { let e = window_elements(state, renderer); let c = premultiplied(state.theme.surface_top); save(renderer, &e, surface.w, surface.h, c, &shot.out) }
             (None, true) => Err(wb_core::i18n::t("no-such-panel").to_string()),
             (Some(p), _) => {
@@ -101,7 +122,7 @@ pub(super) fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: 
         // Taken while a project is open: removed after a while, whatever it shows.
         if done.is_ok() && let Some(r) = std::env::var_os(wb_core::paths::ENV_DATA_DIR) {
             let d = wb_core::paths::Data::new(std::path::PathBuf::from(r));
-            if may_hold_project(&d) { note_expiring(&d, &shot.out); }
+            if may_hold_project(&d) { done = note_expiring(&d, &shot.out); }
         }
         match done {
             Ok(()) => record::detail("screen", "panel shot", &[("panel", format!("{:?}", shot.panel)), ("took", format!("{}ms", began.elapsed().as_millis()))]),
@@ -133,6 +154,36 @@ mod tests {
         assert!(later.exists(), "its time is not up");
         let left: Vec<serde_json::Value> = wb_core::paths::read_kept(&expiring_file(&d));
         assert_eq!(left.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_picture_that_cannot_be_removed_yet_is_tried_again_and_one_that_cannot_be_noted_goes_at_once() {
+        use std::os::unix::fs::PermissionsExt;
+        // Safety: geteuid has no preconditions. Root removes files from a read-only folder.
+        if unsafe { libc::geteuid() } == 0 { return; }
+        let root = std::env::temp_dir().join(format!("wb-shots-again-{}", std::process::id()));
+        let d = wb_core::paths::Data::new(root.clone());
+        let dir = root.join("held");
+        std::fs::create_dir_all(d.cache()).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let mode = |p: &std::path::Path, m: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+        let held = dir.join("a.png");
+        std::fs::write(&held, "x").unwrap();
+        let (len, mtime) = stamp(&held).unwrap();
+        wb_core::paths::write_atomic(&expiring_file(&d), serde_json::json!([{"path": held, "until": 0, "len": len, "mtime": mtime}]).to_string()).unwrap();
+        let left = || wb_core::paths::read_kept::<Vec<serde_json::Value>>(&expiring_file(&d)).len();
+        for m in [0o500, 0o000] { mode(&dir, m); sweep_expiring(&d); assert_eq!(left(), 1, "still to be removed"); }
+        mode(&dir, 0o700);
+        sweep_expiring(&d);
+        assert!(!held.exists() && left() == 0, "removed once it could be");
+
+        let fresh = root.join("b.png");
+        std::fs::write(&fresh, "x").unwrap();
+        mode(&d.cache(), 0o500);
+        let noted = note_expiring(&d, &fresh);
+        mode(&d.cache(), 0o700);
+        assert!(noted.is_err() && !fresh.exists(), "not kept without its removal noted");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
