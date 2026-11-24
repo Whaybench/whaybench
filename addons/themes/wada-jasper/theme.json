@@ -2,7 +2,7 @@
   "format": 1,
   "name": "Wada Jasper",
   "version": "1.0",
-  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 155, as digitised in https://github.com/mattdesl/dictionary-of-colour-combinations (MIT); the other shades are mixed from those colours",
+  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 155: data by https://github.com/dblodorn/sanzo-wada, screen colours by https://github.com/mattdesl/dictionary-of-colour-combinations (both MIT); the panel-edge line is the book's Yellow, from another combination; the text colour is added and the rest are mixed",
   "palette": {
     "jasper": "#eb5324",
     "benzol": "#00978d",

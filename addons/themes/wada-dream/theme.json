@@ -2,7 +2,7 @@
   "format": 1,
   "name": "Wada Dream",
   "version": "1.0",
-  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 176, as digitised in https://github.com/mattdesl/dictionary-of-colour-combinations (MIT); the other shades are mixed from those colours",
+  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 176: data by https://github.com/dblodorn/sanzo-wada, screen colours by https://github.com/mattdesl/dictionary-of-colour-combinations (both MIT); the text colour and the panel-edge line are the book's Violet Blue and Carmine, from other combinations; the rest are mixed, with white where lighter",
   "palette": {
     "pink": "#f9c1ce",
     "shell": "#fdd4bd",
@@ -11,7 +11,7 @@
     "panel": "#feeee5",
     "bar": "#fad0da",
     "front": "#a7dee0",
-    "deep": "#598298"
+    "deep": "#4b607f"
   },
   "base": {
     "background": "panel",

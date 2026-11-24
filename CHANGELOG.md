@@ -25,6 +25,7 @@ names another step.
   development. `docs/codex.md` went into them, and both READMEs are shorter and link to them.
 
 ### Fixed
+- Wada Dream: the accent (links, chosen rows) is darker so it reads at 4.5:1; the three Wada themes name their sources as they are.
 - A picture taken while a project is open that cannot be removed when its time is up is tried again, and the status line
   says so; one whose removal cannot be noted is removed at once. Before, one failure left it for good.
 - In a git worktree or a submodule a project's `.whaybench` is kept out of commits too, and in the repositories around

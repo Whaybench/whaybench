@@ -2,7 +2,7 @@
   "format": 1,
   "name": "Wada Carmine",
   "version": "1.0",
-  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 313, as digitised in https://github.com/mattdesl/dictionary-of-colour-combinations (MIT); the other shades are mixed from those colours",
+  "source": "Colours from Sanzo Wada's A Dictionary of Color Combinations (1933-34), combination 313: data by https://github.com/dblodorn/sanzo-wada, screen colours by https://github.com/mattdesl/dictionary-of-colour-combinations (both MIT); the rest are mixed, with white where lighter",
   "palette": {
     "carmine": "#cc1236",
     "yellow": "#fff200",
