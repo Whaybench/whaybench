@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-11-24
+
 ### Added
 - A Briefsafe project has a browser of its own: a Firefox in its container, with the project's sign-ins and tabs, shown
   in the browser panel of its conversations. Its agents open and read pages there as ordinary agents do
