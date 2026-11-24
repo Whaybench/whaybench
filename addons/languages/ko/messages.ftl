@@ -249,7 +249,6 @@ request = { $where_ }{"\u000A"}요청사항
 request-rework = 재수정 요청
 request-based-on-the-earlier-version = { $where_ }{"\u000A"}요청사항(변경 전 내용 기준)
 text-4 = { $a1 }의 { $a2 } { $a3 } ('{ $a4 }')
-rework-user-request-the-earlier-state = { $w2 }을 다시 고칠 것(사용자 요청): { $t }{"\u000A"}기준이 될 이전 상태는 { $cmd }의 before.
 create-project = 프로젝트 생성
 unknown-error = 알 수 없는 오류
 project-view-update-failed-retrying-in = 프로젝트 화면 갱신 실패 · { $a1 } · 2초 후 재시도

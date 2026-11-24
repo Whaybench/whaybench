@@ -249,7 +249,6 @@ request = { $where_ }{"\u000A"}Request details
 request-rework = Request rework
 request-based-on-the-earlier-version = { $where_ }{"\u000A"}Request details (based on the earlier version)
 text-4 = { $a1 } { $a2 } { $a3 } ('{ $a4 }')
-rework-user-request-the-earlier-state = Rework { $w2 } (user request): { $t }{"\u000A"}The earlier state to start from is the before of { $cmd }.
 create-project = Create project
 unknown-error = Unknown error
 project-view-update-failed-retrying-in = Project view update failed · { $a1 } · Retrying in 2 s

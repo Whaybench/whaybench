@@ -14,6 +14,7 @@ names another step.
 ### Fixed
 - A `settings.json` or `addon-trust.json` with a mistake in it is set aside when the map style settings or a style's
   confirmation write to it, as elsewhere; before, the indent setting replaced all settings.
+- Requests about a project map's change (restore, rework) go to the agent in English in every language.
 
 ## [0.9.4] - 2026-11-24
 

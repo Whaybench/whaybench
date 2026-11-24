@@ -1178,15 +1178,18 @@ fn clicked(s_: &Shared, uri: &str) {
             let (Some(target), Some(id), Some(k)) = (bits.next(), bits.next(), bits.next()) else { return };
             let it = s_.borrow().st.item_change_detail(&pid, id).unwrap_or_default();
             let Some(c) = list(&it, "changes").get(k.parse::<usize>().unwrap_or(usize::MAX)).cloned() else { return };
-            let where_ = wb_core::i18n::f("text-4", &[("a1", (history::target_name(target)).to_string()), ("a2", (if s(&c, "kind") == "item" { wb_core::i18n::t("item") } else { s(&c, "kind") }).to_string()), ("a3", (s(&c, "id")).to_string()), ("a4", (history::label(&c).chars().take(60).collect::<String>()).to_string())]);
+            let label = history::label(&c).chars().take(60).collect::<String>();
+            let where_ = wb_core::i18n::f("text-4", &[("a1", (history::target_name(target)).to_string()), ("a2", (if s(&c, "kind") == "item" { wb_core::i18n::t("item") } else { s(&c, "kind") }).to_string()), ("a3", (s(&c, "id")).to_string()), ("a4", label.clone())]);
+            // The agent reads it in English; the dialog shows it in the language in use.
+            let place = wb_core::i18n::ai_f("project-map-place", &[("kind", s(&c, "kind").to_string()), ("id", s(&c, "id").to_string()), ("label", label)]);
             let cmd = format!("`whaybench-project change-items {pid} {id}`");
             if kind == "iback" {
-                request(&s_.borrow(), &wb_core::i18n::ai_f("put-back-as-it-was-before", &[("where_", (where_).to_string()), ("id", (id).to_string()), ("cmd", (cmd).to_string())]));
+                request(&s_.borrow(), &wb_core::i18n::ai_f("put-back-as-it-was-before", &[("where_", place), ("id", (id).to_string()), ("cmd", (cmd).to_string())]));
                 over(s_, None);
             } else {
-                let (s2, w2) = (s_.clone(), where_.clone());
+                let (s2, w2) = (s_.clone(), place);
                 let bs_then = s_.borrow().bs.clone();
-                let dlg = ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { if s2.borrow().bs != bs_then { return; } request(&s2.borrow(), &wb_core::i18n::f("rework-user-request-the-earlier-state", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
+                let dlg = ask_text(&win, wb_core::i18n::t("request-rework"), &wb_core::i18n::f("request-based-on-the-earlier-version", &[("where_", (where_).to_string())]), move |t| { if s2.borrow().bs != bs_then { return; } request(&s2.borrow(), &wb_core::i18n::ai_f("rework-user-request-the-earlier-state", &[("w2", (w2).to_string()), ("t", (t).to_string()), ("cmd", (cmd).to_string())])); });
                 s_.borrow_mut().dialog = Some(gtk::prelude::ObjectExt::downgrade(&dlg));
             }
         }
