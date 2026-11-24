@@ -81,6 +81,19 @@ fn connect() -> Result<Bus, String> {
 
 /// What the panel's Firefox shows, as text. `all`: the whole page, not only what is on screen.
 pub fn read_text(d: &Data, all: bool) -> Result<Value, String> {
+    let mut v = read_once(d, all)?;
+    // While Firefox starts it is not there yet, and it makes its accessible pages when first asked: that first answer is
+    // an error, or short, without a title or a text.
+    for n in 0..4 {
+        let short = v.get("error").is_some() || n < 2 && (v["title"].as_str().is_none_or(str::is_empty) || v["text"].as_array().is_none_or(Vec::is_empty));
+        if !short { break; }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        v = read_once(d, all)?;
+    }
+    Ok(v)
+}
+
+fn read_once(d: &Data, all: bool) -> Result<Value, String> {
     let pid = wb_core::view::firefox_pid(d).ok_or(wb_core::i18n::t("no-firefox-in-the-view-panel"))?;
     let bus = connect()?;
     let root = ("org.a11y.atspi.Registry".to_string(), "/org/a11y/atspi/accessible/root".to_string());

@@ -7,6 +7,14 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- A Briefsafe project has a browser of its own: a Firefox in its container, with the project's sign-ins and tabs, shown
+  in the browser panel of its conversations. Its agents open and read pages there as ordinary agents do
+  (`whaybench-view open`, `read --firefox`, `where`, `shot --firefox`), and other conversations cannot read it as text.
+  It opens where the other browser is and takes turns with it.
+- A tab pulled out of a title bar is held by its docking dot, so it reaches the targets of every panel; a panel dropped
+  into another keeps its front tab in front. A browser without a saved place opens with the view.
+
 ## [0.9.3] - 2026-11-24
 
 ### Added

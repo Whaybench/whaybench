@@ -78,6 +78,7 @@ pub fn slot_of(app: &str) -> Option<&'static str> {
         "whaybench-term" => "term",
         "dev.whaybench.answer" => "answer",
         "dev.whaybench.input" => "input",
+        a if wb_core::view::browser_project(a).is_some() => "view",
         "org.mozilla.firefox" | "firefox" | "dev.whaybench.view-term" | "dev.whaybench.notify" | "dev.whaybench.project" => "view",
         v if v == wb_core::view::VIEW_APP || v.starts_with("dev.whaybench.view.") => "view",
         v if v.starts_with("dev.whaybench.map.") => "map",
@@ -193,12 +194,12 @@ pub struct App {
     pub brought: std::collections::HashSet<String>,
     pub shaders: Option<crate::render::Shaders>,
     pub grabbed_popups: Vec<smithay::wayland::shell::xdg::PopupSurface>,
-    data: Data,
-    saved: SavedLayout,
+    pub data: Data,
+    pub saved: SavedLayout,
     pub menu: Option<Window>,
     theme_seen: std::time::Instant,
     pub window_size: (i32, i32),
-    save_due: bool,
+    pub save_due: bool,
 
     pub start_time: Instant,
     pub socket_name: OsString,
@@ -219,6 +220,7 @@ pub struct App {
     pub clip: crate::clipboard::Bridge,
     pub popups: PopupManager,
     pub seat: Seat<Self>,
+    pub browsers: crate::browsers::Browsers,
     /// Whether fcitx5 inside is the input method; else the desktop's, through the window.
     pub builtin_ime: bool,
 }
@@ -236,7 +238,7 @@ impl App {
         let dh = display.handle();
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
-        let layer_shell_state = smithay::wayland::shell::wlr_layer::WlrLayerShellState::new::<Self>(&dh);
+        let layer_shell_state = smithay::wayland::shell::wlr_layer::WlrLayerShellState::new_with_filter::<Self, _>(&dh, host_client);
         XdgDecorationState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals stay registered: the manager only holds their ids and has nothing to do when dropped.
@@ -255,8 +257,8 @@ impl App {
         // the desktop's input method reaches the apps through the window as before.
         let builtin_ime = crate::start::builtin_input_method(&data);
         if builtin_ime {
-            InputMethodManagerState::new::<Self, _>(&dh, |_| true);
-            VirtualKeyboardManagerState::new::<Self, _>(&dh, |_| true);
+            InputMethodManagerState::new::<Self, _>(&dh, host_client);
+            VirtualKeyboardManagerState::new::<Self, _>(&dh, host_client);
         } else {
             seat.text_input().set_compositor_input_method(true);
         }
@@ -296,7 +298,7 @@ impl App {
             shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
             compositor_state, xdg_shell_state, layer_shell_state, shm_state, dmabuf: None, gpu: None, seat_state, data_device_state, clip,
-            popups: PopupManager::default(), seat, builtin_ime,
+            popups: PopupManager::default(), seat, browsers: Default::default(), builtin_ime,
         }
     }
 
@@ -462,7 +464,7 @@ impl App {
     }
 
     /// Asks every window of the app to close.
-    fn close_app(&mut self, app: &str) {
+    pub fn close_app(&mut self, app: &str) {
         let mine = format!("{app}#");
         let ids: Vec<u64> = self.surface.panels.iter().flat_map(|p| p.tabs.iter()).filter(|t| t.key == app || t.key.starts_with(&mine)).map(|t| t.id).collect();
         for id in ids { if let Some(w) = self.windows.get(&id) { w.toplevel().unwrap().send_close(); } }
@@ -470,6 +472,7 @@ impl App {
 
     /// Brings the panel of an app to the front, its tab in front.
     pub fn focus_app(&mut self, app: &str) {
+        if self.host_browser_waits(app) { return; }
         let prefix = format!("{app}#");
         let found = self.surface.panels.iter().find_map(|p| p.tabs.iter().position(|t| t.key.starts_with(&prefix)).map(|i| (p.pid, i)));
         // Not open yet (a browser just being started): it comes to the front when its window appears.
@@ -563,6 +566,8 @@ impl App {
 
     /// A panel of the panel menu: closed if it is open, opened if it is not. `key` is a tab's key or an app id.
     pub fn toggle_panel(&mut self, key: &str, command: Option<&str>) {
+        // The browser is the one of the conversation the person is in: in an isolated project, that project's.
+        if key == wb_core::view::FIREFOX_APP && self.toggle_project_browser() { return; }
         let prefix = format!("{key}#");
         let found = self.surface.panels.iter().flat_map(|p| p.tabs.iter()).find(|t| t.key == key || t.key.starts_with(&prefix)).map(|t| t.id);
         match (found, command) {
@@ -576,7 +581,7 @@ impl App {
             // One out on the desktop comes back, rather than a second one here.
             (None, Some(_)) if let Some(i) = self.outside.iter().position(|o| key.split('#').next() == Some(o.app.as_str())) => self.bring_back(i),
             (None, Some(c)) => {
-                if key == wb_core::view::FIREFOX_APP { wb_core::view::set_detached(&self.data, false); }
+                if key == wb_core::view::FIREFOX_APP { wb_core::view::set_detached(&self.data, false); self.ask_browser(key); }
                 self.starting.insert(key.to_string(), Instant::now());
                 self.spawn(c);
             }
@@ -670,7 +675,7 @@ impl App {
             .or_else(|| self.surface.by_choice().flat_map(|p| p.tabs.iter()).find_map(|t| self.terms.get(&t.id))).cloned();
         let Some(tab) = front else {
             if self.focused_term.take().is_some() { wb_core::sessions::clear_focus(&self.data); }
-            return;
+            return self.settle_browsers();
         };
         let session = std::fs::read_to_string(wb_core::sessions::tab_file(&self.data, &tab)).ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
@@ -683,6 +688,7 @@ impl App {
             }
             self.focused_term = Some(pair);
         }
+        self.settle_browsers();
     }
 
     fn key_for(&self, app_id: &str) -> String {
@@ -699,6 +705,13 @@ impl App {
         let app_id = app_id.filter(|a| !a.is_empty()).unwrap_or_else(|| "app".into());
         // Ubuntu's Firefox is a snap, and a snap names its window <snap>_<app>: it is the view panel's browser all the same.
         let app_id = if app_id == "firefox_firefox" { wb_core::view::FIREFOX_APP.to_string() } else { app_id };
+        // A project's window is its browser, whatever it calls itself: never a bar, a conversation or a settings window.
+        let project = project_of(surface.wl_surface()).map(|(id, _)| id);
+        let app_id = project.as_deref().map_or(app_id, wb_core::view::project_browser_app);
+        let opens = crate::browsers::is_browser(&app_id).then(|| self.browser_opens(project.as_deref()));
+        let elsewhere = opens == Some(crate::browsers::Opens::Elsewhere);
+        let keys = self.keys_tab();
+        let fronts: Vec<(u64, u64)> = self.surface.panels.iter().map(|p| (p.pid, p.tab().id)).collect();
         if app_id == STATUS_APP || app_id == MENU_APP {
             let (w, _) = self.window_size;
             let high = if app_id == STATUS_APP { STATUS_H } else { MENU_H };
@@ -725,12 +738,13 @@ impl App {
         // A settings window: centred over the surface, in front of everything until it closes.
         let modal = MODAL_APPS.contains(&app_id.as_str());
         // A dialog stays over its parent, inside it; a window without a parent is a panel of its own.
-        let parent_panel = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i)).and_then(|i| self.surface.holding_tab(i)).map(|p| p.rect);
-        let parent_modal = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i))
-            .and_then(|i| self.surface.holding_tab(i)).is_some_and(|p| p.modal);
+        let parent_tab = parent.as_ref().and_then(|ps| self.windows.iter().find(|(_, w)| w.toplevel().unwrap().wl_surface() == ps).map(|(i, _)| *i));
+        let parent_panel = parent_tab.and_then(|i| self.surface.holding_tab(i)).map(|p| p.rect);
+        let parent_modal = parent_tab.and_then(|i| self.surface.holding_tab(i)).is_some_and(|p| p.modal);
         let pid = smithay::reexports::wayland_server::Resource::client(surface.wl_surface()).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32);
         let comer = |c: &Comer| match c { Comer::Process(p) => Some(*p) == pid, Comer::App(a) => *a == app_id };
         let home = self.homes.iter().position(|(c, _)| comer(c)).map(|i| self.homes.remove(i).1);
+        let behind = parent.is_some() && self.dialog_behind(opens, parent_tab);
         // A dialog of a window that is not a panel (the menu bar, the status line) goes where a settings window goes.
         let pid = if let Some(home) = home {
             // The browser back by ↩: where it was before it went out (the others are back where they were too).
@@ -739,7 +753,7 @@ impl App {
                 layout::Home::Join(_) => { let pid = self.surface.new_pid(); let r = self.surface.free_place(); self.surface.panels.push(Panel::new(pid, tab, r)); pid }
                 layout::Home::Place(rect) => { let pid = self.surface.new_pid(); self.surface.panels.push(Panel::new(pid, tab, rect)); pid }
             }
-        } else if modal || (parent.is_some() && parent_panel.is_none()) {
+        } else if modal || (parent.is_some() && parent_panel.is_none() && project.is_none()) {
             let pid = self.surface.new_pid();
             let (w, h) = ((self.surface.w - 80.0).clamp(layout::MIN_W, 760.0), (self.surface.h - 80.0).max(layout::MIN_H));
             let mut p = Panel::new(pid, tab, Rect::new(((self.surface.w - w) / 2.0).max(0.0), 40.0_f64.min(self.surface.h / 10.0), w, h));
@@ -748,6 +762,10 @@ impl App {
             p.modal = modal;
             self.surface.panels.push(p);
             pid
+        } else if let (true, Some(held)) = (behind, parent_tab.and_then(|i| self.surface.holding_tab(i)).map(|p| p.pid)) {
+            // Not over the panels of another place: with the window it belongs to.
+            if let Some(p) = self.surface.get_mut(held) { p.tabs.push(tab); }
+            held
         } else if let Some(over) = parent_panel {
             let pid = self.surface.new_pid();
             let mut p = Panel::new(pid, tab, Rect::new(over.x + 40.0, over.y + 40.0, (over.w - 80.0).max(layout::MIN_W), (over.h - 80.0).max(layout::MIN_H)));
@@ -758,7 +776,9 @@ impl App {
             self.surface.panels.push(p);
             pid
         } else {
-            match self.surface.place_saved(&self.saved, tab) {
+            // One that opens while the person is elsewhere takes no place of its own over theirs: with its group.
+            let beside = opens.and_then(|_| self.browser_panel());
+            match if elsewhere || beside.is_some() { Err(tab) } else { self.surface.place_saved(&self.saved, tab) } {
                 Ok(pid) => {
                     // A member of this place that the layout does not know opened first and sat here alone: it comes in.
                     let strays: Vec<u64> = self.slots.iter().filter(|(k, v)| **k != id && Some(v.as_str()) == slot).map(|(k, _)| *k)
@@ -772,8 +792,11 @@ impl App {
                 }
                 Err(tab) => {
                     // Panels of one place stay together in one panel, as tabs.
-                    let others: Vec<u64> = self.slots.iter().filter(|(k, v)| **k != id && Some(v.as_str()) == slot).map(|(k, _)| *k).collect();
-                    let joined = others.iter().find_map(|k| self.surface.holding_tab(*k)).map(|p| p.pid);
+                    // A browser beside the browser that is there (they take turns); in the view's place, with the view.
+                    let mut others: Vec<u64> = self.slots.iter().filter(|(k, v)| **k != id && Some(v.as_str()) == slot).map(|(k, _)| *k).collect();
+                    let of_view = |k: &u64| self.surface.holding_tab(*k).is_some_and(|p| p.tabs.iter().any(|t| t.key.starts_with(&format!("{}#", wb_core::view::VIEW_APP))));
+                    others.sort_by_key(|k| (!of_view(k), *k));
+                    let joined = beside.or_else(|| others.iter().find_map(|k| self.surface.holding_tab(*k)).map(|p| p.pid));
                     if let Some(pid) = joined {
                         let p = self.surface.get_mut(pid).unwrap();
                         p.tabs.push(tab);
@@ -803,12 +826,21 @@ impl App {
         let window = Window::new_wayland_window(surface);
         self.space.map_element(window.clone(), (r.x as i32, r.y as i32), false);
         self.windows.insert(id, window);
+        if let Some(opens) = opens.filter(|o| project.is_some() || *o != crate::browsers::Opens::WithKeys) { self.place_browser(id, pid, opens, behind, &fronts, keys); }
         let asked = self.focus_when_open.take_if(|(prefix, at)| key.starts_with(prefix.as_str()) && at.elapsed() < std::time::Duration::from_secs(30));
-        if asked.is_some()
+        if asked.is_some() && project.is_none() && opens.is_none_or(|o| o == crate::browsers::Opens::WithKeys)
             && let Some(p) = self.surface.get_mut(pid) && let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; }
         self.starting.retain(|k, _| key != *k && !key.starts_with(&format!("{k}#")));
         record::decide("screen", "panel opened", if fitted { "a dialog or settings window, at its content's size" } else { "a new app" }, &[("panel", pid.to_string()), ("app", key)]);
-        self.focus_panel(pid);
+        match opens {
+            None => self.focus_panel(pid),
+            // The person is there, or asked for it.
+            Some(crate::browsers::Opens::WithKeys) => {
+                if project.is_none() { self.host_browser_opened(id); }
+                self.press_panel(pid);
+            }
+            Some(_) => {}
+        }
         self.save_due = true;
     }
 
@@ -828,6 +860,8 @@ impl App {
             self.unmapped.retain(|u| u.wl_surface() != surface);
             return;
         };
+        self.closing_under_typing(id);
+        self.browser_gone(id);
         if let Some(w) = self.windows.remove(&id) { self.space.unmap_elem(&w); }
         self.terms.remove(&id);
         self.slots.remove(&id);
@@ -837,15 +871,23 @@ impl App {
         if let Act::Hold { pid, .. } | Act::Resize { pid, .. } | Act::TabPull { pid, .. } = self.act
             && self.surface.get(pid).is_none() { self.act = Act::Idle; self.zone = None; self.guides.clear(); }
         self.hover = None;
+        self.settle_browsers();
         if let Some(front) = self.surface.front() { self.focus_panel(front); }
         self.save_due = true;
     }
 
     /// Raises the panel; its front tab gets the keyboard. While a settings window is open, it keeps the keyboard.
-    pub fn focus_panel(&mut self, pid: u64) {
+    pub fn focus_panel(&mut self, pid: u64) { self.focus(pid, false); }
+
+    /// The same by the person's press: they go where they press, into a browser too.
+    pub fn press_panel(&mut self, pid: u64) { self.focus(pid, true); }
+
+    fn focus(&mut self, pid: u64, person: bool) {
         let pid = self.surface.modal().map_or(pid, |m| m.pid);
         self.surface.raise(pid);
-        let Some(front) = self.surface.get(pid).map(|p| p.tab().id) else { return };
+        let Some((front, modal)) = self.surface.get(pid).map(|p| (p.tab().id, p.modal)) else { return };
+        if !person && !self.may_have_keys(front) { self.refuse_keys(); return self.sync_focus(); }
+        self.keys_given(front, person, modal);
         for (id, w) in &self.windows {
             w.set_activated(*id == front);
             w.toplevel().unwrap().send_pending_configure();
@@ -973,13 +1015,15 @@ impl App {
             if let Some(w) = self.windows.get(&p.tab().id) {
                 let g = w.geometry().size;
                 if g.w > 0 && g.h > 0 {
-                    let w = g.w as f64 + 2.0 * pad;
+                    // A project's dialog never covers the whole screen, whatever size it takes.
+                    let of_project = wb_core::view::browser_project(&p.tab().key).is_some();
+                    let w = crate::browsers::room(of_project, g.w, self.surface.w) + 2.0 * pad;
                     // A settings window that changes width keeps its middle where it was: placed in the middle of the
                     // screen, it stays there at the size its content gives it, and where the person moved it, there.
                     // Its target moves too: the panel glides to its target each frame and would go back.
                     if p.modal && (w - p.rect.w).abs() > 0.5 { p.rect.x = recentred(p.rect.x, p.rect.w, w, self.surface.w); p.tx = p.rect.x; }
                     p.rect.w = w;
-                    p.rect.h = g.h as f64 + layout::title() + pad;
+                    p.rect.h = crate::browsers::room(of_project, g.h, self.surface.h) + layout::title() + pad;
                 }
             }
         }
@@ -1000,6 +1044,8 @@ impl App {
                 let Some(w) = self.windows.get(&t.id) else { continue };
                 let title = with_states(w.toplevel().unwrap().wl_surface(), |s| s.data_map.get::<XdgToplevelSurfaceData>().unwrap().lock().unwrap().title.clone());
                 if let Some(title) = title.filter(|n| !n.is_empty()) {
+                    // A project's browser says whose it is: there can be several, and the host's.
+                    let title = match project_of(w.toplevel().unwrap().wl_surface()) { Some((_, name)) => format!("{name} · {title}"), None => title };
                     let cut = cut_name(&title);
                     if cut != t.name { t.name = cut; }
                 }
@@ -1076,6 +1122,21 @@ impl App {
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// The Briefsafe project whose display it came in by (`project_display`); none: an app of the host.
+    pub project: Option<String>,
+    /// That project's name, shown before its page's title.
+    pub project_name: String,
+}
+
+/// Whether the client is an app of the host: only those may be the input method, type, or be the surface behind the
+/// panels. A project's programs never, or one of them could type in any tab.
+pub fn host_client(c: &smithay::reexports::wayland_server::Client) -> bool { c.get_data::<ClientState>().is_none_or(|s| s.project.is_none()) }
+
+/// The project a window is of, by the display it came in by: its id and name.
+pub fn project_of(surface: &WlSurface) -> Option<(String, String)> {
+    let client = smithay::reexports::wayland_server::Resource::client(surface)?;
+    let of = client.get_data::<ClientState>()?;
+    of.project.clone().map(|id| (id, of.project_name.clone()))
 }
 
 impl TextInputActivation for App {}

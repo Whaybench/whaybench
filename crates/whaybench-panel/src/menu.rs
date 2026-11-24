@@ -208,7 +208,11 @@ fn panel_menu(d: &Data, k: &Maker) -> gio::Menu {
     toggle(wb_core::i18n::t("notify"), "dev.whaybench.notify", Some(panel_command("notify")));
     // The first view cannot be closed: its line only brings it up.
     { let d2 = d.clone(); k.check(&sec, wb_core::i18n::t("view-2"), true, move || status::focus_app(&d2, view::VIEW_APP)); }
-    toggle(wb_core::i18n::t("browser"), view::FIREFOX_APP, Some(view::firefox_command(d, "")));
+    // The window takes the browser of the conversation the person is in (`toggle_panel`); the tick shows that one's.
+    let app = view::chosen_browser(d);
+    let on = open.iter().any(|t| t.starts_with(&format!("{app}#")));
+    let (d2, command) = (d.clone(), view::firefox_command(d, ""));
+    k.check(&sec, wb_core::i18n::t("browser"), on, move || { let _ = status::post(&d2, &json!({"cmd": "togglepanel", "key": view::FIREFOX_APP, "command": command})); });
     // What else is open: extra views and map branches, which only close from here.
     for key in &open {
         if let Some(rest) = key.strip_prefix("dev.whaybench.view.") {
@@ -302,7 +306,7 @@ fn make(win: &gtk::ApplicationWindow, d: &Data) -> (gio::Menu, gio::SimpleAction
 }
 
 /// What the menus depend on; they are made again only when it changes.
-fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {} {:?} {:?} {}", wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), wb_core::i18n::active(d, Some(wb_core::i18n::lang()))) }
+fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {:?} {} {:?} {:?} {}", view::chosen_browser(d), wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), wb_core::i18n::active(d, Some(wb_core::i18n::lang()))) }
 
 /// Whether one of the bar's menus is showing.
 fn menu_open(w: &gtk::Widget) -> bool {

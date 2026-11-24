@@ -46,6 +46,7 @@ The aim is that ideas, personal matters and secrets of a project do not come out
 | What | How |
 |---|---|
 | Its agents | Run in a rootless podman container with the project folder. Programs, toolchains and the agents' plugins are there read only; the rest of your home folder, your other projects and your keyring are not |
+| Its browser | A Firefox in the container. Its window comes out by a display of the project's own, whose programs cannot type in other panels or pass for parts of Whaybench |
 | Its conversations, map, memory and documents | Stay in the project. Other conversations do not get them, and **View** does not read its pages out to them |
 | What goes in | From an ordinary map, a branch you send with **Reflect in project**. It waits in memory, where the system allows it, until the project's tab takes it |
 | On disk | Encrypted with gocryptfs while logged out, where the project has a vault |
@@ -59,6 +60,7 @@ The aim is that ideas, personal matters and secrets of a project do not come out
 
 Its limits:
 
+- The clipboard is shared with the window you are in, a project's browser included, and through it with the desktop.
 - The agents use their model and the network. Whaybench leaves the container's network to Podman.
 - Use disk encryption for the files you work on. The project's name, folder and whether it has a vault are readable too.
 - Quitting Whaybench does not lock a project. Log out, and check that it shows **locked**.

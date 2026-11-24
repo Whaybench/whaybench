@@ -121,7 +121,8 @@ whaybench token check
 | `detach` / `attach` | Move Firefox to the desktop or back. Wait up to 25 seconds for it to move. |
 
 `new --session` needs a known calling session. `open` reports missing local paths, and a queued request can wait for a
-view to follow its session. Inside Briefsafe, use `open` for local project files. Errors and `--help` exit `1`.
+view to follow its session. Inside Briefsafe, use `open` for project files and web addresses, and `read`, `where` and
+`shot` with `--firefox` for the project's own browser. Errors and `--help` exit `1`.
 
 ```sh
 whaybench-view open ./report.pdf 3

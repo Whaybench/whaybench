@@ -25,7 +25,8 @@ An isolated project shares one rootless Podman container across its conversation
 | Container access | What it gets |
 |---|---|
 | Read and write | The project folder, open Whaybench data and a home folder for the project's settings and caches |
-| Read only | Directories of host programs, toolchains and certificates, agent add-ons and Claude Code plugin folders. The container can read everything in them |
+| Read only | Directories of host programs, toolchains, fonts and certificates, agent add-ons and Claude Code plugin folders. The container can read everything in them |
+| Display | Windows of its own in Whaybench. What runs there cannot type in other panels. The clipboard is shared with the window you are in |
 | Outside by default | The rest of your home folder, other project folders and host Whaybench data |
 | Outside by default | Host agent sign-in files and the host keyring |
 
@@ -43,11 +44,12 @@ ls ~/work/PROJECT/.whaybench/gocryptfs.conf
 ## Set up Briefsafe on Linux
 
 The Windows setup brings all of this. If restoring a snapshot says that `fuser` is missing, an earlier setup did not
-bring it: run `wsl -d Whaybench -u root -- dnf install psmisc` in PowerShell. On a work disk that is not btrfs there are
+bring it: run `wsl -d Whaybench -u root -- dnf install psmisc` in PowerShell. The same with `dbus-daemon` when the
+project's browser says `dbus-daemon: No such file or directory`. On a work disk that is not btrfs there are
 no snapshots. On Fedora and on Ubuntu or Debian:
 
 ```sh
-sudo dnf install podman gocryptfs fuse3 btrfs-progs psmisc     # Fedora
+sudo dnf install podman gocryptfs fuse3 btrfs-progs psmisc dbus-daemon     # Fedora
 sudo apt install podman gocryptfs fuse3 btrfs-progs psmisc     # Ubuntu, Debian
 podman run --rm docker.io/library/hello-world                  # checks podman
 ```
@@ -95,6 +97,23 @@ image is known but cannot be downloaded, login fails.
 On the project's **Sessions** tab, click **Claude** or **Codex** to start a conversation.
 
 After you install or update a Claude Code plugin on the host, log out of the project and log in again to bring it in.
+
+## Browse in the project
+
+An isolated project has its own Firefox, which runs in the project's container. Choose **Panels → Browser** in one of
+its conversations, or let its agent open a web address. The browser panel follows the conversation you are in, and its
+title starts with the project's name.
+
+- Sign in on a site once for the project. Sign-ins, history and tabs are kept in the project's data, encrypted with it
+  where it has a vault, and come back the next time. Your other browser's sign-ins and extensions are not there.
+- The project's agents read what you have in front with `whaybench-view read --firefox`. They can reach this browser's
+  sign-ins, as ordinary agents can those of the other browser. Other conversations cannot read it.
+- It opens and saves the project's files, not the rest of your home folder. It has no sound. The Firefox of a snap does
+  not run there.
+- Copy and paste work between it and your other windows: clear the clipboard after copying a secret.
+- A project opened by an earlier Whaybench says that its container has no display: log out and log in again. Without a
+  container there is no browser.
+- A Codex conversation works in a sandbox that can refuse it the browser.
 
 ## Log out of the project
 
@@ -206,7 +225,7 @@ Programs running as you can read a project while it is logged in. Its agents use
 You can send a branch of an ordinary map into an open project with **Reflect in project**, while one of its
 conversations runs in an open tab. The request waits in memory until that conversation takes it.
 
-Whaybench does not give a project's pages in **View** to other conversations that ask the panel to read them. A
+Whaybench does not give a project's pages in **View** or its browser to other conversations that ask to read them. A
 screenshot can still show them: Whaybench removes its own ten minutes after they were taken while a project was open. A
 copy you make stays.
 

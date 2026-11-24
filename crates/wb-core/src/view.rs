@@ -9,6 +9,13 @@ use serde_json::{json, Value};
 use crate::{paths::Data, status};
 
 pub const FIREFOX_APP: &str = "org.mozilla.firefox";
+/// The app a project's own browser is known by: given by the compositor, whatever its windows call themselves.
+pub fn project_browser_app(project: &str) -> String { format!("{FIREFOX_APP}.p-{project}") }
+/// The app of the browser the panel menu's line is of now, as the compositor has it.
+pub fn chosen_browser_file(d: &Data) -> PathBuf { d.cache().join("chosen-browser") }
+pub fn chosen_browser(d: &Data) -> String { std::fs::read_to_string(chosen_browser_file(d)).ok().filter(|a| !a.is_empty()).unwrap_or_else(|| FIREFOX_APP.to_string()) }
+/// The project whose browser this app or tab key is.
+pub fn browser_project(key: &str) -> Option<&str> { key.split('#').next()?.strip_prefix(FIREFOX_APP)?.strip_prefix(".p-") }
 /// Set for a panel started out on the desktop: the size it had inside, `WxH`. It then has a bar of its own.
 pub const ENV_OUTSIDE: &str = "WHAYBENCH_OUTSIDE";
 pub const TERM_APP: &str = "dev.whaybench.view-term";
@@ -344,13 +351,15 @@ const USER_JS: &str = "user_pref(\"toolkit.legacyUserProfileCustomizations.style
 /// The tab bar is hidden (the panel shows one page); the address bar stays, to see and type where the page is.
 const USER_CHROME: &str = "#TabsToolbar { visibility: collapse !important; }\n";
 
-fn prepare_profile(d: &Data) {
+pub(crate) fn prepare_profile(d: &Data) {
     let p = profile(d);
     // A lock left by a Firefox that is gone (a crash, WSL shut down under it) stops the next start with "already
     // running, but is not responding": Firefox cannot tell its owner is gone when the host's address changed since.
     if firefox_pid(d).is_none() { for f in ["lock", ".parentlock"] { let _ = std::fs::remove_file(p.join(f)); } }
     let _ = std::fs::create_dir_all(p.join("chrome"));
-    let _ = std::fs::write(p.join("user.js"), USER_JS);
+    // A project's browser is met for the first time again and again: no welcome pages in front of what was asked for or comes back.
+    let own = if crate::roots::is_project_root(d) { "user_pref(\"browser.aboutwelcome.enabled\", false);\nuser_pref(\"startup.homepage_welcome_url\", \"\");\nuser_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");\nuser_pref(\"datareporting.policy.dataSubmissionEnabled\", false);\n" } else { "" };
+    let _ = std::fs::write(p.join("user.js"), format!("{USER_JS}{own}"));
     let _ = std::fs::write(p.join("chrome/userChrome.css"), USER_CHROME);
 }
 
@@ -485,6 +494,12 @@ mod tests {
         assert_eq!(local_path("file://localhost/a/b"), std::path::PathBuf::from("/a/b"));
     }
     use super::*;
+    #[test]
+    fn a_projects_browser_is_told_from_the_hosts() {
+        assert_eq!(browser_project(&format!("{}#1", project_browser_app("up"))), Some("up"));
+        for host in [FIREFOX_APP, "org.mozilla.firefox#1", "dev.whaybench.view.p-up#1"] { assert_eq!(browser_project(host), None); }
+    }
+
     #[test]
     fn a_read_reply_is_a_plain_name_in_the_cache() {
         let dir = tempfile::tempdir().unwrap();

@@ -3184,6 +3184,7 @@ dependencies = [
  "smithay",
  "tempfile",
  "wayland-client",
+ "wayland-protocols",
  "wayland-protocols-wlr",
  "wb-core",
 ]

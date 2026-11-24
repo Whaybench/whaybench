@@ -169,8 +169,9 @@ impl App {
                     if let Some(new) = self.surface.tear_out(pid, tab, x, y) {
                         record::decide("screen", "tab pulled out", "a tab dragged out of the title bar", &[("panel", new.to_string())]);
                         // A tab pulled out is held as by its dot: it can go back into tabs or beside a panel.
-                        self.act = Act::Hold { pid: new, gx: 60.0, gy: 12.0, dock: true };
-                        self.focus_panel(new);
+                        let w = self.surface.get(new).map_or(0.0, |p| p.rect.w);
+                        self.act = Act::Hold { pid: new, gx: w / 2.0, gy: title() / 2.0, dock: true };
+                        self.press_panel(new);
                     } else {
                         self.act = Act::Swallow;
                     }
@@ -195,7 +196,7 @@ impl App {
         }
         // While a settings window is open, a press elsewhere does nothing.
         if let Some(m) = self.surface.modal().map(|m| (m.pid, m.rect))
-            && !m.1.contains(x, y) { self.focus_panel(m.0); self.act = Act::Swallow; return false; }
+            && !m.1.contains(x, y) { self.press_panel(m.0); self.act = Act::Swallow; return false; }
         if self.menu_under((x, y).into()).is_some() { return true; }
         // A press on an open menu is the menu's alone: raising the panel under it would take the keyboard from the
         // menu, and GTK then drops the menu before the item is chosen.
@@ -205,7 +206,7 @@ impl App {
             if let Some((pid, edges)) = self.surface.edges_at(x, y) {
                 let partners = self.surface.partners(pid, edges);
                 self.act = Act::Resize { pid, edges, partners };
-                self.focus_panel(pid);
+                self.press_panel(pid);
                 return false;
             }
             let hit = bar_hit(self, top, x, y);
@@ -236,7 +237,8 @@ impl App {
                     self.drag_begins(self.surface.get(top).and_then(|p| p.tabs.get(i)).map(|t| t.id));
                     if let Some(p) = self.surface.get_mut(top) { p.active = i; }
                     self.act = Act::TabPull { pid: top, tab: i, x, y };
-                    self.focus_panel(top);
+                    self.tab_pressed(top);
+                    self.press_panel(top);
                     self.person_chose(top);
                     self.note_saved_soon();
                     return false;
@@ -245,7 +247,8 @@ impl App {
                     let (gx, gy, dock) = { let p = self.surface.get(top).unwrap(); (x - p.rect.x, y - p.rect.y, crate::render::on_dot(&self.theme, p, x, y)) };
                     self.drag_begins(self.surface.get(top).map(|p| p.tab().id));
                     self.act = Act::Hold { pid: top, gx, gy, dock };
-                    self.focus_panel(top);
+                    self.tab_pressed(top);
+                    self.press_panel(top);
                     self.person_chose(top);
                     return false;
                 }
@@ -253,7 +256,7 @@ impl App {
             }
         }
         if self.surface.get(top).is_some_and(|p| p.rect.bar().contains(x, y)) { return false; }
-        self.focus_panel(top);
+        self.press_panel(top);
         self.person_chose(top);
         true
     }

@@ -37,7 +37,19 @@ pub enum Request {
 }
 
 /// A shot waiting for the next frame.
-pub struct Shot { pub out: PathBuf, pub panel: Option<usize>, pub app: Option<String> }
+pub struct Shot {
+    pub out: PathBuf,
+    pub panel: Option<usize>,
+    pub app: Option<String>,
+    /// A project's: `out` is in its data, written beneath this root, following no link its agents left.
+    pub root: Option<PathBuf>,
+}
+
+/// The plain name of the picture a project asked for.
+fn shot_name(out: &Path) -> Option<String> {
+    let n = out.file_name()?.to_str()?;
+    (n.starts_with("view-shot-") && n.ends_with(".png") && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')).then(|| n.to_string())
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Instance { pub pid: u32, pub socket: String, pub run: String }
@@ -548,10 +560,13 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
     // A request left by an earlier run is not for this one.
     for f in fs::read_dir(&dir)?.flatten() { let _ = fs::remove_file(f.path()); }
     sessions::drop_dead_inboxes(data);
+    // The menu's browser line is the host's until a project's conversation is chosen.
+    let _ = fs::remove_file(wb_core::view::chosen_browser_file(data));
     crate::awake::start(data.clone());
     // The Windows start script could not attach the work disk (3.20): ~/work is on the distribution's own disk now.
     if std::env::var("WHAYBENCH_WORK_DISK").as_deref() == Ok("missing") { wb_core::status::say(data, wb_core::i18n::t("work-disk-missing"), 30); }
     let mut ticks = 0u32;
+    let (handle, mut displays) = (event_loop.handle(), crate::project_display::Displays::default());
     let asked_data = data.clone();
     event_loop.handle().insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, state| {
         crate::start::reap_apps();
@@ -574,7 +589,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
                 let _ = fs::remove_file(f.path());
                 match parsed {
                     Some(Request::Quit) => { state.end_reason = "ctl quit".into(); state.loop_signal.stop(); }
-                    Some(Request::Shot { out, panel, app }) => state.shots.push(Shot { out, panel, app }),
+                    Some(Request::Shot { out, panel, app }) => state.shots.push(Shot { out, panel, app, root: None }),
                     Some(Request::Theme { name }) => state.set_theme(&name),
                     Some(Request::OpenTerm { open }) => state.open_terminal(&open),
                     Some(Request::FocusTerm { tab, agent }) => state.focus_term(&tab, agent),
@@ -597,13 +612,26 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
         if ticks.is_multiple_of(10) { state.tell_waiting(); }
         // Pictures taken while a project was open, once their time is up (and at the first tick, after a restart).
         if ticks.is_multiple_of(100) { crate::render::shots::sweep_expiring(&asked_data); }
+        if ticks.is_multiple_of(10) { displays.sync(&handle, &asked_data); }
         // A project's programs leave requests in its own root; only those that touch nothing outside are taken.
         for (pid, root) in wb_core::roots::Roots::new(asked_data.clone()).projects() {
             for bytes in take_files(&root.ctl()) {
                 match serde_json::from_slice::<Request>(&bytes).ok() {
+                    // A browser it names is its own, by whatever name; while the person is elsewhere it stays behind, and
+                    // it never takes the keyboard.
+                    Some(Request::FocusApp { app } | Request::FrontApp { app }) if crate::browsers::is_browser(&app) => {
+                        state.front_project_browser(&pid);
+                    }
                     Some(Request::FocusApp { app }) => state.focus_app(&app),
                     Some(Request::FrontApp { app }) => state.front_app(&app),
-                    Some(_) => record::warn("run", "request refused", "from a project's root only bringing a panel forward is taken", &[("project", pid.clone())]),
+                    // A picture of its own browser, into its own data: the name it asked by, in its cache.
+                    Some(Request::Shot { out, app: Some(app), .. }) if app == wb_core::view::FIREFOX_APP => {
+                        match shot_name(&out) {
+                            Some(n) => { state.redraw = true; state.shots.push(Shot { out: Path::new("cache").join(n), panel: None, app: Some(wb_core::view::project_browser_app(&pid)), root: Some(root.root.clone()) }) }
+                            None => record::warn("run", "request refused", "a project's picture goes in its own cache", &[("project", pid.clone())]),
+                        }
+                    }
+                    Some(_) => record::warn("run", "request refused", "from a project's root only bringing a panel forward and a picture of its browser are taken", &[("project", pid.clone())]),
                     None => {}
                 }
             }
@@ -743,6 +771,12 @@ mod tests {
         assert_eq!(fs::read_dir(sessions::tab_inbox(&data, "t-new")).unwrap().count(), 1);
     }
     fn w(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+
+    #[test]
+    fn a_projects_picture_is_a_plain_name_in_its_cache() {
+        assert_eq!(shot_name(Path::new("/h/cache/open/up/cache/view-shot-12.png")).as_deref(), Some("view-shot-12.png"));
+        for other in ["/x/a.png", "/x/view-shot-1.txt", "/x/view-shot-..", "/"] { assert_eq!(shot_name(Path::new(other)), None, "{other}"); }
+    }
 
     #[test]
     fn requests_are_understood() {

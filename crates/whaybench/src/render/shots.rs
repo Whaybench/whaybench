@@ -3,7 +3,7 @@ use super::*;
 
 /// Draws the elements off-screen and saves them. Must run before the frame's own drawing: reading after
 /// it makes the next swap of the window fail with ContextLost.
-fn save<E: smithay::backend::renderer::element::RenderElement<GlesRenderer>>(renderer: &mut GlesRenderer, elements: &[E], w: i32, h: i32, clear: [f32; 4], out: &std::path::Path) -> Result<(), String> {
+fn save<E: smithay::backend::renderer::element::RenderElement<GlesRenderer>>(renderer: &mut GlesRenderer, elements: &[E], w: i32, h: i32, clear: [f32; 4], shot: &ctl::Shot) -> Result<(), String> {
     let size: Size<i32, Buffer> = (w, h).into();
     let mut texture: GlesTexture = renderer.create_buffer(Fourcc::Abgr8888, size).map_err(|e| e.to_string())?;
     let mut fb = renderer.bind(&mut texture).map_err(|e| e.to_string())?;
@@ -11,7 +11,12 @@ fn save<E: smithay::backend::renderer::element::RenderElement<GlesRenderer>>(ren
     tracker.render_output(renderer, &mut fb, 0, elements, clear).map_err(|e| format!("{e:?}"))?;
     let map = renderer.copy_framebuffer(&fb, Rectangle::from_size(size), Fourcc::Abgr8888).map_err(|e| e.to_string())?;
     let rgba = renderer.map_texture(&map).map_err(|e| e.to_string())?;
-    write_png(out, w as u32, h as u32, rgba)
+    put(shot, &shot.out, &png(w as u32, h as u32, rgba)?).map_err(|x| x.to_string())
+}
+
+/// Where the picture (or why there is none) goes: a project's beneath its own data.
+fn put(shot: &ctl::Shot, at: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    match &shot.root { Some(r) => wb_core::beneath::write(r, at, bytes), None => ctl::write_atomic(at, bytes) }
 }
 
 /// How long a picture taken while a Briefsafe project is open lives: it is a screen test's, then it goes (spec 3.22:
@@ -81,7 +86,7 @@ pub fn sweep_expiring(d: &wb_core::paths::Data) {
     if changed { let _ = wb_core::paths::write_atomic(&file, serde_json::Value::Array(keep).to_string()); }
 }
 
-pub fn write_png(out: &std::path::Path, w: u32, h: u32, rgba: &[u8]) -> Result<(), String> {
+fn png(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     {
         let mut e = png::Encoder::new(&mut bytes, w, h);
@@ -91,7 +96,7 @@ pub fn write_png(out: &std::path::Path, w: u32, h: u32, rgba: &[u8]) -> Result<(
         let rgb: Vec<u8> = rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
         writer.write_image_data(&rgb).map_err(|x| x.to_string())?;
     }
-    ctl::write_atomic(out, &bytes).map_err(|x| x.to_string())
+    Ok(bytes)
 }
 
 pub(super) fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: Size<i32, Physical>) {
@@ -105,7 +110,7 @@ pub(super) fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: 
         let chosen = by_app.or_else(|| shot.panel.and_then(|i| state.surface.panels.get(i).cloned()));
         let missing = shot.app.is_some() || shot.panel.is_some();
         let mut done = match (chosen, missing) {
-            (None, false) => { let e = window_elements(state, renderer); let c = premultiplied(state.theme.surface_top); save(renderer, &e, surface.w, surface.h, c, &shot.out) }
+            (None, false) => { let e = window_elements(state, renderer); let c = premultiplied(state.theme.surface_top); save(renderer, &e, surface.w, surface.h, c, &shot) }
             (None, true) => Err(wb_core::i18n::t("no-such-panel").to_string()),
             (Some(p), _) => {
                 let a = state.surface.app_of(p.rect);
@@ -116,11 +121,11 @@ pub(super) fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: 
                 let panel = premultiplied(state.theme.panel);
                 f.solid(Rect::new(0.0, 0.0, w as f64, h as f64), panel);
                 e.extend(f.out);
-                save(renderer, &e, w, h, panel, &shot.out)
+                save(renderer, &e, w, h, panel, &shot)
             }
         };
         // Taken while a project is open: removed after a while, whatever it shows.
-        if done.is_ok() && let Some(r) = std::env::var_os(wb_core::paths::ENV_DATA_DIR) {
+        if done.is_ok() && shot.root.is_none() && let Some(r) = std::env::var_os(wb_core::paths::ENV_DATA_DIR) {
             let d = wb_core::paths::Data::new(std::path::PathBuf::from(r));
             if may_hold_project(&d) { done = note_expiring(&d, &shot.out); }
         }
@@ -128,7 +133,7 @@ pub(super) fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: 
             Ok(()) => record::detail("screen", "panel shot", &[("panel", format!("{:?}", shot.panel)), ("took", format!("{}ms", began.elapsed().as_millis()))]),
             Err(e) => {
                 record::warn("screen", "panel not shot", &e, &[("panel", format!("{:?}", shot.panel))]);
-                let _ = std::fs::write(ctl::error_file(&shot.out), e);
+                let _ = put(&shot, &ctl::error_file(&shot.out), e.as_bytes());
             }
         }
     }
@@ -137,6 +142,20 @@ pub(super) fn take_shots(state: &mut App, renderer: &mut GlesRenderer, surface: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_projects_picture_follows_no_link_its_agents_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let (root, other) = (dir.path().join("cache/open/up"), dir.path().join("elsewhere"));
+        for d in [&root, &other] { std::fs::create_dir_all(d).unwrap(); }
+        let shot = ctl::Shot { out: "cache/view-shot-1.png".into(), panel: None, app: None, root: Some(root.clone()) };
+        std::os::unix::fs::symlink(&other, root.join("cache")).unwrap();
+        assert!(put(&shot, &shot.out, b"x").is_err());
+        assert_eq!(std::fs::read_dir(&other).unwrap().count(), 0, "nothing through the link");
+        std::fs::remove_file(root.join("cache")).unwrap();
+        put(&shot, &shot.out, b"x").unwrap();
+        assert_eq!(std::fs::read(root.join(&shot.out)).unwrap(), b"x");
+    }
+
     #[test]
     fn a_picture_whose_time_is_up_goes_and_one_written_over_since_stays() {
         let root = std::env::temp_dir().join(format!("wb-shots-{}", std::process::id()));

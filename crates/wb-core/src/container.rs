@@ -12,9 +12,20 @@ use crate::{paths::Data, roots::{CLAUDE_DIR, PROJECT_DATA, Stub}};
 /// never take each other's container.
 pub fn name(s: &Stub) -> String {
     let place = s.open_at.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let hash = place.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
     // The whole 64 bits: two data folders must not share a container.
-    format!("whaybench-{}-{:016x}", s.id, hash)
+    format!("whaybench-{}-{:016x}", s.id, hash(&place))
+}
+
+fn hash(text: &str) -> u64 { text.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3)) }
+
+/// Where a project's programs find Whaybench's display: a folder of the host's with one socket in it, which takes only
+/// that project's windows. A folder, not the socket itself: a restarted Whaybench makes the socket anew in it.
+pub const DISPLAY_IN_CONTAINER: &str = "/opt/whaybench/display";
+pub const DISPLAY_SOCKET: &str = "wayland-0";
+
+/// That folder on the host, in memory and private to the person. Named by a hash: a socket's path has little room.
+pub fn display_dir(s: &Stub) -> PathBuf {
+    crate::vault::runtime_dir().join("display").join(format!("{:016x}", hash(&name(s))))
 }
 
 fn os_value<'a>(os_release: &'a str, key: &str) -> Option<&'a str> {
@@ -66,13 +77,15 @@ pub fn running(s: &Stub) -> bool {
 fn real_dir(program: &Path) -> Option<PathBuf> { std::fs::canonicalize(program).ok()?.parent().map(Path::to_path_buf) }
 
 /// What the container is started with (spec 3.22). `home` is the person's home folder, `programs` the folders of the
-/// programs the agents run (Whaybench's own, Claude Code's, Codex's).
-pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec<String> {
+/// programs the agents run (Whaybench's own, Claude Code's, Codex's), `display` the folder of the project's own display.
+pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf], display: Option<&Path>) -> Vec<String> {
     let path = |p: &Path| p.to_string_lossy().to_string();
     let data = path(&s.open_at);
     // No capabilities and no gaining of privileges: the agents work as the person, in their project.
     let mut a: Vec<String> = ["run", "-d", "--init", "--name", &name(s), "--userns=keep-id", "--security-opt", "label=disable",
-        "--cap-drop=ALL", "--security-opt=no-new-privileges"].map(String::from).to_vec();
+        "--cap-drop=ALL", "--security-opt=no-new-privileges",
+        // The project's browser shares pictures between its processes there; podman's own 64 MB are few for it.
+        "--shm-size=1g"].map(String::from).to_vec();
     // The time of day is the computer's (a container's is UTC), where it has one: podman refuses to start without.
     if std::fs::canonicalize("/etc/localtime").is_ok() { a.push("--tz=local".into()); }
     // A vault (a FUSE mount) opens inside a folder of the person's own, bound in its place over `cache/open`: the
@@ -88,7 +101,8 @@ pub fn run_args(s: &Stub, image: &str, home: &Path, programs: &[PathBuf]) -> Vec
     // The host's agent add-ons, read-only where the project's data names them: a project's agents are set up from them.
     // Apart from the project's data (a vault's FUSE folder cannot take a mount): found there by WHAYBENCH_AGENT_ADDONS.
     if let Some(host) = s.open_at.ancestors().nth(3) && host.join("addons/agents").is_dir() { bind(&host.join("addons/agents"), Path::new(crate::agents::ADDONS_IN_CONTAINER), true); }
-    for p in ["/usr", "/etc/alternatives", "/etc/pki", "/etc/ssl", "/etc/ca-certificates"].map(Path::new).iter().filter(|p| p.exists()) { bind(p, p, true); }
+    if let Some(at) = display { bind(at, Path::new(DISPLAY_IN_CONTAINER), true); }
+    for p in ["/usr", "/etc/alternatives", "/etc/fonts", "/etc/pki", "/etc/ssl", "/etc/ca-certificates"].map(Path::new).iter().filter(|p| p.exists()) { bind(p, p, true); }
     // A home of the project's own, writable (tool caches, settings), where the person's is: nothing of theirs in it.
     // A vault's is in the vault, named by HOME only (a FUSE folder cannot be mounted).
     if !s.vault { bind(&s.stored().root.join("home"), home, false); }
@@ -343,6 +357,10 @@ pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
         for dir in ["cache/tmp", CLAUDE_DIR, "home"] { crate::beneath::mkdir(&s.stored().root, Path::new(dir)).map_err(|e| format!("{dir}: {e}"))?; }
         prepare_claude(s, &home)?;
         programs_bin(s, &home)?;
+        // Without it the project opens all the same, only with no browser of its own.
+        let at = display_dir(s);
+        let display = crate::vault::private_dir(&at);
+        if let Err(e) = &display { crate::log::warn("session", "no display for the project", e, &[("project", s.id.clone())]); }
         // The plugins' marketplaces, as the person's own list names them (the project's copy is its agents' to change).
         let mut read = programs.to_vec();
         read.extend(marketplaces(&home.join(".claude/plugins/known_marketplaces.json"), &home));
@@ -360,7 +378,7 @@ pub fn start(s: &Stub, programs: &[PathBuf]) -> Result<(), String> {
         for p in read.iter().chain([home.join(".claude/plugins/cache"), home.join(".rustup"), home.join(".cargo/bin"), home.join(".local/bin"), s.folder.clone(), s.open_at.clone()].iter()).filter(|_| !s.vault) {
             if let Ok(rel) = p.strip_prefix(&home) && (p.exists() || p == &s.open_at) { crate::beneath::mkdir(&s.stored().root, &Path::new("home").join(rel)).map_err(|e| format!("{}: {e}", rel.display()))?; }
         }
-        let out = Command::new("podman").args(run_args(s, &image, &home, &read)).output().map_err(|e| format!("podman: {e}"))?;
+        let out = Command::new("podman").args(run_args(s, &image, &home, &read, display.is_ok().then_some(at.as_path()))).output().map_err(|e| format!("podman: {e}"))?;
         if out.status.success() { Ok(()) } else { Err(format!("podman: {}", String::from_utf8_lossy(&out.stderr).trim())) }
     })
 }
@@ -519,6 +537,18 @@ pub fn paused<T>(s: &Stub, work: impl FnOnce() -> Result<T, String>) -> Result<T
     out
 }
 
+/// Shows the project's browser (started when it does not run); why not, in words for the person.
+pub fn show_browser(s: &Stub) -> Result<(), String> {
+    let out = Command::new("podman").args(["exec", &name(s), "whaybench-view", "browser"]).stdin(Stdio::null()).output().map_err(|e| format!("podman: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+/// Asks the project's browser to end, so it writes its tabs and sign-ins before its container stops; bounded.
+pub fn end_browser(s: &Stub) {
+    if !running(s) { return; }
+    let _ = Command::new("timeout").args(["8", "podman", "exec", &name(s), "whaybench-view", "browser", "end"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+}
+
 /// Lets a project's container go on if it was left paused (a snapshot stopped half way).
 pub fn unpause(s: &Stub) {
     if status(s).as_deref() == Some("paused") { let _ = Command::new("podman").args(["unpause", &name(s)]).stdout(Stdio::null()).stderr(Stdio::null()).status(); }
@@ -591,7 +621,7 @@ mod tests {
     fn the_container_gets_the_project_and_read_only_programs_but_no_host_data() {
         let host = Data::new(PathBuf::from("/h/.local/share/whaybench"));
         let s = Stub::new(&host, "up", "Up", Path::new("/w/up"));
-        let a = run_args(&s, "img:1", Path::new("/h"), &[]).join(" ");
+        let a = run_args(&s, "img:1", Path::new("/h"), &[], None).join(" ");
         assert!(a.contains("-v /w/up:/w/up "), "{a}");
         assert!(a.contains(&format!(":{}", s.open_at.display())), "the open place at its own path");
         assert!(a.contains("--tmpfs /w/up/.whaybench:ro"), "where the data rests is hidden");
@@ -600,6 +630,10 @@ mod tests {
         assert!(!a.contains("-v /h/.local/share/whaybench:"), "never the host's data");
         assert!(!a.contains(".claude:") && !a.contains(".codex:"), "never the host's agent settings");
         assert!(a.ends_with("img:1 sleep infinity"));
+        assert!(!a.contains("wayland") && !a.contains("DBUS") && !a.contains(DISPLAY_IN_CONTAINER), "no display of the desktop's, and none of its own unless given");
+        let with = run_args(&s, "img:1", Path::new("/h"), &[], Some(&display_dir(&s))).join(" ");
+        assert!(with.contains(&format!("-v {}:{DISPLAY_IN_CONTAINER}:ro", display_dir(&s).display())), "its own display, read-only: {with}");
+        assert!(display_dir(&s).join(DISPLAY_SOCKET).as_os_str().len() < 100, "a socket's path has little room");
         let e = exec_args(&s, Path::new("/w/up"), &["TERM".into(), "CLAUDE_CODE_OAUTH_TOKEN".into()], "claude", &["--resume".into(), "x".into()]);
         assert!(e.join(" ").starts_with(&format!("exec -it --detach-keys= -w /w/up -e TERM -e CLAUDE_CODE_OAUTH_TOKEN {} sh -c", name(&s))));
         assert_eq!(&e[e.len() - 4..], ["sh", "claude", "--resume", "x"]);

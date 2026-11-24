@@ -357,7 +357,7 @@ impl Surface {
         Some(Zone { target: t.pid, how, preview })
     }
 
-    /// Carries out a drop: into tabs (dropped one in front), or the other panel gives way.
+    /// Carries out a drop: into tabs (the dropped one's front tab in front), or the other panel gives way.
     pub fn apply_drop(&mut self, held: u64, zone: Zone) {
         match zone.how {
             How::Tab => {
@@ -367,7 +367,7 @@ impl Surface {
                 let mut tabs = h.tabs;
                 tabs.append(&mut t.tabs);
                 t.tabs = tabs;
-                t.active = 0;
+                t.active = h.active;
                 self.raise(zone.target);
             }
             How::Side(side) => {
@@ -397,8 +397,10 @@ impl Surface {
         let p = self.get_mut(pid)?;
         if p.tabs.len() < 2 || tab >= p.tabs.len() { return None; }
         let t = p.tabs.remove(tab);
+        if tab < p.active { p.active -= 1; }
         p.active = p.active.min(p.tabs.len() - 1);
-        let r = Rect::new(x - 60.0, y - 12.0, p.rect.w, p.rect.h);
+        // Held by its dot, the middle of its title bar: the dot goes onto the targets, so every one is in the pointer's reach.
+        let r = Rect::new(x - p.rect.w / 2.0, y - title() / 2.0, p.rect.w, p.rect.h);
         self.panels.push(Panel::new(new, t, r));
         Some(new)
     }
@@ -407,6 +409,8 @@ impl Surface {
     pub fn remove_tab(&mut self, id: u64) -> bool {
         let Some(i) = self.panels.iter().position(|p| p.tabs.iter().any(|t| t.id == id)) else { return false };
         let p = &mut self.panels[i];
+        // The tab in front stays in front when one before it goes: another would take its place, and the keys with it.
+        if p.tabs.iter().position(|t| t.id == id).is_some_and(|j| j < p.active) { p.active -= 1; }
         p.tabs.retain(|t| t.id != id);
         if p.tabs.is_empty() { self.panels.remove(i); } else { p.active = p.active.min(p.tabs.len() - 1); }
         true
@@ -984,6 +988,20 @@ mod tests {
         s.panels[0].ty = -50.0;
         s.keep_reachable(1);
         assert_eq!((s.panels[0].tx, s.panels[0].ty), (1460.0, 0.0));
+    }
+
+    #[test]
+    fn the_tab_in_front_stays_when_another_goes() {
+        let mut s = surface(&[Rect::new(0.0, 0.0, 750.0, 450.0)]);
+        for id in [11, 12, 13] { s.panels[0].tabs.push(Tab { id, key: format!("app#{id}"), name: "t".into() }); }
+        s.panels[0].active = 2;
+        let first = s.panels[0].tabs[0].id;
+        s.remove_tab(first);
+        assert_eq!(s.panels[0].tab().id, 12, "one before it went");
+        s.remove_tab(13);
+        assert_eq!(s.panels[0].tab().id, 12, "one after it went");
+        s.remove_tab(12);
+        assert_eq!(s.panels[0].tab().id, 11, "itself");
     }
 
     #[test]

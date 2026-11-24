@@ -18,6 +18,7 @@ ab_glyph.workspace = true
 tempfile = "3"
 # A client in the tests, to speak the protocols as an app does.
 wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
 [lints]

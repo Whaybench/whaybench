@@ -54,9 +54,10 @@ project's pages. `--all` requests the whole page. For a local PDF in **View**, e
 text from the whole file. `shot` saves a PNG; give a new file name. While a Briefsafe project is open, Whaybench removes
 it after ten minutes.
 
-From inside a [Briefsafe project](briefsafe.md) conversation, the helper only opens project files, with `open`. Logs and
-archives open in a terminal, whose program runs in the project's container where it has one. Run the other commands from
-a shell outside that conversation.
+From inside a [Briefsafe project](briefsafe.md) conversation, the helper opens project files with `open`, and uses the
+project's own browser with `open`, `read --firefox`, `where` and `shot --firefox`. Logs and archives open in a terminal,
+whose program runs in the project's container where it has one. Run the other commands from a shell outside that
+conversation.
 
 ## Browse and sign in
 
@@ -78,7 +79,12 @@ whaybench-view where --text
 Use `where` to get the current PDF page number when Firefox makes it available. `--text` also extracts that page's text
 from a local PDF. If extracting fails, the command says why. If no PDF page is detected, the command reports an error.
 
+An isolated Briefsafe project has a [browser of its own](briefsafe.md#browse-in-the-project). The browser panel shows
+the one of the conversation you are in.
+
 ## Move Firefox to the desktop
+
+This is for the browser of your ordinary conversations. A project's own browser stays in its panel.
 
 Drag the dot in the browser panel's title bar to the edge of the Whaybench window. If the browser shares a panel with
 other tabs, drag its tab out of the title bar first. Release when **Into a window of its own** appears.

@@ -279,6 +279,7 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             // The open place goes only once the container is gone: a project is never taken for closed while it runs.
             // Its tabs first: each ends its agent (which writes what it has), then the container stops (spec 3.22).
             wb_core::container::close_tabs(&st2, &st.data, std::time::Duration::from_secs(8));
+            if wb_core::container::opened_isolated(&st2) { wb_core::container::end_browser(&st2); }
             let closed = wb_core::container::life(&st2, || {
                 if wb_core::container::podman_found() { wb_core::container::stop(&st2)?; }
                 // The vault before the open place: one that will not close (a panel holds a file in it) leaves the

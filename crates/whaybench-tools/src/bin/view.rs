@@ -5,7 +5,7 @@ mod a11y;
 use std::{io::Read, path::Path, process::Command};
 
 use serde_json::{json, Value};
-use wb_core::{paths::{self, Data}, sessions, view::{self, Link}};
+use wb_core::{own_browser, paths::{self, Data}, sessions, view::{self, Link}};
 
 const HELP: &str = "The view panel is where everything you show the person opens, and nowhere else. It goes with your session: when
 the person comes back to this session, your views are there. Never open anything outside it: no xdg-open, gio open,
@@ -88,6 +88,11 @@ fn in_reach(d: &Data, who: Option<&str>, target: String) -> Result<String, Strin
 
 fn flag(args: &[String], name: &str) -> bool { args.iter().any(|a| a == name) }
 
+/// Where the picture goes: `--out`, else the data folder's cache.
+fn shot_out(args: &[String], d: &Data) -> String {
+    args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)).map(|a| absolute(a)).unwrap_or_else(|| d.cache().join("view-shot.png").to_string_lossy().to_string())
+}
+
 fn link_text(l: &Link) -> String {
     match l { Link::Follow => wb_core::i18n::t("linked-to-session-tab").into(), Link::Session(s) => wb_core::i18n::f("session", &[("s", (s).to_string())]), Link::Target(p, t) => wb_core::i18n::f("pinned-view", &[("t", (t).to_string()), ("p", (p).to_string())]) }
 }
@@ -104,10 +109,18 @@ fn print_read(v: &Value) {
 }
 
 fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
-    // In a Briefsafe project's conversation only showing a page or file in the project's view works (its requests
-    // reach the view through the project's own folder); the rest is the host's, and is said so, not left to time out.
-    if wb_core::roots::is_project_root(d) && !matches!(args.first().map(String::as_str), Some("open" | "--help" | "-h") | None) {
-        return Err(wb_core::i18n::t("briefsafe-view-host-only").into());
+    // In a Briefsafe project's conversation: showing a page or file in the project's view (its requests reach the view
+    // through the project's own folder), and the project's own browser, which runs beside the agents. The rest is the
+    // host's, and is said so, not left to time out.
+    let project = wb_core::roots::is_project_root(d);
+    if project {
+        let here = match args.first().map(String::as_str) {
+            Some("open" | "--help" | "-h" | "where" | "browser") | None => true,
+            Some("read" | "shot") => flag(&args, "--firefox"),
+            _ => false,
+        };
+        if !here { return Err(wb_core::i18n::t("briefsafe-view-host-only").into()); }
+        if matches!(args.first().map(String::as_str), Some("read" | "where")) { own_browser::enter()?; }
     }
     match args.first().map(String::as_str) {
         Some("open") => {
@@ -124,11 +137,17 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
                 let f = dir.join(format!("{}.html", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|t| t.as_millis()).unwrap_or(0)));
                 std::fs::write(&f, html).map_err(|e| e.to_string())?;
                 f.to_string_lossy().to_string()
-            } else { in_reach(d, who.as_deref(), resolve_target(target)?)? };
+            } else {
+                let at = resolve_target(target)?;
+                // A project's own browser sees the files where its agents see them: no copy for it.
+                if project && firefox { at } else { in_reach(d, who.as_deref(), at)? }
+            };
             // A web address opens in the browser tab, where the person's sign-ins are; the view keeps pages and files.
             if firefox || what.starts_with("http://") || what.starts_with("https://") {
-                if wb_core::roots::is_project_root(d) { return Err(wb_core::i18n::t("briefsafe-view-host-only").into()); }
-                view::open_in_firefox(d, &what, page).map_err(|e| e.to_string())?;
+                if project {
+                    own_browser::open(d, Some(&view::address(&what, page)))?;
+                    wb_core::status::front_app(d, view::FIREFOX_APP);
+                } else { view::open_in_firefox(d, &what, page).map_err(|e| e.to_string())?; }
                 println!("{}", wb_core::i18n::f("open-requested-in-firefox", &[("what", (what).to_string())]));
                 return Ok(());
             }
@@ -179,7 +198,7 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
             let all = flag(&args, "--all");
             let read = if flag(&args, "--firefox") {
                 let mut v = a11y::read_text(d, all)?;
-                v["link"] = serde_json::json!(wb_core::i18n::ai("view-link-firefox"));
+                v["link"] = serde_json::json!(wb_core::i18n::ai(if project { "view-link-firefox-project" } else { "view-link-firefox" }));
                 v
             } else { view::read_panel(d, view::FIRST_VIEW, all)? };
             print_read(&read);
@@ -200,8 +219,21 @@ fn run(args: Vec<String>, d: &Data) -> Result<(), String> {
             }
             Ok(())
         }
+        // Whaybench's own (the panel menu, a project's log out): the project's browser shown, or asked to end.
+        Some("browser") if project => {
+            if args.get(1).is_some_and(|a| a == "end") { own_browser::end(d); return Ok(()); }
+            own_browser::open(d, None)
+        }
+        Some("shot") if project => {
+            let file = own_browser::shot(d)?;
+            let out = shot_out(&args, d);
+            std::fs::copy(&file, &out).map_err(|e| format!("{out}: {e}"))?;
+            let _ = std::fs::remove_file(&file);
+            println!("{out}");
+            Ok(())
+        }
         Some("shot") => {
-            let out = args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)).map(|a| absolute(a)).unwrap_or_else(|| d.cache().join("view-shot.png").to_string_lossy().to_string());
+            let out = shot_out(&args, d);
             let exe = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("whaybench");
             let o = Command::new(exe).args(["ctl", "--data-dir", &d.root.to_string_lossy(), "shot", "--out", &out, "--app", if flag(&args, "--firefox") { view::FIREFOX_APP } else { view::VIEW_APP }]).output().map_err(|e| e.to_string())?;
             if !o.status.success() { return Err(String::from_utf8_lossy(&o.stderr).trim().to_string()); }

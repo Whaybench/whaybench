@@ -11,6 +11,7 @@ pub mod log;
 pub mod map;
 pub mod map_tool;
 pub mod memory;
+pub mod own_browser;
 pub mod paths;
 pub mod prompt;
 pub mod records;

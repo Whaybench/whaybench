@@ -76,6 +76,7 @@ view-link-follow-none = View: follows the conversation the person chose; none is
 view-link-session = View: stays on { $session }, whatever conversation the person chose.
 view-link-page = View: pinned to this page by the person, whatever conversation is chosen; every session reads the same page.
 view-link-firefox = View: the Firefox panel. It belongs to no session: every session reads the same tab the person has in front.
+view-link-firefox-project = View: this project's own browser. Every conversation of the project reads the same tab the person has in front; its sign-ins are the project's, not those of the person's other browser.
 typed-from-session = [From the { $session } conversation: its agent sent this, the person did not type it.]
 ask-denied = The person declined this in Whaybench.
 ask-shown = Not asked here: Whaybench shows these questions and their options to the person in its answer panel, and their choice comes as the next message. Do not ask them again in another way; end your turn now and wait for that message.
