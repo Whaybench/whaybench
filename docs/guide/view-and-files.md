@@ -87,7 +87,7 @@ the one of the conversation you are in.
 This is for the browser of your ordinary conversations. A project's own browser stays in its panel.
 
 Drag the dot in the browser panel's title bar to the edge of the Whaybench window. If the browser shares a panel with
-other tabs, drag its tab out of the title bar first. Release when **Into a window of its own** appears.
+other tabs, drag its tab up or down out of the title bar first. Release when **Into a window of its own** appears.
 
 To bring it back, click **↩ Browser** on the conversation terminal's title bar or choose **Panels → Browser**.
 Firefox restarts with the same profile. If Firefox fails to close, the move stops and Whaybench logs why.

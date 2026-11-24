@@ -632,8 +632,9 @@ impl Surface {
         let s = &saved.panels[at];
         if let Some(existing) = self.panels.iter_mut().find(|p| p.saved_at == Some(at)) {
             let order = |k: &String| s.tabs.iter().position(|t| t == k).unwrap_or(usize::MAX);
-            existing.tabs.push(tab);
-            existing.tabs.sort_by_key(|t| order(&t.key));
+            // Before the first tab saved after it; the others stay in the order the person gave them.
+            let at = existing.tabs.iter().position(|t| order(&t.key) > order(&tab.key)).unwrap_or(existing.tabs.len());
+            existing.tabs.insert(at, tab);
             existing.active = existing.tabs.iter().position(|t| t.key == s.active).unwrap_or(0);
             return Ok(existing.pid);
         }
@@ -1070,6 +1071,19 @@ mod tests {
         assert_eq!(p.tabs.iter().map(|t| t.key.as_str()).collect::<Vec<_>>(), ["firefox#1", "app#1"]);
         assert_eq!(p.tab().key, "firefox#1");
         assert!(back.place_saved(&saved, tab(77)).is_err(), "not in the layout");
+        // Reordered, closed and opened again: the rest keep the person's order.
+        let key = |k: &str| Tab { id: k.len() as u64 + 900, key: k.into(), name: String::new() };
+        let saved = SavedLayout { panels: vec![SavedPanel { x: 0.0, y: 0.0, w: 0.5, h: 0.5, active: "a".into(), tabs: ["a", "bb", "ccc"].map(String::from).to_vec() }], ..SavedLayout::default() };
+        let mut s = Surface::new(1000.0, 600.0);
+        for k in ["ccc", "a", "bb"] { s.place_saved(&saved, key(k)).unwrap(); }
+        let keys = |s: &Surface| s.panels[0].tabs.iter().map(|t| t.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&s), ["a", "bb", "ccc"], "as saved, whatever order they come in");
+        let pid = s.panels[0].pid;
+        s.move_tab(pid, 2, 0);
+        let gone = s.panels[0].tabs.iter().find(|t| t.key == "bb").unwrap().id;
+        s.remove_tab(gone);
+        s.place_saved(&saved, key("bb")).unwrap();
+        assert_eq!(keys(&s), ["bb", "ccc", "a"], "ccc stays before a");
     }
 
     #[test]
