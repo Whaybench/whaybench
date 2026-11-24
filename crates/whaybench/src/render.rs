@@ -332,6 +332,9 @@ pub enum Back { Browser, Panel(usize) }
 /// The share of a title bar its tabs may take.
 const TABS_SHARE: f64 = 0.7;
 
+/// A tab is no narrower than this, its × included: what does not fit then is left out, as ever.
+const TAB_LEAST: f64 = 60.0;
+
 /// How wide a tab may be so that all fit in `room`: the short ones stay whole, the long ones share what is left.
 fn fair_width(wants: &[f64], room: f64) -> f64 {
     let mut sorted = wants.to_vec();
@@ -339,7 +342,7 @@ fn fair_width(wants: &[f64], room: f64) -> f64 {
     let mut left = room;
     for (i, w) in sorted.iter().enumerate() {
         let share = left / (sorted.len() - i) as f64;
-        if *w > share { return share; }
+        if *w > share { return share.max(TAB_LEAST); }
         left -= w;
     }
     f64::INFINITY
@@ -869,5 +872,6 @@ mod tests {
         assert_eq!(fair_width(&[100.0, 120.0], 300.0), f64::INFINITY, "they fit");
         assert_eq!(fair_width(&[400.0, 300.0], 300.0), 150.0, "two long ones halve it");
         assert_eq!(fair_width(&[60.0, 400.0, 400.0], 300.0), 120.0, "a short one stays whole");
+        assert_eq!(fair_width(&[200.0; 20], 300.0), super::TAB_LEAST, "of too many, some are left to press");
     }
 }

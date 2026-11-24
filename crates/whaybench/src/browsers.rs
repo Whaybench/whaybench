@@ -110,7 +110,7 @@ impl App {
         if !is_browser(key) { return true; }
         let side = view::browser_project(key);
         let there = match &self.browsers.last { Went::Host => side.is_none() && !self.typing_for_project(), Went::Project(p) => side == Some(p.as_str()), Went::Away => false };
-        there || self.asked(side) && (side.is_none() || self.browsers.side.as_deref() == side)
+        there || self.asked(side) && self.browsers.side.as_deref() == side
     }
 
     /// Notes who has the keyboard now, by the person's going there or not. A settings window (`modal`) has it only for a
@@ -148,7 +148,7 @@ impl App {
         let here = self.keys_project();
         match project {
             // The host's opens with the keyboard, as it always has; not while the person types in a project's, or did when it went.
-            None => if here.is_none() && self.browsers.last == Went::Host && !self.typing_for_project() || self.asked(None) { Opens::WithKeys } else { Opens::InFront },
+            None => if here.is_none() && self.browsers.last == Went::Host && !self.typing_for_project() || self.asked(None) && self.browsers.side.is_none() { Opens::WithKeys } else { Opens::InFront },
             Some(p) if here.as_deref() == Some(p) => Opens::WithKeys,
             Some(p) if self.chosen_isolated().is_none_or(|s| s.id != p) => Opens::Elsewhere,
             Some(p) => if self.asked(Some(p)) { Opens::WithKeys } else { Opens::InFront },

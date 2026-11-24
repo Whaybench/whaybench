@@ -86,13 +86,18 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         let line: Line = Default::default();
         {
             let (line, root) = (line.clone(), d.root.clone());
-            std::thread::spawn(move || loop {
-                let want = line.lock().unwrap_or_else(|e| e.into_inner()).0.clone();
-                if let Some(s) = want {
-                    let text = wb_core::agents::session_line(&root, &s);
-                    line.lock().unwrap_or_else(|e| e.into_inner()).1 = Some((s, text));
+            // Once for each conversation the field is empty for: it reads every record.
+            std::thread::spawn(move || {
+                let mut asked = None;
+                loop {
+                    let want = line.lock().unwrap_or_else(|e| e.into_inner()).0.clone();
+                    if let Some(s) = want.clone().filter(|_| want != asked) {
+                        let text = wb_core::agents::session_line(&root, &s);
+                        line.lock().unwrap_or_else(|e| e.into_inner()).1 = Some((s, text));
+                    }
+                    asked = want;
+                    std::thread::sleep(std::time::Duration::from_secs(1));
                 }
-                std::thread::sleep(std::time::Duration::from_secs(1));
             });
         }
         every(1000, move || {

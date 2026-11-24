@@ -777,7 +777,8 @@ impl App {
             pid
         } else {
             // One that opens while the person is elsewhere takes no place of its own over theirs: with its group.
-            let beside = opens.and_then(|_| self.browser_panel());
+            let saved = self.saved.panels.iter().any(|s| s.tabs.contains(&tab.key));
+            let beside = opens.filter(|_| project.is_some() || !saved).and_then(|_| self.browser_panel());
             match if elsewhere || beside.is_some() { Err(tab) } else { self.surface.place_saved(&self.saved, tab) } {
                 Ok(pid) => {
                     // A member of this place that the layout does not know opened first and sat here alone: it comes in.
@@ -837,6 +838,8 @@ impl App {
             // The person is there, or asked for it.
             Some(crate::browsers::Opens::WithKeys) => {
                 if project.is_none() { self.host_browser_opened(id); }
+                // In front of what its group otherwise shows first (the view).
+                if let Some(p) = self.surface.get_mut(pid) && let Some(i) = p.tabs.iter().position(|t| t.id == id) { p.active = i; }
                 self.press_panel(pid);
             }
             Some(_) => {}

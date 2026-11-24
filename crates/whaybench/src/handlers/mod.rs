@@ -292,7 +292,9 @@ mod tests {
 
     /// Serves the app until it says the step is done (an app that failed ends the test, not hangs it).
     fn until<T>(rx: &mpsc::Receiver<T>, state: &mut crate::App, events: &mut Loop) -> T {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
+            assert!(std::time::Instant::now() < end, "the app did not answer");
             serve(state, events);
             match rx.try_recv() { Ok(v) => return v, Err(mpsc::TryRecvError::Disconnected) => panic!("the app failed"), Err(_) => {} }
         }
@@ -472,7 +474,7 @@ mod tests {
         d.up();
         assert!(d.shows(UP) && d.keys() == TERM, "the page that was asked for shows");
         // The view is looked at, not typed in: the page shows, and nothing typed goes to the one hidden.
-        let mut d = Desk::new();
+        d = Desk::new();
         d.term();
         d.open(None, "dev.whaybench.view");
         d.choose(Some("up"));
@@ -480,7 +482,7 @@ mod tests {
         d.up();
         assert!(d.shows(UP) && d.keys().is_empty(), "{}", d.keys());
         // The tab it would cover is the one typed in.
-        let mut d = Desk::new();
+        d = Desk::new();
         d.term();
         d.open(None, "dev.whaybench.project");
         d.choose(Some("up"));
@@ -501,7 +503,7 @@ mod tests {
         d.asked(1);
         d.up();
         assert!(d.shows(UP) && d.keys() == UP, "by the menu, also from the host's browser");
-        let mut d = Desk::new();
+        d = Desk::new();
         d.host();
         d.term();
         d.choose(Some("up"));
@@ -524,7 +526,7 @@ mod tests {
         let w = d.apps.remove(up);
         w.dialog(&mut d.state, &mut d.events);
         assert_eq!(d.keys(), "org.mozilla.firefox.p-up#2", "the file window the person opened, whatever conversation is chosen");
-        let mut d = Desk::new();
+        d = Desk::new();
         d.host();
         d.term();
         let up = d.up();
@@ -555,7 +557,7 @@ mod tests {
         d.close(up);
         assert_eq!(d.keys(), "", "the next tab is another project's: what is typed goes nowhere");
         // With the view in the panel it comes up, and may have them.
-        let mut d = Desk::new();
+        d = Desk::new();
         d.open(None, "dev.whaybench.view");
         d.term();
         d.choose(Some("up"));
@@ -566,13 +568,13 @@ mod tests {
         d.close(up);
         assert!(d.shows(VIEW) && d.keys() == VIEW);
         // One that had not the keyboard changes nothing, and a conversation that ends gives none to a project's page.
-        let mut d = Desk::new();
+        d = Desk::new();
         d.host();
         let up = d.up();
         d.press(HOST);
         d.close(up);
         assert!(d.shows(HOST) && d.keys() == HOST);
-        let mut d = Desk::new();
+        d = Desk::new();
         d.up();
         d.press(UP);
         d.term();
@@ -662,7 +664,7 @@ mod tests {
         d.close(notify);
         assert!(!d.shows(UP) && d.shows(VIEW));
         // A closes: the view comes up, and B's browser with B's conversation.
-        let mut d = Desk::new();
+        d = Desk::new();
         d.open(None, "dev.whaybench.view");
         d.term();
         d.choose(Some("up"));
@@ -769,7 +771,7 @@ mod tests {
         assert_eq!(d.keys(), TERM);
         d.choose(None);
         assert!(d.shows(HOST), "it comes up with a conversation of the host's");
-        let mut d = Desk::new();
+        d = Desk::new();
         d.open(None, "dev.whaybench.view");
         d.term();
         d.choose(Some("up"));
@@ -781,7 +783,7 @@ mod tests {
         d.state.focus_app(wb_core::view::FIREFOX_APP);
         assert_eq!(d.keys(), HOST, "in a conversation of the host's as always");
         // Beside the project's own page, and by whatever else would give the host's the keys.
-        let mut d = Desk::new();
+        d = Desk::new();
         d.host();
         d.term();
         d.choose(Some("up"));
@@ -796,7 +798,7 @@ mod tests {
         d.state.focus_panel(alone);
         assert_eq!(d.keys(), TERM);
         // The conversation ends under the hands.
-        let mut d = Desk::new();
+        d = Desk::new();
         d.host();
         d.press(HOST);
         d.term();
@@ -820,7 +822,7 @@ mod tests {
         d.open(None, "dev.whaybench.map");
         assert!(d.shows(HOST), "beside its terminal");
         // The same when the host's browser starts for it.
-        let mut d = Desk::new();
+        d = Desk::new();
         d.open(None, "dev.whaybench.project");
         d.term();
         d.choose(Some("up"));
@@ -845,7 +847,7 @@ mod tests {
         w.dialog(&mut d.state, &mut d.events);
         d.apps.push(w);
         assert!(d.state.surface.panels.len() == panels && d.shows(HOST) && d.keys() == HOST, "not over the page typed in");
-        let mut d = Desk::new();
+        d = Desk::new();
         d.host();
         d.term();
         d.up();
@@ -882,6 +884,34 @@ mod tests {
             d.choose(None);
             assert!(d.shows(HOST), "they take turns there");
         }
+    }
+
+    #[test]
+    fn the_hosts_browser_opens_in_front_and_where_it_was() {
+        let mut d = Desk::new();
+        d.open(None, "dev.whaybench.view");
+        d.term();
+        d.host();
+        assert!(d.shows(HOST) && d.keys() == HOST, "not behind the view it stands beside");
+        // Asked for by the menu in a conversation of the host's, then a project's came to the front.
+        d = Desk::new();
+        d.open(None, "dev.whaybench.view");
+        d.term();
+        d.press(TERM);
+        d.state.ask_browser(wb_core::view::FIREFOX_APP);
+        d.choose(Some("up"));
+        d.host();
+        assert_eq!(d.keys(), TERM, "it is not the one asked for now");
+        // A second window that had a panel of its own.
+        d = Desk::new();
+        let mut s = crate::layout::Surface::new(d.state.surface.w, d.state.surface.h);
+        for (i, key) in [HOST, "org.mozilla.firefox#2"].iter().enumerate() {
+            s.panels.push(crate::layout::Panel::new(i as u64 + 1, crate::layout::Tab { id: i as u64 + 1, key: key.to_string(), name: "x".into() }, crate::layout::Rect::new(500.0 * i as f64, 0.0, 400.0, 300.0)));
+        }
+        d.state.saved = s.to_saved((1500, 900));
+        d.host();
+        d.host();
+        assert_eq!(d.state.surface.panels.len(), 2, "each comes back to its own");
     }
 
     /// What opens, closes, is dragged, pressed and chosen, in any order: the three things hold after each step.
