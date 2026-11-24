@@ -21,6 +21,8 @@ fn test_time() -> InputTime {
 
 /// The left mouse button: only it picks up panels.
 const LEFT: u32 = 0x110;
+/// How far a pressed tab is dragged before it moves, so a click does not shift it.
+const TAB_SLACK: f64 = 6.0;
 
 impl App {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
@@ -163,9 +165,15 @@ impl App {
                 let (pid, edges, partners) = (*pid, *edges, partners.clone());
                 self.surface.resize(pid, edges, &partners, x, y);
             }
-            Act::TabPull { pid, tab, x: sx, y: sy } => {
-                let (pid, tab, sx, sy) = (*pid, *tab, *sx, *sy);
-                if (y - sy).abs() > title() || (x - sx).abs() > 60.0 {
+            Act::TabPull { pid, tab: id, x: sx, y: sy, grab, slid } => {
+                let (pid, id, sx, sy, grab, slid) = (*pid, *id, *sx, *sy, *grab, *slid);
+                let Some((p, tab)) = self.surface.get(pid).and_then(|p| Some((p.clone(), p.tabs.iter().position(|t| t.id == id)?))) else { self.act = Act::Swallow; return };
+                if (y - sy).abs() <= title() {
+                    if !slid && (x - sx).abs() <= TAB_SLACK { return; }
+                    self.act = Act::TabPull { pid, tab: id, x: sx, y: sy, grab, slid: true };
+                    let rects = crate::render::tab_rects(self, &p);
+                    self.surface.move_tab(pid, tab, crate::layout::tab_slot(&rects, tab, x - grab));
+                } else {
                     if let Some(new) = self.surface.tear_out(pid, tab, x, y) {
                         record::decide("screen", "tab pulled out", "a tab dragged out of the title bar", &[("panel", new.to_string())]);
                         // A tab pulled out is held as by its dot: it can go back into tabs or beside a panel.
@@ -236,7 +244,8 @@ impl App {
                 Some(BarHit::Tab(i)) => {
                     self.drag_begins(self.surface.get(top).and_then(|p| p.tabs.get(i)).map(|t| t.id));
                     if let Some(p) = self.surface.get_mut(top) { p.active = i; }
-                    self.act = Act::TabPull { pid: top, tab: i, x, y };
+                    let pressed = self.surface.get(top).cloned().and_then(|p| Some((p.tabs.get(i)?.id, crate::render::tab_rects(self, &p).get(i)?.x)));
+                    self.act = match pressed { Some((tab, left)) => Act::TabPull { pid: top, tab, x, y, grab: x - left, slid: false }, None => Act::Swallow };
                     self.tab_pressed(top);
                     self.press_panel(top);
                     self.person_chose(top);

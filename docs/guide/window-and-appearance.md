@@ -25,8 +25,8 @@ another panel.
 | Center | Into the other panel as a tab. The preview says **As a tab of 'Sessions'** if **Sessions** is in front. |
 | Edge | Beside the other panel, which makes room on that side. The preview says **Beside 'Sessions'** in this example. |
 
-Click a tab to bring it forward. To separate it, drag the tab away from the title bar until it becomes a panel of
-its own. Keep dragging to dock it somewhere else. After a move that changes the layout, click **↩** within ten
+Click a tab to bring it forward. Drag it along the title bar to change the order of the tabs. To separate it, drag
+the tab up or down, away from the title bar, until it becomes a panel of its own. Keep dragging to dock it somewhere else. After a move that changes the layout, click **↩** within ten
 seconds to undo it while the arrow is available.
 
 ## Close, reopen, and reset panels

@@ -124,8 +124,9 @@ pub enum Act {
     /// (or a tab pulled out), so it can go onto a target circle of another panel; else it only moves.
     Hold { pid: u64, gx: f64, gy: f64, dock: bool },
     Resize { pid: u64, edges: Edges, partners: Vec<(u64, Side)> },
-    /// A tab pressed: it may be pulled out of the bar.
-    TabPull { pid: u64, tab: usize, x: f64, y: f64 },
+    /// A tab pressed at x, y, `grab` from its left: along the bar it changes places (`slid`: it has begun to), away
+    /// from the bar it is pulled out.
+    TabPull { pid: u64, tab: u64, x: f64, y: f64, grab: f64, slid: bool },
     /// The bar's close button pressed, or anything else that the app must not see the release of.
     Swallow,
 }

@@ -61,7 +61,7 @@ pub fn room(of_project: bool, asks: i32, all: f64) -> f64 { if of_project { (ask
 fn app_of_side(side: Option<&str>) -> String { side.map_or(view::FIREFOX_APP.to_string(), view::project_browser_app) }
 
 /// The newest tab of the app (a dialog of it comes after it).
-fn newest(p: &Panel, app: &str) -> Option<usize> { p.tabs.iter().rposition(|t| app_of(&t.key) == app) }
+fn newest(p: &Panel, app: &str) -> Option<usize> { p.tabs.iter().enumerate().filter(|(_, t)| app_of(&t.key) == app).max_by_key(|(_, t)| t.id).map(|(i, _)| i) }
 
 /// Instead of a browser that has no place here: the view, else the first tab that is none.
 fn instead(p: &Panel) -> Option<usize> {

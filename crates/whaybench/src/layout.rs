@@ -10,6 +10,23 @@ pub fn title() -> f64 { f64::from_bits(TITLE_BITS.load(std::sync::atomic::Orderi
 // Held in the tests: a test that builds the whole program (a protocol test) would change it under the layout tests
 // running beside it, which measure with the height the program starts with.
 pub fn set_title(text: f64) { if !cfg!(test) { TITLE_BITS.store((text * 28.0 / 13.0).round().to_bits(), std::sync::atomic::Ordering::Relaxed); } }
+/// Where a tab dragged along its bar may be drawn: not past the first place or the last.
+pub fn tab_left(rects: &[Rect], i: usize, left: f64) -> f64 {
+    let (Some(r), Some(first), Some(last)) = (rects.get(i), rects.first(), rects.last()) else { return left };
+    left.min(last.right() - r.w).max(first.x)
+}
+
+/// The place a tab dragged to `left` takes: past the middle of another, that one's.
+pub fn tab_slot(rects: &[Rect], i: usize, left: f64) -> usize {
+    let Some(r) = rects.get(i) else { return i };
+    let left = tab_left(rects, i, left);
+    let mid = |r: &Rect| r.x + r.w / 2.0;
+    let mut to = i;
+    while to + 1 < rects.len() && left + r.w > mid(&rects[to + 1]) { to += 1; }
+    while to > 0 && to <= i && left < mid(&rects[to - 1]) { to -= 1; }
+    to
+}
+
 pub const SNAP: f64 = 12.0;
 pub const GRIP: f64 = 7.0;
 pub const TOUCH: f64 = 2.0;
@@ -391,6 +408,16 @@ impl Surface {
         }
     }
 
+    /// A tab takes another place in its bar; the one in front stays in front.
+    pub fn move_tab(&mut self, pid: u64, from: usize, to: usize) {
+        let Some(p) = self.get_mut(pid) else { return };
+        if from == to || from >= p.tabs.len() || to >= p.tabs.len() { return; }
+        let front = p.tab().id;
+        let t = p.tabs.remove(from);
+        p.tabs.insert(to, t);
+        p.active = p.tabs.iter().position(|t| t.id == front).unwrap_or(0);
+    }
+
     /// A tab pulled out becomes a panel of its own under the pointer. Its new panel's id.
     pub fn tear_out(&mut self, pid: u64, tab: usize, x: f64, y: f64) -> Option<u64> {
         let new = self.new_pid();
@@ -674,6 +701,22 @@ impl SavedLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_tab_dragged_along_its_bar_changes_places() {
+        let rects = [(0.0, 60.0), (64.0, 100.0), (168.0, 40.0)].map(|(x, w)| Rect::new(x, 3.0, w, 24.0));
+        // (the tab, where it is dragged to) -> its new place
+        let cases = [((0, 10.0), 0), ((0, 53.0), 0), ((0, 55.0), 1), ((0, 150.0), 2), ((0, 900.0), 2), ((2, 130.0), 2), ((2, 100.0), 1), ((2, -50.0), 0), ((1, 30.0), 1), ((1, 29.0), 0), ((9, 5.0), 9)];
+        for ((i, left), to) in cases { assert_eq!(tab_slot(&rects, i, left), to, "tab {i} at {left}"); }
+        assert_eq!((tab_left(&rects, 0, 900.0), tab_left(&rects, 2, -50.0)), (148.0, 0.0), "not past the ends");
+        let mut s = Surface::new(1000.0, 600.0);
+        let tab = |id| Tab { id, key: format!("a#{id}"), name: String::new() };
+        s.panels.push(Panel::new(7, tab(1), Rect::new(0.0, 0.0, 400.0, 300.0)));
+        s.panels[0].tabs.extend([tab(2), tab(3)]);
+        s.panels[0].active = 1;
+        s.move_tab(7, 0, 2);
+        assert_eq!(s.panels[0].tabs.iter().map(|t| t.id).collect::<Vec<_>>(), [2, 3, 1]);
+        assert_eq!(s.panels[0].tab().id, 2, "the one in front stays in front");
+    }
     fn tab(id: u64) -> Tab { Tab { id, key: format!("app#{id}"), name: format!("app{id}") } }
     fn surface(rects: &[Rect]) -> Surface {
         let mut s = Surface::new(1500.0, 900.0);

@@ -362,7 +362,7 @@ fn fitting(state: &mut App, name: &str, w: f64) -> String {
     "…".into()
 }
 
-fn tab_rects(state: &mut App, p: &Panel) -> Vec<Rect> {
+pub fn tab_rects(state: &mut App, p: &Panel) -> Vec<Rect> {
     // With tabs each has its own close button, so the bar has none: nothing closes a whole group by accident.
     let mut x = p.rect.x + 6.0;
     // Part of the bar stays free of tabs: that is where the panel is held.
@@ -542,15 +542,24 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
     if let Some(r) = undo_rect(state, p) { add_text(state, renderer, &mut f.out, 1.0, "↩", ink, r); }
     for (_, label, r) in back_rects(state, p) { add_text(state, renderer, &mut f.out, 1.0, &label, ink, r); }
     if p.tabs.len() > 1 {
-        let rects = tab_rects(state, p);
-        for (i, r) in rects.iter().enumerate() {
+        let mut rects = tab_rects(state, p);
+        // A tab dragged along the bar follows the pointer, over the others.
+        if let Act::TabPull { pid, tab, grab, slid: true, .. } = state.act && pid == p.pid
+            && let Some(i) = p.tabs.iter().position(|t| t.id == tab).filter(|i| *i < rects.len()) {
+            rects[i].x = crate::layout::tab_left(&rects, i, state.pointer.0 - grab);
+        }
+        // The chosen one first: on top.
+        let mut order: Vec<usize> = (0..rects.len()).collect();
+        order.sort_by_key(|i| *i != p.active);
+        for i in order {
+            let r = &rects[i];
             let ink = if i == p.active { t.ink } else { t.ink_soft };
             add_text(state, renderer, &mut f.out, 1.0, "×", ink, Rect::new(r.right() - TAB_CLOSE, r.y, TAB_CLOSE, r.h));
             let room = (r.w - TAB_CLOSE).max(1.0);
             let name = fitting(state, &p.tabs[i].name.clone(), room - 10.0);
             add_text(state, renderer, &mut f.out, 1.0, &name, ink, Rect::new(r.x, r.y, room, r.h));
+            if i == p.active { f.card(shaders, *r, Card::plain(radius.min(7.0), premultiplied(t.tab_front))); }
         }
-        if let Some(r) = rects.get(p.active) { f.card(shaders, *r, Card::plain(radius.min(7.0), premultiplied(t.tab_front))); }
     } else {
         // The name at the bar's left; its width only as far as the close button.
         let wide = state.chrome.width(&p.tab().name) + 2.0;
