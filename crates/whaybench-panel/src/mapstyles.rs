@@ -86,15 +86,14 @@ fn settings_file(d: &Data, id: &str) -> PathBuf { d.root.join("addons/map-styles
 /// Changes one setting of a style; `null` goes back to the style's own value.
 pub fn set(d: &Data, id: &str, key: &str, value: Value) -> wb_store::Res<()> {
     if !valid_id(id) { return Err("no such style".into()); }
-    let mut over = read(&settings_file(d, id)).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let mut over = kept(&settings_file(d, id));
     if value.is_null() { over.as_object_mut().map(|o| o.remove(key)); } else { over[key] = value; }
     write_json(&settings_file(d, id), &over)
 }
 
-/// A file shared with other parts of the program, to change and write back: one that cannot be read is set aside, not
-/// written over.
+/// A file of settings to change and write back: one that cannot be read is set aside, not written over.
 fn kept(path: &std::path::Path) -> Value {
-    wb_core::paths::read_kept::<Option<Value>>(path).filter(Value::is_object).unwrap_or_else(|| json!({}))
+    Value::Object(wb_core::paths::read_kept(path))
 }
 
 /// The tree, Default, is the program's own: its indent (letters per level) is in the data folder's settings.json.
@@ -284,8 +283,19 @@ mod tests {
         fs::write(&file, r#"{"language": "ko",, }"#).unwrap();
         set_default_indent(&d, 6).unwrap();
         assert_eq!(default_indent(&d), 6);
-        let aside = fs::read_dir(&dir).unwrap().flatten().find(|f| f.file_name().to_string_lossy().ends_with(".unreadable")).expect("set aside");
-        assert_eq!(fs::read_to_string(aside.path()).unwrap(), r#"{"language": "ko",, }"#);
+        // Not settings at all (an array) is set aside too (here, the confirmations), and so is a style's own file.
+        fs::write(trust_file(&d), r#"["x"]"#).unwrap();
+        assert_eq!(kept(&trust_file(&d)), json!({}));
+        let own = settings_file(&d, "s1");
+        fs::create_dir_all(own.parent().unwrap()).unwrap();
+        fs::write(&own, "{oops").unwrap();
+        set(&d, "s1", "a", json!(1)).unwrap();
+        assert_eq!(read(&own), Some(json!({"a": 1})));
+        let aside = |dir: &std::path::Path| -> Vec<String> { fs::read_dir(dir).unwrap().flatten().filter(|f| f.file_name().to_string_lossy().ends_with(".unreadable")).map(|f| fs::read_to_string(f.path()).unwrap()).collect() };
+        let mut held = aside(&dir);
+        held.sort();
+        assert_eq!(held, [r#"["x"]"#, r#"{"language": "ko",, }"#]);
+        assert_eq!(aside(own.parent().unwrap()), ["{oops"]);
         let _ = fs::remove_dir_all(&dir);
     }
     #[test]

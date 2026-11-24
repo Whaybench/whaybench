@@ -621,7 +621,7 @@ fn clicked(s_: &Shared, uri: &str) {
             let it = s_.borrow().st.item_change_detail(&pid, id).unwrap_or_default();
             let Some(c) = list(&it, "changes").get(k.parse::<usize>().unwrap_or(usize::MAX)).cloned() else { return };
             let label = history::label(&c).chars().take(60).collect::<String>();
-            let where_ = wb_core::i18n::f("text-4", &[("a1", (history::target_name(target)).to_string()), ("a2", (if s(&c, "kind") == "item" { wb_core::i18n::t("item") } else { s(&c, "kind") }).to_string()), ("a3", (s(&c, "id")).to_string()), ("a4", label.clone())]);
+            let where_ = wb_core::i18n::f("text-4", &[("a1", (history::target_name(target)).to_string()), ("a2", (match s(&c, "kind") { k @ ("item" | "area") => wb_core::i18n::t(k), k => k }).to_string()), ("a3", (s(&c, "id")).to_string()), ("a4", label.clone())]);
             // The agent reads it in English; the dialog shows it in the language in use.
             let place = wb_core::i18n::ai_f("project-map-place", &[("kind", s(&c, "kind").to_string()), ("id", s(&c, "id").to_string()), ("label", label)]);
             let cmd = format!("`whaybench-project change-items {pid} {id}`");
