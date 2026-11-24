@@ -11,6 +11,10 @@ names another step.
 - A tab dragged along its title bar changes places with the others, and follows the pointer; only dragged up or down, away
   from the bar, is it pulled out into a panel. Before, 60 pixels sideways pulled it out.
 
+### Fixed
+- A `settings.json` or `addon-trust.json` with a mistake in it is set aside when the map style settings or a style's
+  confirmation write to it, as elsewhere; before, the indent setting replaced all settings.
+
 ## [0.9.4] - 2026-11-24
 
 ### Added

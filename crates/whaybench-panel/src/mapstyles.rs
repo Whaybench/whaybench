@@ -91,6 +91,12 @@ pub fn set(d: &Data, id: &str, key: &str, value: Value) -> wb_store::Res<()> {
     write_json(&settings_file(d, id), &over)
 }
 
+/// A file shared with other parts of the program, to change and write back: one that cannot be read is set aside, not
+/// written over.
+fn kept(path: &std::path::Path) -> Value {
+    wb_core::paths::read_kept::<Option<Value>>(path).filter(Value::is_object).unwrap_or_else(|| json!({}))
+}
+
 /// The tree, Default, is the program's own: its indent (letters per level) is in the data folder's settings.json.
 pub const INDENT: (u64, u64, u64) = (1, 8, 4);
 
@@ -100,7 +106,7 @@ pub fn default_indent(d: &Data) -> u64 {
 
 pub fn set_default_indent(d: &Data, letters: u64) -> wb_store::Res<()> {
     let path = d.root.join("settings.json");
-    let mut v = read(&path).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let mut v = kept(&path);
     v["map_indent"] = json!(letters.clamp(INDENT.0, INDENT.1));
     write_json(&path, &v)
 }
@@ -257,7 +263,7 @@ pub fn allowed(d: &Data, style: &Style) -> bool {
 }
 
 pub fn allow(d: &Data, style: &Style) {
-    let mut k = read(&trust_file(d)).unwrap_or_else(|| json!({}));
+    let mut k = kept(&trust_file(d));
     k[style.path.to_string_lossy().as_ref()] = Value::String(sha(&style.free_text()));
     let _ = write_json(&trust_file(d), &k);
 }
@@ -265,6 +271,23 @@ pub fn allow(d: &Data, style: &Style) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_shared_file_that_cannot_be_read_is_set_aside_and_one_that_can_keeps_the_rest() {
+        let dir = std::env::temp_dir().join(format!("wb-ms-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let d = Data::new(dir.clone());
+        let file = dir.join("settings.json");
+        fs::write(&file, r#"{"language": "ko", "map_indent": 2}"#).unwrap();
+        set_default_indent(&d, 5).unwrap();
+        assert_eq!(read(&file), Some(json!({"language": "ko", "map_indent": 5})));
+        fs::write(&file, r#"{"language": "ko",, }"#).unwrap();
+        set_default_indent(&d, 6).unwrap();
+        assert_eq!(default_indent(&d), 6);
+        let aside = fs::read_dir(&dir).unwrap().flatten().find(|f| f.file_name().to_string_lossy().ends_with(".unreadable")).expect("set aside");
+        assert_eq!(fs::read_to_string(aside.path()).unwrap(), r#"{"language": "ko",, }"#);
+        let _ = fs::remove_dir_all(&dir);
+    }
     #[test]
     fn the_screen_carries_its_nodes_their_branches_and_what_they_require() {
         let n = |id: &str, parent: &str| json!({"id": id, "parent": parent});
