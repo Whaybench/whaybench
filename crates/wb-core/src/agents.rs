@@ -93,11 +93,29 @@ pub fn name_of(data: &Path, agent: Option<&str>) -> String {
 
 /// A session as people tell sessions apart: its agent's name and the start of its number, `Codex 01a1d60c`.
 pub fn session_label(data: &Path, sid: &str) -> String {
+    format!("{} {}", session_agent(data, sid), sid.chars().take(8).collect::<String>())
+}
+
+fn session_agent(data: &Path, sid: &str) -> String {
     let at = crate::roots::for_session(&crate::paths::Data::new(data.to_path_buf()), sid).root;
     let agent = crate::map::read_json(&at.join("sessions").join(format!("{sid}.json")), Value::Null).ok()
         .and_then(|r| r["agent"].as_str().map(String::from));
-    format!("{} {}", name_of(data, agent.as_deref()), sid.chars().take(8).collect::<String>())
+    name_of(data, agent.as_deref())
 }
+
+/// A session's line where a conversation is named: its title, the start of its number and its agent. The title is cut,
+/// not what comes after it: two conversations of one title are told apart by that.
+pub fn session_line(data: &Path, sid: &str) -> String { line_of(data, sid, &crate::sessions::session_name(&crate::paths::Data::new(data.to_path_buf()), sid)) }
+
+/// The same for a conversation that only starts: its name is not asked for yet (that can take the agent's answer).
+pub fn new_session_line(data: &Path, sid: &str) -> String { line_of(data, sid, "") }
+
+fn line_of(data: &Path, sid: &str, name: &str) -> String {
+    let title: String = name.lines().next().unwrap_or_default().to_string();
+    let title = if title.is_empty() { crate::i18n::t("new-session").to_string() } else if title.chars().count() > LINE_TITLE { format!("{}…", title.chars().take(LINE_TITLE).collect::<String>()) } else { title };
+    format!("{title} · {} · {}", sid.chars().take(8).collect::<String>(), session_agent(data, sid))
+}
+const LINE_TITLE: usize = 24;
 
 /// Where a project's container finds the host's agent add-ons.
 pub const ENV_ADDONS: &str = "WHAYBENCH_AGENT_ADDONS";
@@ -566,6 +584,10 @@ mod tests {
         fs::create_dir_all(dir.path().join("sessions")).unwrap();
         fs::write(dir.path().join("sessions/01a1d60c-6.json"), r#"{"agent":"codex"}"#).unwrap();
         assert_eq!((session_label(dir.path(), "01a1d60c-6"), session_label(dir.path(), "a3cf3125-f")), ("Codex 01a1d60c".into(), "Claude Code a3cf3125".into()));
+        // A title is cut before what tells two conversations apart, and one without a title says so.
+        assert!(session_line(dir.path(), "a3cf3125-f").ends_with(" · a3cf3125 · Claude Code"));
+        crate::paths::write_atomic(&dir.path().join("names.json"), serde_json::json!({"a3cf3125-f": "x".repeat(40)}).to_string()).unwrap();
+        assert_eq!(session_line(dir.path(), "a3cf3125-f"), format!("{}… · a3cf3125 · Claude Code", "x".repeat(24)));
         assert_eq!((name_of(dir.path(), None), name_of(dir.path(), Some("codex")), name_of(dir.path(), Some("gone"))), ("Claude Code".into(), "Codex".into(), "gone".into()));
     }
 }

@@ -117,8 +117,6 @@ pub fn session_name(d: &Data, id: &str) -> String {
     record_of(d, id).and_then(|r| r.get("firstPrompt").and_then(Value::as_str).map(String::from)).unwrap_or_default()
 }
 
-pub fn tab_title(d: &Data, id: &str) -> String { session_name(d, id) }
-
 pub(crate) fn strip_count(name: &str) -> String {
     let t = name.trim();
     if let Some(open) = t.rfind(" (") {

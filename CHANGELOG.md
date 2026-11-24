@@ -14,6 +14,8 @@ names another step.
   It opens where the other browser is and takes turns with it.
 - A tab pulled out of a title bar is held by its docking dot, so it reaches the targets of every panel; a panel dropped
   into another keeps its front tab in front. A browser without a saved place opens with the view.
+- A conversation's tab and the empty Input panel name it as `title · number · agent`; the Input panel says its keys on
+  lines of their own. Tabs take at most 70% of a title bar and share it, so there is room to hold the panel by.
 
 ## [0.9.3] - 2026-11-24
 

@@ -10,7 +10,7 @@ use smithay::{
 use wb_core::log as record;
 
 /// Tab titles are cut here.
-pub const NAME_CHARS: usize = 44;
+pub const NAME_CHARS: usize = 56;
 
 pub fn cut_name(name: &str) -> String {
     if name.chars().count() > NAME_CHARS { format!("{}…", name.chars().take(NAME_CHARS).collect::<String>()) } else { name.to_string() }

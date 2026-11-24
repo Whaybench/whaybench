@@ -1,6 +1,6 @@
 //! The input panel: text to the chosen session. Enter sends. Shift+Enter is a new line, also when the
 //! input method re-sends the Enter that ends a syllable without Shift: Shift is tracked here.
-use std::{cell::{Cell, RefCell}, rc::Rc};
+use std::{cell::{Cell, RefCell}, rc::Rc, sync::{Arc, Mutex}};
 
 use gtk::{gdk, glib, prelude::*};
 use wb_core::{paths::Data, sessions, status};
@@ -81,6 +81,20 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         // The keys that switch the input language, as fcitx5 has them now (they are set in Settings → Input…): asked
         // every ten seconds, not every second (each ask is a process).
         let (switch, asked): (Rc<RefCell<String>>, Rc<Cell<i64>>) = Default::default();
+        // A conversation's name can take Claude Code's answer (a process): asked off this thread, which types.
+        type Line = Arc<Mutex<(Option<String>, Option<(String, String)>)>>;
+        let line: Line = Default::default();
+        {
+            let (line, root) = (line.clone(), d.root.clone());
+            std::thread::spawn(move || loop {
+                let want = line.lock().unwrap_or_else(|e| e.into_inner()).0.clone();
+                if let Some(s) = want {
+                    let text = wb_core::agents::session_line(&root, &s);
+                    line.lock().unwrap_or_else(|e| e.into_inner()).1 = Some((s, text));
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            });
+        }
         every(1000, move || {
             let now = glib::monotonic_time();
             if now - asked.get() > 10_000_000 || asked.get() == 0 {
@@ -92,7 +106,12 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             let gone = owner.borrow().as_deref().filter(|p| !p.is_empty()).is_some_and(|p| !wb_core::roots::stubs(&d).iter().any(|s| s.id == p && s.open()));
             if gone { view.buffer().set_text(""); }
             if now - sent_at.get() < 1_500_000 { hint.set_text(wb_core::i18n::t("sent")); return; }
-            let who = target().map(|s| wb_core::agents::session_label(&d.root, &s)).unwrap_or_else(|| wb_core::i18n::t("none").into());
+            let to = target();
+            let known = { let mut l = line.lock().unwrap_or_else(|e| e.into_inner()); l.0 = to.clone().filter(|_| view.buffer().char_count() == 0); l.1.clone() };
+            let who = match to {
+                None => wb_core::i18n::t("none").into(),
+                Some(s) => match known { Some((of, text)) if of == s => text, _ => wb_core::agents::session_label(&d.root, &s) },
+            };
             hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", who), ("switch", switch.borrow().clone())]));
         });
     }

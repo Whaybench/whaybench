@@ -329,14 +329,46 @@ pub enum BarHit { Close, CloseTab(usize), Tab(usize), Undo, Back(Back), Bar }
 pub enum Back { Browser, Panel(usize) }
 
 /// Each tab's area in the bar, as many as fit: left of the close button.
+/// The share of a title bar its tabs may take.
+const TABS_SHARE: f64 = 0.7;
+
+/// How wide a tab may be so that all fit in `room`: the short ones stay whole, the long ones share what is left.
+fn fair_width(wants: &[f64], room: f64) -> f64 {
+    let mut sorted = wants.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let mut left = room;
+    for (i, w) in sorted.iter().enumerate() {
+        let share = left / (sorted.len() - i) as f64;
+        if *w > share { return share; }
+        left -= w;
+    }
+    f64::INFINITY
+}
+
+/// The name as far as it fits in `w`, with an ellipsis.
+fn fitting(state: &mut App, name: &str, w: f64) -> String {
+    let all = state.chrome.width(name);
+    if all <= w { return name.to_string(); }
+    let chars: Vec<char> = name.chars().collect();
+    // From a little above its share of the letters: a name is measured a few times a frame, not once a letter.
+    let from = ((chars.len() as f64 * w / all) as usize + 3).min(chars.len());
+    for n in (1..from).rev() {
+        let cut = format!("{}…", chars[..n].iter().collect::<String>().trim_end());
+        if state.chrome.width(&cut) <= w { return cut; }
+    }
+    "…".into()
+}
+
 fn tab_rects(state: &mut App, p: &Panel) -> Vec<Rect> {
     // With tabs each has its own close button, so the bar has none: nothing closes a whole group by accident.
-    let limit = marks_left(state, p) - 6.0;
     let mut x = p.rect.x + 6.0;
+    // Part of the bar stays free of tabs: that is where the panel is held.
+    let limit = (marks_left(state, p) - 6.0).min(p.rect.x + p.rect.w * TABS_SHARE);
+    let wants: Vec<f64> = p.tabs.iter().map(|t| state.chrome.width(&t.name) + 22.0 + TAB_CLOSE).collect();
+    let most = fair_width(&wants, limit - x - 4.0 * (wants.len() - 1) as f64);
     let mut out = Vec::new();
-    for t in &p.tabs {
-        let w = state.chrome.width(&t.name) + 22.0 + TAB_CLOSE;
-        let w = w.min(limit - x);
+    for w in wants {
+        let w = w.min(most).min(limit - x);
         if w < 24.0 { break; }
         out.push(Rect::new(x, p.rect.y + 3.0, w, title() - 6.0));
         x += w + 4.0;
@@ -511,7 +543,9 @@ fn draw_panel(state: &mut App, renderer: &mut GlesRenderer, f: &mut Frame, shade
         for (i, r) in rects.iter().enumerate() {
             let ink = if i == p.active { t.ink } else { t.ink_soft };
             add_text(state, renderer, &mut f.out, 1.0, "×", ink, Rect::new(r.right() - TAB_CLOSE, r.y, TAB_CLOSE, r.h));
-            add_text(state, renderer, &mut f.out, 1.0, &p.tabs[i].name.clone(), ink, Rect::new(r.x, r.y, (r.w - TAB_CLOSE).max(1.0), r.h));
+            let room = (r.w - TAB_CLOSE).max(1.0);
+            let name = fitting(state, &p.tabs[i].name.clone(), room - 10.0);
+            add_text(state, renderer, &mut f.out, 1.0, &name, ink, Rect::new(r.x, r.y, room, r.h));
         }
         if let Some(r) = rects.get(p.active) { f.card(shaders, *r, Card::plain(radius.min(7.0), premultiplied(t.tab_front))); }
     } else {
@@ -825,4 +859,15 @@ fn window_elements(state: &mut App, renderer: &mut GlesRenderer) -> Vec<WindowEl
     let surface = surface_elements(state, renderer);
     out.extend(surface.into_iter().map(|e| WindowElement::from(RelocateRenderElement::from_element(e, (0, down), Relocate::Relative))));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tabs_share_the_room_they_have() {
+        use super::fair_width;
+        assert_eq!(fair_width(&[100.0, 120.0], 300.0), f64::INFINITY, "they fit");
+        assert_eq!(fair_width(&[400.0, 300.0], 300.0), 150.0, "two long ones halve it");
+        assert_eq!(fair_width(&[60.0, 400.0, 400.0], 300.0), 120.0, "a short one stays whole");
+    }
 }
