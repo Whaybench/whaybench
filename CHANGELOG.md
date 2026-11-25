@@ -7,6 +7,9 @@ names another step.
 
 ## [Unreleased]
 
+### Changed
+- Codex's Interrupt and SessionEnd hooks ask for 3 seconds, the most Codex gives them: at 10 it warned at each start.
+
 ## [0.9.7] - 2026-11-25
 
 ### Changed

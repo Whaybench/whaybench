@@ -72,7 +72,7 @@
           {
             "type": "command",
             "command": "{hook}",
-            "timeout": 10
+            "timeout": 3
           }
         ]
       }
@@ -83,7 +83,7 @@
           {
             "type": "command",
             "command": "{hook}",
-            "timeout": 10
+            "timeout": 3
           }
         ]
       }
