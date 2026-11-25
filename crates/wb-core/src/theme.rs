@@ -361,9 +361,11 @@ pub fn save_as(data: &Data, from: &str, name: &str) -> std::io::Result<String> {
 /// font, size and colours, and Shift+Enter as Claude Code's new line.
 pub fn write_terminal_config(data: &Data) -> std::io::Result<PathBuf> {
     let text = terminal_config(&load_active(data));
-    let path = data.cache().join("alacritty.toml");
+    // In a folder of its own: Alacritty watches the whole folder, and the cache is opened many times a second.
+    let dir = data.cache().join("terminal");
+    let path = dir.join("alacritty.toml");
     if fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
-        fs::create_dir_all(data.cache())?;
+        fs::create_dir_all(&dir)?;
         crate::paths::write_atomic(&path, text)?;
     }
     Ok(path)

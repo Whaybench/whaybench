@@ -15,6 +15,8 @@ names another step.
   memory each. `GSK_RENDERER` set by hand still wins.
 - Less drawing: while the picture changes often, each change is sent to the desktop once (a lone one is sent again with the
   next look), and at rest the window looks at it ten times a second with no faster timer beside.
+- The terminal's settings file has a folder of its own (`cache/terminal`), so Alacritty no longer wakes for every other
+  file in the cache.
 
 ### Fixed
 - A key held while the desktop takes the keyboard (Alt of Alt+Tab) no longer stays pressed inside Whaybench: every key
