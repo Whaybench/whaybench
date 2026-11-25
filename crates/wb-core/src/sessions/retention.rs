@@ -39,7 +39,10 @@ fn size_of(p: &Path) -> u64 {
 /// Drops whole conversations (every number of one, so its map and answers go together) older than `keep_days`,
 /// then the oldest until all of them fit in `keep_mb`. Running ones stay; saved maps (the maps folder) are not
 /// conversation records and stay too. The number of conversations dropped.
-pub fn prune(d: &Data) -> usize {
+pub fn prune(d: &Data) -> usize { prune_sure(d, asked_anew) }
+
+/// `sure`: whether what runs is known now; asked once, before the first conversation goes. Without it none goes.
+fn prune_sure(d: &Data, sure: impl Fn() -> bool) -> usize {
     let (days, mb) = retention(d);
     if days == 0 && mb == 0 { return 0; }
     // How the nodes changed is kept as long as the conversations: older events go, the nodes stay as they are.
@@ -60,11 +63,13 @@ pub fn prune(d: &Data) -> usize {
     let now = crate::clock::now_ms();
     let sizes: Vec<u64> = convs.iter().map(|c| c.1.iter().flat_map(|id| session_paths(d, id)).map(|p| size_of(&p)).sum()).collect();
     let mut total: u64 = sizes.iter().sum();
-    let mut dropped = 0;
+    let (mut dropped, mut known) = (0, None);
     for (i, (at, ids)) in convs.iter().enumerate().rev() {
         let old = days > 0 && now - at > days as i64 * 86_400_000;
         let over = mb > 0 && total > mb * 1024 * 1024;
-        if !(old || over) || ids.iter().any(|id| alive(d, id) || parents.contains(&id.as_str())) { continue; }
+        if !(old || over) { continue; }
+        if !*known.get_or_insert_with(&sure) { break; }
+        if ids.iter().any(|id| alive(d, id) || parents.contains(&id.as_str())) { continue; }
         for p in ids.iter().flat_map(|id| session_paths(d, id)) { let _ = if p.is_dir() { fs::remove_dir_all(&p) } else { fs::remove_file(&p) }; }
         record::decide("session", "records dropped", if old { "older than the kept days" } else { "over the kept size" }, &[("session", ids[0].clone()), ("numbers", ids.len().to_string())]);
         total = total.saturating_sub(sizes[i]);
@@ -164,10 +169,11 @@ mod tests {
             crate::db::event_add(&conn, &serde_json::json!({"id": id, "source": "person", "type": "node.changed", "time": at(ms), "nid": "n1"})).unwrap();
         }
         let left = || crate::db::events(&conn, "1", &[]).unwrap().iter().map(|e| e["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
-        assert_eq!(prune(&d), 0, "no limit by default");
+        assert_eq!(prune_sure(&d, || true), 0, "no limit by default");
         assert_eq!(left().len(), 2);
         fs::write(d.root.join("settings.json"), r#"{"keep_days":30}"#).unwrap();
-        assert_eq!(prune(&d), 1);
+        assert_eq!(prune_sure(&d, || false), 0, "Claude Code did not say what runs");
+        assert_eq!(prune_sure(&d, || true), 1);
         assert_eq!(left(), ["new"], "the event older than the limit went");
         assert!(crate::db::node_get(&conn, "n1").unwrap().is_some(), "the node stays");
         assert!(!d.root.join("a.json").exists() && !d.root.join("answer-log/b.jsonl").exists(), "every number of it, map and answers");
@@ -184,7 +190,7 @@ mod tests {
         }
         fs::write(d.root.join("forks/inherited.json"), r#"{"child":"p"}"#).unwrap();
         fs::write(d.root.join("settings.json"), r#"{"keep_mb":1}"#).unwrap();
-        assert_eq!(prune(&d), 1);
+        assert_eq!(prune_sure(&d, || true), 1);
         assert!(d.root.join("p.json").exists(), "child took its map: kept");
         assert!(!d.root.join("x.json").exists(), "the oldest of the others");
         assert!(d.root.join("y.json").exists() && d.root.join("child.json").exists(), "under the size again: stops");

@@ -373,6 +373,7 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             // A background session is stopped, one the tab runs gets /exit; then the tab goes.
             let id = &sessions::current_id(data, words.get(1).ok_or("session end needs an id")?);
             let tab = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(id.as_str()));
+            sessions::refresh_agents();
             if tab.is_none() && elsewhere(data, id) { return Err(wb_core::i18n::t("working-in-another-terminal").into()); }
             if sessions::background(id) {
                 sessions::stop(id);
@@ -399,11 +400,17 @@ fn elsewhere(data: &Data, id: &str) -> bool { !sessions::background(id) && sessi
 
 /// A session chosen: its tab, or attached in a new one, or started again in one.
 pub fn show_session(data: &Data, id: &str) -> Result<(), String> {
-    let located = sessions::locate(data, id);
-    if let Some(t) = sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(located.as_str())) {
-        return post(data, &Request::FocusTerm { tab: t.tab, agent: by_agent() });
+    let tab_of = |id: &str| sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(id)).map(|t| t.tab);
+    let mut located = sessions::locate(data, id);
+    if tab_of(&located).is_none() {
+        // No tab shows it: where it lives now, and whether it runs, is not decided on a kept list.
+        sessions::refresh_agents();
+        located = sessions::locate(data, id);
     }
-    open_session(data, &located)
+    match tab_of(&located) {
+        Some(tab) => post(data, &Request::FocusTerm { tab, agent: by_agent() }),
+        None => open_session(data, &located),
+    }
 }
 
 /// The session in a new tab: attached if it runs in the background, else started again from where it was saved.

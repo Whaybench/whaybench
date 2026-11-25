@@ -302,42 +302,114 @@ pub fn claude_program() -> PathBuf {
     versions::find_program("claude", &path, home.as_deref().map(Path::new)).unwrap_or_else(|| "claude".into())
 }
 
-static AGENTS: Mutex<Option<(Instant, Vec<Value>)>> = Mutex::new(None);
+/// How long the list of running sessions is kept while nothing is known to have changed it. Asking costs Claude Code a
+/// third of a second of CPU, so it is asked when something happened (`refresh_agents`, a listed process gone); this is
+/// for what no one told.
+const KEPT: Duration = Duration::from_secs(50);
+/// After a change the list is looked at again every `RECENT` for this long: a session's start or end is told a moment
+/// before Claude Code lists it so.
+const SETTLING: Duration = Duration::from_secs(20);
+const RECENT: Duration = Duration::from_secs(3);
 
-/// The next `agents()` asks Claude Code again instead of using the list kept from up to 3 seconds ago.
+/// The list a process has: when it was asked for (the shared file's time), whether Claude Code answered, whether it
+/// would be told of a change, the sessions.
+struct Kept { at: SystemTime, answered: bool, told: bool, list: Vec<Value> }
+static AGENTS: Mutex<Option<Kept>> = Mutex::new(None);
+
+/// Something changed which sessions run: lists asked for before now are not used again, in any process.
 pub fn refresh_agents() {
     *AGENTS.lock().unwrap() = None;
-    if let Some(f) = shared_agents() { let _ = fs::remove_file(f); }
+    if let Some(f) = shared_agents() { let _ = write_atomic(&changed_file(&f), "1"); }
 }
 
-/// The list kept for every process of this person (the panels, the program, the hooks), so Claude Code is asked once
-/// per 3 seconds in all, not once per process. In the runtime folder, which only they can read; without one, each
-/// process keeps its own.
+/// Asks Claude Code now, and whether it answered: for what must not be decided on an old list. Without Claude Code on
+/// this computer none of its sessions runs.
+pub fn asked_anew() -> bool {
+    if crate::agents::other() { return true; }
+    refresh_agents();
+    agents();
+    AGENTS.lock().unwrap().as_ref().is_some_and(|k| k.answered)
+}
+
+/// The list kept for every process of this person (the panels, the program, the hooks), so that not each of them asks
+/// Claude Code. In the runtime folder, which only they can read; without one, each process keeps its own for `RECENT`,
+/// as no one could tell it of a change. wb-core's own tests tell the person's Whaybench nothing.
 fn shared_agents() -> Option<PathBuf> {
+    if cfg!(test) { return None; }
     std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("whaybench-agents.json"))
 }
 
-fn fresh(at: SystemTime) -> bool { SystemTime::now().duration_since(at).is_ok_and(|age| age < Duration::from_secs(3)) }
+/// Written when the list is known to have changed: its time is the change's. A name of its own, not the list's with
+/// another ending: `write_atomic` names its temporary file by the name without it.
+fn changed_file(shared: &Path) -> PathBuf { shared.with_file_name("whaybench-agents-changed") }
 
-/// Running sessions as Claude Code reports them, kept for 3 seconds. `kind` "interactive" is held by a
+fn file_time(f: &Path) -> Option<SystemTime> { fs::metadata(f).and_then(|m| m.modified()).ok() }
+
+/// Gives the list to the other processes, with the time it was asked for, unless they have a later one.
+fn publish(f: &Path, list: &[Value], asked: SystemTime) -> std::io::Result<()> {
+    if file_time(f).is_some_and(|t| t > asked && t <= SystemTime::now()) { return Ok(()); }
+    let tmp = f.with_extension(format!("{}.tmp", std::process::id()));
+    fs::write(&tmp, Value::from(list.to_vec()).to_string())?;
+    fs::File::options().write(true).open(&tmp)?.set_modified(asked)?;
+    fs::rename(tmp, f)
+}
+
+/// Whether a list of time `at` still holds: asked after the last change, and recent, or old only within `KEPT` with the
+/// change settled and every listed process still there. A change later than now (the clock was set back) is none.
+fn holds(at: SystemTime, changed: Option<SystemTime>, now: SystemTime, gone: impl Fn() -> bool) -> bool {
+    let changed = changed.filter(|c| *c <= now);
+    let Ok(age) = now.duration_since(at) else { return false };
+    if changed.is_some_and(|c| at <= c) { return false; }
+    age < RECENT || (age < KEPT && changed.is_none_or(|c| at.duration_since(c).is_ok_and(|d| d >= SETTLING)) && !gone())
+}
+
+/// Whether a process the list names has ended. Background sessions without a process name none.
+fn process_gone(list: &[Value]) -> bool {
+    list.iter().filter_map(|a| a.get("pid")?.as_u64()).any(|p| !Path::new(&format!("/proc/{p}")).exists())
+}
+
+/// What the thread of `watch_agents` was last told.
+static WATCHED: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+thread_local! { static WATCHES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+/// From here on `agents()` on this thread (a panel's own loop) gives what another thread was last told, and never waits
+/// for Claude Code: its answer takes up to half a second, in which a panel would neither draw nor take input.
+pub fn watch_agents() {
+    let ask = || { let list = agents(); *WATCHED.lock().unwrap() = list; };
+    ask();
+    WATCHES.set(true);
+    std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(2)); ask(); });
+}
+
+/// Running sessions as Claude Code reports them, kept as `holds` says. `kind` "interactive" is held by a
 /// terminal; anything else runs in the background.
 pub fn agents() -> Vec<Value> {
+    if WATCHES.get() { return WATCHED.lock().unwrap().clone(); }
     if crate::agents::other() { return Vec::new(); }
-    let mut g = AGENTS.lock().unwrap();
-    if let Some((at, list)) = g.as_ref()
-        && at.elapsed() < Duration::from_secs(3) { return list.clone(); }
-    let shared = shared_agents();
-    let kept = shared.as_ref().filter(|f| fs::metadata(f).and_then(|m| m.modified()).is_ok_and(fresh))
-        .and_then(|f| serde_json::from_str::<Vec<Value>>(&fs::read_to_string(f).ok()?).ok());
-    if let Some(list) = kept {
-        *g = Some((Instant::now(), list.clone()));
-        return list;
-    }
-    let out = Command::new(claude_program()).args(["agents", "--json"]).stdin(Stdio::null()).stderr(Stdio::null()).output();
-    let asked = out.ok().and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).and_then(|v| v.as_array().cloned());
-    if let (Some(list), Some(f)) = (&asked, &shared) { let _ = write_atomic(f, Value::from(list.clone()).to_string()); }
-    let list = asked.or_else(|| g.as_ref().map(|x| x.1.clone())).unwrap_or_default();
-    *g = Some((Instant::now(), list.clone()));
+    listed_agents(shared_agents().as_deref(), &mut AGENTS.lock().unwrap(), || {
+        match Command::new(claude_program()).args(["agents", "--json"]).stdin(Stdio::null()).stderr(Stdio::null()).output() {
+            Ok(o) => serde_json::from_slice::<Value>(&o.stdout).ok()?.as_array().cloned(),
+            Err(e) => (e.kind() == std::io::ErrorKind::NotFound).then(Vec::new),
+        }
+    })
+}
+
+/// The list in hand or in the shared file, else asked for; one Claude Code did not answer stays for `RECENT`.
+fn listed_agents(shared: Option<&Path>, kept: &mut Option<Kept>, ask: impl FnOnce() -> Option<Vec<Value>>) -> Vec<Value> {
+    if let Some(f) = shared && let Some(at) = file_time(f) && kept.as_ref().is_none_or(|k| at > k.at)
+        && let Some(list) = fs::read_to_string(f).ok().and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok()) {
+            *kept = Some(Kept { at, answered: true, told: true, list });
+        }
+    let changed = shared.and_then(|f| file_time(&changed_file(f)));
+    if let Some(k) = kept.as_ref() && holds(k.at, changed, SystemTime::now(), || !k.told || process_gone(&k.list)) { return k.list.clone(); }
+    // The time before it is asked: a change meanwhile may not be in the answer.
+    let at = SystemTime::now();
+    let answer = ask();
+    let told = answer.is_some() && shared.is_some();
+    if let (Some(list), Some(f)) = (&answer, shared) { let _ = publish(f, list, at); }
+    let answered = answer.is_some();
+    let list = answer.or_else(|| kept.take().map(|k| k.list)).unwrap_or_default();
+    *kept = Some(Kept { at, answered, told, list: list.clone() });
     list
 }
 
@@ -432,6 +504,7 @@ pub fn mark_ended(d: &Data, id: &str) {
 pub fn stop(id: &str) {
     let short: String = id.chars().take(8).collect();
     let _ = Command::new(claude_program()).args(["stop", &short]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    refresh_agents();
 }
 
 /// Every recorded session, most recently active first: the host's and the open projects' for a host program.
@@ -534,6 +607,66 @@ pub fn target(d: &Data) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_change_told_by_one_process_makes_another_ask() {
+        use super::*;
+        use std::cell::Cell;
+        let b = tempfile::tempdir().unwrap();
+        let file = b.path().join("agents.json");
+        let asked = Cell::new(0);
+        let answer = |n: i64| Some(vec![serde_json::json!({"sessionId": n.to_string()})]);
+        let ask = |kept: &mut Option<Kept>, n: i64| listed_agents(Some(&file), kept, || { asked.set(asked.get() + 1); answer(n) })[0]["sessionId"].as_str().unwrap().to_string();
+        let (mut one, mut two) = (None, None);
+        assert_eq!((ask(&mut one, 1), ask(&mut two, 2), asked.get()), ("1".into(), "1".into(), 1), "the second takes the first's list");
+        // Two's hook tells of a change, later than the list: both ask again, though both asked a moment ago.
+        std::thread::sleep(Duration::from_millis(20));
+        write_atomic(&changed_file(&file), "1").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!((ask(&mut two, 3), ask(&mut one, 4), asked.get()), ("3".into(), "3".into(), 2), "once for both");
+        // A change while Claude Code answers: that answer is not used by the next.
+        std::thread::sleep(Duration::from_millis(20));
+        one = None;
+        fs::remove_file(&file).unwrap();
+        listed_agents(Some(&file), &mut one, || { std::thread::sleep(Duration::from_millis(20)); write_atomic(&changed_file(&file), "1").unwrap(); answer(5) });
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(ask(&mut two, 6), "6");
+        // An older answer does not replace a later one.
+        publish(&file, &[serde_json::json!({"sessionId": "old"})], SystemTime::now() - Duration::from_secs(30)).unwrap();
+        assert!(fs::read_to_string(&file).unwrap().contains("\"6\""));
+        // Not answered: what was known stays, and it is not asked again at once.
+        let mut lone = None;
+        assert!(listed_agents(None, &mut lone, || None).is_empty());
+        assert!(listed_agents(None, &mut lone, || panic!("asked a moment ago")).is_empty() && !lone.unwrap().answered);
+    }
+
+    #[test]
+    fn a_watching_thread_is_given_the_last_list_and_asks_nobody() {
+        use super::*;
+        std::thread::spawn(|| {
+            // Were it to ask, the answer would be Claude Code's list, or the empty one when it is not installed.
+            WATCHES.set(true);
+            *WATCHED.lock().unwrap() = vec![serde_json::json!({"sessionId": "s1", "kind": "background"})];
+            assert!(background("s1") && agent("s2").is_none());
+        }).join().unwrap();
+    }
+
+    #[test]
+    fn the_list_holds_until_something_changes() {
+        use super::*;
+        let t = |s: u64| UNIX_EPOCH + Duration::from_secs(1_000_000 + s);
+        let there = || false;
+        assert!(holds(t(0), None, t(49), there) && !holds(t(0), None, t(50), there), "50 seconds without a change");
+        assert!(!holds(t(0), Some(t(1)), t(2), there), "asked before the change");
+        assert!(holds(t(5), Some(t(1)), t(7), there) && !holds(t(5), Some(t(1)), t(8), there), "while it settles, 3 seconds");
+        assert!(holds(t(21), Some(t(1)), t(60), there), "settled");
+        assert!(!holds(t(0), None, t(10), || true) && holds(t(0), None, t(2), || true), "a process gone, but not asked again at once");
+        assert!(holds(t(0), Some(t(100)), t(10), there), "a change of a clock that was set back");
+        assert!(!holds(t(10), None, t(5), there), "a list from later than now");
+        let own = serde_json::json!({"pid": std::process::id()});
+        assert!(!process_gone(&[own.clone(), serde_json::json!({"kind": "background"})]));
+        assert!(process_gone(&[own, serde_json::json!({"pid": u32::MAX})]));
+    }
+
     #[test]
     fn a_host_program_reaches_a_project_session_and_writes_only_to_the_project() {
         use super::*;

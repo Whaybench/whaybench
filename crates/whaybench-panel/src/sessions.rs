@@ -259,6 +259,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
+    sessions::watch_agents();
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some(wb_core::i18n::t("search-sessions-names-questions-answers-maps")));
     let list = gtk::ListBox::new();

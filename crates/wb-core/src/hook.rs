@@ -76,6 +76,7 @@ fn handle(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     // requests (they start with / or [), and the answer to one would be kept under the question before it.
     if let Some(p) = prompt { write_json(&state_file(data, "prompt", sid), &json!(p))?; }
     session_record::alive(data, sid, name != "SessionEnd")?;
+    if agent.is_none() && matches!(name, "SessionStart" | "SessionEnd") { crate::sessions::refresh_agents(); }
     let session_map = map::ensure(data, sid)?;
     if name == "SessionStart" || name == "UserPromptSubmit" {
         // The panel follows latest.json until the person selects a session; a resumed conversation shows its map.
