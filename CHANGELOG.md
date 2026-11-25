@@ -7,6 +7,9 @@ names another step.
 
 ## [Unreleased]
 
+### Changed
+- The request for a conversation's name says too that a step (review, commit, push, release) is no name, and to replace one.
+
 ## [0.9.6] - 2026-11-25
 
 ### Changed

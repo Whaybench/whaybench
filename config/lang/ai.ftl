@@ -47,8 +47,8 @@ map-check-kind = - { $id }: its label reads "question → answer": kind conclusi
 map-check-options = - { $id }: closed, but options under it are still open: close the chosen one and drop the others; if none was chosen, reopen it.
 map-check-parent = - { $id }: everything under it is closed: close it too, or give it suggest.
 map-kept = - { $id }: not changed: the person set { $key } to { $value }. Leave it, unless the person asks for another.
-map-title = - title "{ $title }" may no longer fit. Latest work first: { $items }. If it no longer says the work, send a new title in your next call; else leave it.
-map-no-title = - no title yet. Latest work first: { $items }. Send title in your next call: what the conversation is working on.
+map-title = - title "{ $title }" may no longer fit. Latest work first: { $items }. If it no longer says the work, or names a step, send a new title in your next call; else leave it. A step (review, commit, push, release) is no name: name the work it is for, unless nothing else was worked on.
+map-no-title = - no title yet. Latest work first: { $items }. Send title in your next call: what the conversation is working on. A step (review, commit, push, release) is no name: name the work it is for, unless nothing else was worked on.
 map-similar = - { $id } may be about the same thing as { $memid } "{ $label }" ({ $state }, session { $session }): give it that memid only if it clearly is the same problem; else leave it.
 map-number = - { $id } → { $number } "{ $label }": if that is not the one you meant, fix the number.
 # What every turn of every agent is told (whaybench hook). Kept short: they ride on each prompt.

@@ -37,7 +37,7 @@ pub fn definition() -> Value {
         "upsert": {"type": "array", "items": node_schema(&["id"])},
         "remove": {"type": "array", "items": {"type": "string"}},
         "current": {"type": "string", "description": "id of the node the conversation is on now"},
-        "title": {"type": "string", "description": "the name of this conversation in the session list: what it is working on now, about 24 characters, a noun phrase in its language. Not a step such as a review or a commit."},
+        "title": {"type": "string", "description": "the name of this conversation in the session list: what it is working on now, about 24 characters, a noun phrase in its language. A step (review, commit, push, release) is no name: name the work it is for, unless nothing else was worked on."},
         "show": {"type": "boolean"}
     }}})
 }
