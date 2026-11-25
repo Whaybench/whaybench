@@ -126,7 +126,7 @@ WHAYBENCH_LANG=en WHAYBENCH_TRACE=session,request whaybench
 | `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY` | Locate the desktop Wayland socket. Launch from your desktop session if Whaybench cannot find it. |
 | `XDG_DATA_DIRS` | Locates fcitx5 engine information. It defaults to `/usr/local/share:/usr/share`. |
 | `GALLIUM_DRIVER` | Keeps your Mesa driver choice. When unset and `/dev/dxg` exists, Whaybench uses `d3d12`. |
-| `GSK_RENDERER` | Keeps your GTK renderer choice. When unset, the **Input**, **Sessions**, **Files**, **Notifications**, menu and status panels use `cairo`. |
+| `GSK_RENDERER` | Keeps your GTK renderer choice. When unset, the **Input** panel uses `cairo`. |
 | `WHAYBENCH_REPO` | Changes the Linux installer’s download source. It defaults to the Whaybench repository. |
 
 For a lasting log setting, set `parts` in `logs/detail.json`, for example `{"parts":["session","request"]}`.

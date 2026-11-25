@@ -8,6 +8,8 @@ names another step.
 ## [Unreleased]
 
 ### Changed
+- The sessions, files, notifications, menu and status panels draw with the renderer GTK chooses again (the GPU); the input
+  panel alone takes Cairo. Under WSL it made no difference worth it.
 - The request for a conversation's name says too that a step (review, commit, push, release) is no name, and to replace one.
 
 ## [0.9.6] - 2026-11-25

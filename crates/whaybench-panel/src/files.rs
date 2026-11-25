@@ -116,10 +116,7 @@ fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dy
             let is_default = default.as_deref() == app.id().as_deref();
             let (p, a) = (path.to_string(), app.clone());
             add(&sec, &format!("{}{}", app.name(), if is_default { wb_core::i18n::t("default-2") } else { "" }), Box::new(move || {
-                // The panel's own renderer (`main`) is not the app's.
-                let context = gio::AppLaunchContext::new();
-                if crate::OWN_RENDERER.load(std::sync::atomic::Ordering::Relaxed) { context.unsetenv("GSK_RENDERER"); }
-                let _ = a.launch(&[gio::File::for_path(&p)], Some(&context));
+                let _ = a.launch(&[gio::File::for_path(&p)], None::<&gio::AppLaunchContext>);
             }));
         }
         top.append_section(None, &sec);
