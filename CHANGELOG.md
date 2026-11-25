@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-11-25
+
 ### Changed
 - The Input panel sends the first prompt to a new Codex tab: before it, Codex has no session, and the panel said none and
   took no text. It waits for Codex to say that it takes input (`ready` and `busy` in an agent add-on's `agent.json`), so
