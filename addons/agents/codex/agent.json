@@ -17,5 +17,6 @@
   "login": ["login", "--device-auth"],
   "login_page": "https://auth.openai.com/codex/device",
   "trust": "/hooks",
+  "ready": "\u001b]7501;state=idle",
   "usage": "codex-rollout"
 }

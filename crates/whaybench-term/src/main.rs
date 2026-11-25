@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use screen::{Titles, typed_command};
+use screen::{Mark, Titles, typed_command};
 use wb_core::{log as record, paths::{self, Data}, sessions};
 
 const TICK: Duration = Duration::from_secs(2);
@@ -49,6 +49,8 @@ struct Relay {
     typed_at: Option<i64>,
     screen: vt100::Parser,
     titles: Titles,
+    /// The add-on agent's `ready`.
+    ready: Option<Mark>,
     title: String,
     /// When set, the relay ends at that moment.
     leave_at: Option<Instant>,
@@ -88,6 +90,7 @@ impl Relay {
         let size = size_of(0);
         let agent = wb_core::agents::active().map(|id| wb_core::agents::load(&self.data.root, &id)).transpose().map_err(|e| e.to_string())?;
         let addon = agent.is_some();
+        self.ready = agent.as_ref().and_then(|a| Mark::new(a.ready.as_deref()?));
         let program = if let Some(a) = &agent {
             let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
             wb_core::versions::find_program(&a.command, &std::env::var("PATH").unwrap_or_default(), home.as_deref()).ok_or_else(|| format!("{} is not installed", a.command))?
@@ -345,6 +348,8 @@ impl Relay {
         }
         self.master = -1;
         record::decide("session", "program ended", "this tab's agent ended", &[("tab", self.tab.clone())]);
+        // It waits for no first prompt any more.
+        self.save_tab();
         if self.closing { self.leave_at = Some(Instant::now()); return; }
         // Attaching ended at once: nothing runs under that name any more. The conversation is on disk: open it from there.
         if self.attached && self.started.elapsed() < ATTACH_FAILS_WITHIN
@@ -508,6 +513,8 @@ impl Relay {
                 std::thread::sleep(Duration::from_millis(150));
                 write_all(self.master, b"\r");
                 if !text.trim_start().starts_with('/') { self.typed_at = Some(wb_core::clock::now_ms()); commands_only = true; }
+                // A first prompt: no other one until its session is known, or the agent waits again.
+                if self.session.is_none() { self.save_tab(); }
             }
         }
     }
@@ -537,6 +544,7 @@ impl Relay {
                     } else {
                         let bytes = &buffer[..got as usize];
                         self.screen.process(bytes);
+                        if self.session.is_none() && self.ready.as_mut().is_some_and(|m| m.seen(bytes)) { sessions::mark_ready(&self.data, &self.tab); }
                         if !self.closing { let shown = self.titles.strip(bytes); write_all(1, &shown); }
                     }
                 }
@@ -707,7 +715,7 @@ fn main() {
     let session = attach.clone().or_else(|| resume.clone()).or_else(|| new_id.clone());
     let mut relay = Relay {
         data, tab, session, attached: attach.is_some(), master: -1, child: 0, running: false, started: Instant::now(), started_at: std::time::SystemTime::now(), hooked: false, typed_at: None,
-        screen: vt100::Parser::new(40, 120, 0), titles: Titles::default(), title: String::new(),
+        screen: vt100::Parser::new(40, 120, 0), titles: Titles::default(), ready: None, title: String::new(),
         leave_at: None, closing: false, map_from, resumed_at: None,
     };
     // Before the session is known (an add-on agent tells it with its first hook): the agent's name.

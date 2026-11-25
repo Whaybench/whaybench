@@ -27,9 +27,23 @@ pub fn queue_prompt(d: &Data, id: &str, text: &str) -> bool {
         record::decide("request", "request not sent", "no tab shows the session", &[("session", now), ("kind", kind)]);
         return false;
     };
+    put(d, &tab, &now, kind, text, "the session is running")
+}
+
+/// Queues an agent's first prompt for a tab that has no session yet and waits for one (`OpenTab::ready`). True when queued.
+pub fn queue_first(d: &Data, tab: &str, text: &str) -> bool {
+    let kind = if tab_project(d, tab).is_some() { "project".to_string() } else { request_kind(text) };
+    if !open_tabs(d).iter().any(|t| t.tab == tab && t.session.is_none() && t.ready) {
+        record::decide("request", "request not sent", "the tab does not wait for a first prompt", &[("tab", tab.to_string()), ("kind", kind)]);
+        return false;
+    }
+    put(d, tab, "", kind, text, "the tab waits for its first prompt")
+}
+
+fn put(d: &Data, tab: &str, session: &str, kind: String, text: &str, why: &str) -> bool {
     let seq = SystemTime::now().duration_since(UNIX_EPOCH).map(|t| t.as_nanos()).unwrap_or(0);
-    if write_atomic(&tab_inbox(d, &tab).join(format!("{seq}.json")), serde_json::json!({"text": text, "enter": true}).to_string()).is_err() { return false; }
-    record::decide("request", "request queued", "the session is running", &[("request", seq.to_string()), ("session", now), ("tab", tab), ("kind", kind), ("chars", text.chars().count().to_string())]);
+    if write_atomic(&tab_inbox(d, tab).join(format!("{seq}.json")), serde_json::json!({"text": text, "enter": true}).to_string()).is_err() { return false; }
+    record::decide("request", "request queued", why, &[("request", seq.to_string()), ("session", session.to_string()), ("tab", tab.to_string()), ("kind", kind), ("chars", text.chars().count().to_string())]);
     true
 }
 
@@ -63,6 +77,13 @@ pub fn write_tab(d: &Data, tab: &str, session: Option<&str>, attached: bool) {
     let _ = write_atomic(&tab_file(d, tab), v.to_string());
 }
 
+/// Notes that the tab's agent waits for its first prompt. The next `write_tab` takes the note off.
+pub fn mark_ready(d: &Data, tab: &str) {
+    let Some(mut v) = read_json(&tab_file(d, tab)).filter(|v| v["ready"] != true) else { return };
+    v["ready"] = Value::Bool(true);
+    let _ = write_atomic(&tab_file(d, tab), v.to_string());
+}
+
 /// The project a tab runs its agent for (its container's), noted by the host's terminal. A tab without one is the
 /// host's. What a project's records say about tabs counts only for that project's own tabs.
 fn tab_project_file(d: &Data, tab: &str) -> PathBuf { tabs_dir(d).join(format!("{tab}.project")) }
@@ -80,7 +101,9 @@ pub fn tab_project(d: &Data, tab: &str) -> Option<String> { fs::read_to_string(t
 
 pub struct OpenTab { pub tab: String, pub session: Option<String>, pub attached: bool,
     /// Its add-on agent; none is Claude Code.
-    pub agent: Option<String> }
+    pub agent: Option<String>,
+    /// Without a session, it waits for its first prompt.
+    pub ready: bool }
 
 /// Tabs whose relay still runs.
 pub fn open_tabs(d: &Data) -> Vec<OpenTab> {
@@ -95,6 +118,7 @@ pub fn open_tabs(d: &Data) -> Vec<OpenTab> {
             session: v.get("session").and_then(Value::as_str).map(String::from),
             attached: v.get("attached").and_then(Value::as_bool).unwrap_or(false),
             agent: v.get("agent").and_then(Value::as_str).map(String::from),
+            ready: v["ready"] == true,
         });
     }
     out
@@ -119,6 +143,26 @@ mod tests {
         let queued: Vec<_> = fs::read_dir(tab_inbox(&d, "t1")).unwrap().flatten().collect();
         assert_eq!(queued.len(), 1);
     }
+    #[test]
+    fn a_first_prompt_goes_only_to_a_tab_that_waits_for_one() {
+        let d = data("first-prompt");
+        write_tab(&d, "t1", None, false);
+        set_focus_empty(&d, "t1", "test", false);
+        assert!(first_prompt_tab(&d).is_none() && !queue_first(&d, "t1", "hello"), "a sign-in or trust screen");
+        mark_ready(&d, "t1");
+        assert_eq!(first_prompt_tab(&d).as_deref(), Some("t1"));
+        assert!(queue_first(&d, "t1", "hello"));
+        assert_eq!(fs::read_dir(tab_inbox(&d, "t1")).unwrap().count(), 1);
+        write_tab(&d, "t2", None, false);
+        mark_ready(&d, "t2");
+        set_focus_empty(&d, "t2", "test", false);
+        assert_eq!(first_prompt_tab(&d).as_deref(), Some("t2"), "another empty tab came to the front");
+        write_tab(&d, "t2", Some("s2"), false);
+        assert!(first_prompt_tab(&d).is_none() && !queue_first(&d, "t2", "hello"), "it has its session");
+        set_focus(&d, "s2", "test");
+        assert!(first_prompt_tab(&d).is_none());
+    }
+
     #[test]
     fn codex_requests_require_a_tab_and_go_to_its_relay() {
         let d = data("codex-input");

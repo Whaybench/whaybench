@@ -632,7 +632,7 @@ impl App {
         self.brought.remove(&tab);
         match &self.focused_term {
             Some((front, Some(s))) if *front == tab => wb_core::sessions::set_focus(&self.data, s, wb_core::i18n::t("input")),
-            Some((front, None)) if *front == tab => wb_core::sessions::set_focus_empty(&self.data, wb_core::i18n::t("input"), false),
+            Some((front, None)) if *front == tab => wb_core::sessions::set_focus_empty(&self.data, &tab, wb_core::i18n::t("input"), false),
             _ => {}
         }
     }
@@ -685,7 +685,7 @@ impl App {
         if self.focused_term.as_ref() != Some(&pair) {
             match &pair.1 {
                 Some(s) => wb_core::sessions::set_focus_by(&self.data, s, wb_core::i18n::t("input"), self.brought.contains(&pair.0)),
-                None => wb_core::sessions::set_focus_empty(&self.data, wb_core::i18n::t("input"), self.brought.contains(&pair.0)),
+                None => wb_core::sessions::set_focus_empty(&self.data, &pair.0, wb_core::i18n::t("input"), self.brought.contains(&pair.0)),
             }
             self.focused_term = Some(pair);
         }

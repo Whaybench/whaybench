@@ -44,6 +44,8 @@ pub struct Agent {
     /// What each prompt gets instead of `context`; without it, `context` goes with every prompt too.
     prompt_context: Option<String>,
     pub trust: Option<String>,
+    /// What the agent writes to its terminal when it waits for input, so never at a start screen (sign-in, trust).
+    pub ready: Option<String>,
     pub usage: Option<String>,
     /// Arguments that sign the agent in where it has no browser (a Briefsafe project's container), and the page the
     /// person opens for it.

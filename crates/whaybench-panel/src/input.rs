@@ -7,19 +7,46 @@ use wb_core::{paths::Data, sessions, status};
 
 use crate::common::{ctl, cut, every};
 
+/// What a text is for: a conversation, or a tab whose agent makes its conversation with its first prompt (Codex).
+#[derive(Clone, Debug, PartialEq)]
+pub enum To { Session(String), Tab(String) }
+
+impl To {
+    fn front(d: &Data) -> Option<To> { sessions::focus(d).map(To::Session).or_else(|| sessions::first_prompt_tab(d).map(To::Tab)) }
+
+    /// Followed to where it lives now: a moved conversation, a tab that has made its own.
+    fn now(self, d: &Data) -> To {
+        match self {
+            To::Session(s) => To::Session(sessions::current_id(d, &s)),
+            To::Tab(t) => sessions::open_tabs(d).into_iter().find(|o| o.tab == t).and_then(|o| o.session).map_or(To::Tab(t), To::Session),
+        }
+    }
+
+    fn project(&self, d: &Data) -> Option<String> {
+        match self {
+            To::Session(s) => wb_core::roots::Roots::new(d.clone()).project_of(s),
+            To::Tab(t) => sessions::tab_project(d, t),
+        }
+    }
+}
+
 /// Where a sent text goes.
 #[derive(Debug, PartialEq)]
 pub enum Route { Nothing, Typed, Queued }
 
-pub fn route(text: &str, session: Option<&str>) -> Route {
-    if text.is_empty() || session.is_none() { return Route::Nothing; }
-    if text.starts_with('/') && !text.contains('\n') { Route::Typed } else { Route::Queued }
+pub fn route(text: &str, to: Option<&To>) -> Route {
+    if text.is_empty() { return Route::Nothing; }
+    match to {
+        None => Route::Nothing,
+        Some(To::Session(_)) if text.starts_with('/') && !text.contains('\n') => Route::Typed,
+        Some(_) => Route::Queued,
+    }
 }
 
 /// The conversation a draft goes to: the one it was begun for, until the person chooses another. One that only an
 /// agent's request brought to the front does not take it.
-pub fn draft_goes_to(begun: Option<&str>, front: Option<&str>, by_agent: bool) -> Option<String> {
-    if by_agent && begun.is_some() { begun } else { front }.map(String::from)
+pub fn draft_goes_to(begun: Option<&To>, front: Option<&To>, by_agent: bool) -> Option<To> {
+    if by_agent && begun.is_some() { begun } else { front }.cloned()
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
@@ -48,16 +75,16 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     // The project of the conversation a draft was begun for: it goes only there, and goes when that project locks.
     let owner: Rc<RefCell<Option<String>>> = Rc::default();
     // The conversation a draft goes to (`draft_goes_to`).
-    let goes: Rc<RefCell<Option<String>>> = Rc::default();
+    let goes: Rc<RefCell<Option<To>>> = Rc::default();
     {
         let (hint, owner, goes, d) = (hint.clone(), owner.clone(), goes.clone(), d.clone());
         view.buffer().connect_changed(move |b| {
             hint.set_visible(b.char_count() == 0);
             if b.char_count() == 0 { *owner.borrow_mut() = None; *goes.borrow_mut() = None; }
             else if owner.borrow().is_none() {
-                let s = sessions::focus(&d);
-                *owner.borrow_mut() = Some(s.as_deref().and_then(|s| wb_core::roots::Roots::new(d.clone()).project_of(s)).unwrap_or_default());
-                *goes.borrow_mut() = s;
+                let to = To::front(&d);
+                *owner.borrow_mut() = Some(to.as_ref().and_then(|t| t.project(&d)).unwrap_or_default());
+                *goes.borrow_mut() = to;
             }
         });
     }
@@ -66,9 +93,9 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let target = {
         let (d, goes, view) = (d.clone(), goes.clone(), view.clone());
         move || {
-            let front = sessions::focus(&d);
+            let front = To::front(&d);
             if view.buffer().char_count() == 0 { return front; }
-            let to = draft_goes_to(goes.borrow().as_deref(), front.as_deref(), sessions::focus_by_agent(&d)).map(|s| sessions::current_id(&d, &s));
+            let to = draft_goes_to(goes.borrow().as_ref(), front.as_ref(), sessions::focus_by_agent(&d)).map(|t| t.now(&d));
             goes.borrow_mut().clone_from(&to);
             to
         }
@@ -112,10 +139,14 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             if gone { view.buffer().set_text(""); }
             if now - sent_at.get() < 1_500_000 { hint.set_text(wb_core::i18n::t("sent")); return; }
             let to = target();
-            let known = { let mut l = line.lock().unwrap_or_else(|e| e.into_inner()); l.0 = to.clone().filter(|_| view.buffer().char_count() == 0); l.1.clone() };
+            let known = { let mut l = line.lock().unwrap_or_else(|e| e.into_inner()); l.0 = match &to { Some(To::Session(s)) if view.buffer().char_count() == 0 => Some(s.clone()), _ => None }; l.1.clone() };
             let who = match to {
                 None => wb_core::i18n::t("none").into(),
-                Some(s) => match known { Some((of, text)) if of == s => text, _ => wb_core::agents::session_label(&d.root, &s) },
+                Some(To::Tab(t)) => {
+                    let agent = sessions::open_tabs(&d).into_iter().find(|o| o.tab == t).and_then(|o| o.agent);
+                    format!("{} · {}", wb_core::i18n::t("new-session"), wb_core::agents::name_of(&d.root, agent.as_deref()))
+                }
+                Some(To::Session(s)) => match known { Some((of, text)) if of == s => text, _ => wb_core::agents::session_label(&d.root, &s) },
             };
             hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", who), ("switch", switch.borrow().clone())]));
         });
@@ -134,26 +165,28 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             }
             let buffer = view.buffer();
             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().to_string();
-            let session = target();
+            let to = target();
             // Typed for a project's conversation, it goes to no other place's (host text may go anywhere: spec 3.22).
-            let here = session.as_deref().and_then(|s| wb_core::roots::Roots::new(d.clone()).project_of(s)).unwrap_or_default();
+            let here = to.as_ref().and_then(|t| t.project(&d)).unwrap_or_default();
             if owner.borrow().as_ref().is_some_and(|o| !o.is_empty() && *o != here) { status::say(&d, wb_core::i18n::t("briefsafe-draft-stays"), 8); return glib::Propagation::Stop; }
-            match route(&text, session.as_deref()) {
-                Route::Nothing => {}
-                Route::Typed => {
-                    let id = session.unwrap_or_default();
+            match (route(&text, to.as_ref()), to) {
+                (Route::Typed, Some(To::Session(id))) => {
                     ctl(&d, vec!["--data-dir".into(), d.root.to_string_lossy().to_string(), "session".into(), "type".into(), id, text]);
                     buffer.set_text("");
                 }
-                Route::Queued => {
-                    let id = session.unwrap_or_default();
-                    if sessions::queue_prompt(&d, &id, &text) {
+                (Route::Queued, Some(to)) => {
+                    let (queued, id) = match &to {
+                        To::Session(id) => (sessions::queue_prompt(&d, id, &text), id),
+                        To::Tab(tab) => (sessions::queue_first(&d, tab, &text), tab),
+                    };
+                    if queued {
                         buffer.set_text("");
                         sent_at.set(glib::monotonic_time());
                     } else {
-                        status::say(&d, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", (cut(&id, 8)).to_string())]), 8);
+                        status::say(&d, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(id, 8).to_string())]), 8);
                     }
                 }
+                _ => {}
             }
             glib::Propagation::Stop
         });
@@ -173,20 +206,34 @@ mod tests {
     use super::*;
     #[test]
     fn where_a_text_goes() {
-        assert_eq!(route("", Some("s")), Route::Nothing);
+        let (s, t) = (To::Session("s".into()), To::Tab("t".into()));
+        assert_eq!(route("", Some(&s)), Route::Nothing);
         assert_eq!(route("text", None), Route::Nothing);
-        assert_eq!(route("/context", Some("s")), Route::Typed);
-        assert_eq!(route("/exit", Some("s")), Route::Typed);
-        assert_eq!(route("/x\nsecond line", Some("s")), Route::Queued);
-        assert_eq!(route("plain text", Some("s")), Route::Queued);
+        assert_eq!(route("/context", Some(&s)), Route::Typed);
+        assert_eq!(route("/exit", Some(&s)), Route::Typed);
+        assert_eq!(route("/x\nsecond line", Some(&s)), Route::Queued);
+        assert_eq!(route("plain text", Some(&s)), Route::Queued);
+        assert_eq!(route("plain text", Some(&t)), Route::Queued, "a tab's first prompt");
+        assert_eq!(route("/model", Some(&t)), Route::Queued, "no session to name to the typing command");
     }
     #[test]
     fn a_draft_stays_with_its_conversation_unless_the_person_chooses_another() {
-        let s = |v: &str| Some(v.to_string());
-        assert_eq!(draft_goes_to(Some("a"), Some("b"), true), s("a"), "an agent brought b to the front");
-        assert_eq!(draft_goes_to(Some("a"), Some("b"), false), s("b"), "the person chose b");
-        assert_eq!(draft_goes_to(None, Some("b"), true), s("b"), "begun with no conversation in front");
-        assert_eq!(draft_goes_to(Some("a"), None, true), s("a"), "an agent opened a tab with no session yet");
-        assert_eq!(draft_goes_to(Some("a"), None, false), None, "the person did");
+        let s = |v: &str| To::Session(v.to_string());
+        let (a, b, t) = (s("a"), s("b"), To::Tab("t".into()));
+        assert_eq!(draft_goes_to(Some(&a), Some(&b), true), Some(s("a")), "an agent brought b to the front");
+        assert_eq!(draft_goes_to(Some(&a), Some(&b), false), Some(s("b")), "the person chose b");
+        assert_eq!(draft_goes_to(None, Some(&b), true), Some(s("b")), "begun with no conversation in front");
+        assert_eq!(draft_goes_to(Some(&a), Some(&t), true), Some(s("a")), "an agent opened a tab with no session yet");
+        assert_eq!(draft_goes_to(Some(&a), None, true), Some(s("a")), "or one that takes no prompt yet");
+        assert_eq!(draft_goes_to(Some(&a), None, false), None, "the person did");
+    }
+    #[test]
+    fn a_draft_for_an_empty_tab_follows_the_conversation_it_makes() {
+        let d = Data::new(std::env::temp_dir().join(format!("whaybench-input-{}", std::process::id())));
+        sessions::write_tab(&d, "t", None, false);
+        assert_eq!(To::Tab("t".into()).now(&d), To::Tab("t".into()));
+        sessions::write_tab(&d, "t", Some("s1"), false);
+        assert_eq!(To::Tab("t".into()).now(&d), To::Session("s1".into()));
+        let _ = std::fs::remove_dir_all(&d.root);
     }
 }

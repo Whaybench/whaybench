@@ -37,6 +37,7 @@ An agent without these cannot keep the map or the session list.
 | `login` | no | Arguments that sign the agent in where it has no browser of its own, such as a code the person enters on a page (Codex's `login --device-auth`). A Briefsafe project's agents keep a login of the project's own: the project panel runs this in its container, in a terminal of the view. Without it the panel offers no sign-in for the agent |
 | `login_page` | no | The https page the person opens for that sign-in, shown in the browser tab beside it |
 | `trust` | no | The command inside the agent where the person trusts the hooks; Whaybench says so when its tab opens |
+| `ready` | no | What the agent writes to its terminal when it waits for input, and not while a start screen (sign-in, trust) waits for the person; `\u001b` is Escape. For an agent that makes its session only at its first prompt (Codex): once this is seen, the Input panel can send that prompt. Without it the first prompt is typed in the tab |
 | `usage` | no | Where the agent's context and plan usage are read, for the notifications panel. `codex-rollout`: the last `token_count` line of Codex's session file, read when a turn ends. Without it the panel shows no usage for the agent's sessions |
 
 In templates, these are filled in text values: `{exe}` the Whaybench program, `{data}` the data folder, `{hook}` the hook command (`'<exe>' hook <id>`). In `context.md` and `prompt.md`: `{session}`.

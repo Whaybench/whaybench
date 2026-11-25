@@ -62,6 +62,22 @@ impl Titles {
     }
 }
 
+/// Looks for a mark in what a program writes, also when it arrives split over reads.
+pub struct Mark { mark: Vec<u8>, tail: Vec<u8> }
+
+impl Mark {
+    /// None for an empty mark, which everything would hold.
+    pub fn new(mark: &str) -> Option<Mark> { (!mark.is_empty()).then(|| Mark { mark: mark.into(), tail: Vec::new() }) }
+
+    pub fn seen(&mut self, bytes: &[u8]) -> bool {
+        self.tail.extend_from_slice(bytes);
+        let seen = self.tail.windows(self.mark.len()).any(|w| w == self.mark);
+        let keep = self.tail.len().saturating_sub(self.mark.len() - 1);
+        self.tail.drain(..keep);
+        seen
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,6 +96,14 @@ mod tests {
         assert_eq!(typed_command("> /exits"), None);
         assert_eq!(typed_command("> /home/user/bg"), None);
         assert_eq!(typed_command(""), None);
+    }
+    #[test]
+    fn a_mark_is_seen_once_also_split() {
+        assert!(Mark::new("").is_none());
+        let mut m = Mark::new("\x1b]7501;state=idle").unwrap();
+        assert!(!m.seen(b"\x1b]7501;state=working\x1b\\text\x1b]7501;sta"));
+        assert!(m.seen(b"te=idle:app=codex\x1b\\"));
+        assert!(!m.seen(b"more"), "not again without a new one");
     }
     #[test]
     fn titles_are_removed_and_the_rest_stays() {

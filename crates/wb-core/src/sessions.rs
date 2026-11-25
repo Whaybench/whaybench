@@ -558,9 +558,9 @@ fn latest_id(d: &Data) -> Option<String> {
 
 /// A conversation tab without a session yet is in front (an agent whose hooks have not told it): the panels show
 /// nothing rather than the session seen before, which would pass for this tab's.
-pub fn set_focus_empty(d: &Data, who: &str, agent: bool) {
-    let v = if agent { serde_json::json!({"sessionId": null, "agent": true}) } else { serde_json::json!({"sessionId": null}) };
-    if let Some(was) = read_json(&focus_file(d)).filter(|v| v["sessionId"].is_null()) {
+pub fn set_focus_empty(d: &Data, tab: &str, who: &str, agent: bool) {
+    let v = if agent { serde_json::json!({"sessionId": null, "tab": tab, "agent": true}) } else { serde_json::json!({"sessionId": null, "tab": tab}) };
+    if let Some(was) = read_json(&focus_file(d)).filter(|v| v["sessionId"].is_null() && v["tab"] == tab) {
         // The person chooses what an agent had brought.
         if !agent && was["agent"] == true { let _ = write_atomic(&focus_file(d), v.to_string()); }
         return;
@@ -571,6 +571,12 @@ pub fn set_focus_empty(d: &Data, who: &str, agent: bool) {
 
 /// Whether the tab in front has no session yet (set_focus_empty).
 pub fn empty_chosen(d: &Data) -> bool { read_json(&focus_file(d)).is_some_and(|v| v["sessionId"].is_null()) }
+
+/// The tab in front, when it has no session yet and its agent waits for its first prompt.
+pub fn first_prompt_tab(d: &Data) -> Option<String> {
+    let v = read_json(&focus_file(d)).filter(|v| v["sessionId"].is_null())?;
+    open_tabs(d).into_iter().find(|t| v["tab"] == t.tab.as_str() && t.session.is_none() && t.ready).map(|t| t.tab)
+}
 
 pub fn set_focus(d: &Data, id: &str, who: &str) { set_focus_by(d, id, who, false) }
 
@@ -768,7 +774,7 @@ mod tests {
         let d = data("empty-focus");
         fs::write(latest_map(&d), r#"{"sessionId":"older"}"#).unwrap();
         assert_eq!(target(&d).as_deref(), Some("older"), "nothing chosen: the map that changed last");
-        set_focus_empty(&d, "test", false);
+        set_focus_empty(&d, "t1", "test", false);
         assert!(target(&d).is_none() && focus(&d).is_none(), "not the session seen before");
         set_focus(&d, "s1", "test");
         assert_eq!(target(&d).as_deref(), Some("s1"));
