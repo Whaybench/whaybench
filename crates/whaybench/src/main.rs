@@ -224,7 +224,7 @@ fn serve(data: &paths::Data, run_id: &str, apps: Vec<String>, no_session: bool) 
     let saved = state::read_layout(data);
     let mut state = App::new(&mut event_loop, display, data.clone(), saved);
 
-    render::init_window(&mut event_loop, &mut state, !no_session).map_err(|e| e.to_string())?;
+    let mut after_turn = render::init_window(&mut event_loop, &mut state, !no_session).map_err(|e| e.to_string())?;
     ctl::listen(&event_loop, data).map_err(|e| e.to_string())?;
     ctl::write_instance(data, run_id, &state.socket_name.to_string_lossy()).map_err(|e| e.to_string())?;
     record::decide("run", "start", "the program started", &[("run", run_id.to_string()), ("reason", if std::env::var_os(ENV_AGAIN).is_some() { "again" } else { "first" }.into()), ("socket", state.socket_name.to_string_lossy().to_string())]);
@@ -255,7 +255,7 @@ fn serve(data: &paths::Data, run_id: &str, apps: Vec<String>, no_session: bool) 
 
     // What the apps are owed goes out after every turn of the loop, not only after a frame: with nothing to draw, a
     // frame can be 100 ms away (a selection asked for on its way to the desktop).
-    event_loop.run(None, &mut state, |state| { let _ = state.display_handle.flush_clients(); }).map_err(|e| e.to_string())?;
+    event_loop.run(None, &mut state, |state| { after_turn(state); let _ = state.display_handle.flush_clients(); }).map_err(|e| e.to_string())?;
     start::end_outside();
     state.save_layout();
     ctl::remember_tabs(data);

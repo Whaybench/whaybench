@@ -13,6 +13,8 @@ names another step.
 - The sessions panel no longer stands still while Claude Code answers that.
 - The sessions, files, notifications, menu and status panels draw with GTK's Cairo renderer, as the input panel does: less
   memory each. `GSK_RENDERER` set by hand still wins.
+- Less drawing: while the picture changes often, each change is sent to the desktop once (a lone one is sent again with the
+  next look), and at rest the window looks at it ten times a second with no faster timer beside.
 
 ### Fixed
 - A key held while the desktop takes the keyboard (Alt of Alt+Tab) no longer stays pressed inside Whaybench: every key

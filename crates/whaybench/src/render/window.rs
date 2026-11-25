@@ -4,6 +4,8 @@ use super::shots::take_shots;
 
 /// With nothing happening and nothing moving, how often the picture is still looked at.
 const LOOK_EVERY: Duration = Duration::from_millis(100);
+/// Looks at the picture asked for after a change come no closer than this.
+const FRAME: Duration = Duration::from_millis(16);
 
 /// Offers the window's GPU to the apps (linux-dmabuf with default feedback, as anvil's winit backend does), so they
 /// draw on it and hand over their buffers without a copy. Without a render node they keep shared memory.
@@ -28,7 +30,8 @@ fn offer_gpu(state: &mut App, backend: &Rc<RefCell<winit::WinitGraphicsBackend<G
 }
 
 /// `own_frame`: the menu bar runs and serves as the title strip, so the desktop's frame is left out.
-pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: bool) -> Result<(), Box<dyn std::error::Error>> {
+/// What it returns is to run after every turn of the event loop: it asks for a frame when something happened.
+pub fn init_window(event_loop: &mut EventLoop<'static, App>, state: &mut App, own_frame: bool) -> Result<impl FnMut(&mut App) + 'static, Box<dyn std::error::Error>> {
     let (w, h) = state.saved_window().map(|(w, h)| (w as f64, h as f64)).unwrap_or(FIRST_WINDOW);
     // No frame from the desktop: the menu bar is the title strip, with the window's buttons drawn at its right.
     let attributes = WindowAttributes::default().with_decorations(!own_frame).with_transparent(true).with_title("Whaybench").with_surface_size(LogicalSize::new(w, h)).with_visible(true);
@@ -60,22 +63,41 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: 
 
     // Only what changed goes to the desktop. A frame with nothing new is not sent at all: sending the whole window
     // every frame makes the desktop redraw it and its title bar 60 times a second, which shows as a flicker there.
-    // Without a sent frame nothing paces the next one, so a timer asks for it instead: as a game or a compositor does,
-    // only when something happened (an app's request, input, a command) or something moves by itself; else a few
-    // times a second, for what is looked at by the clock (a theme file changed, the agent's state). Building the
-    // picture 60 times a second with nothing new cost several percent of a core.
+    // So a frame is asked for, as a game or a compositor does, only when something happened (an app's request, input, a
+    // command) or something moves by itself; else a few times a second, for what is looked at by the clock (a theme
+    // file changed, the agent's state). Building the picture 60 times a second with nothing new cost several percent
+    // of a core.
     let backend = Rc::new(RefCell::new(backend));
     offer_gpu(state, &backend);
     let idle = Rc::new(Cell::new(false));
+    let looked = Rc::new(Cell::new(Instant::now()));
+    let look = {
+        let (backend, idle, looked) = (backend.clone(), idle.clone(), looked.clone());
+        move || if idle.replace(false) { looked.set(Instant::now()); backend.borrow().window().request_redraw(); }
+    };
     {
-        let (backend, idle) = (backend.clone(), idle.clone());
-        let mut looked = Instant::now();
-        event_loop.handle().insert_source(Timer::from_duration(Duration::from_millis(16)), move |_, _, state| {
-            let due = state.redraw || state.moving.get() || looked.elapsed() >= LOOK_EVERY;
-            if due && idle.replace(false) { looked = Instant::now(); backend.borrow().window().request_redraw(); }
-            TimeoutAction::ToDuration(Duration::from_millis(16))
+        let (look, looked) = (look.clone(), looked.clone());
+        event_loop.handle().insert_source(Timer::from_duration(LOOK_EVERY), move |_, _, _| {
+            // What happened since is seen after this turn of the loop.
+            if looked.get().elapsed() >= LOOK_EVERY { look(); }
+            TimeoutAction::ToDuration(LOOK_EVERY)
         })?;
     }
+    let after_turn = {
+        let (idle, handle, waking) = (idle.clone(), event_loop.handle(), Rc::new(Cell::new(false)));
+        move |state: &mut App| {
+            if !(state.redraw || state.moving.get()) || !idle.get() || waking.get() { return; }
+            match FRAME.checked_sub(looked.get().elapsed()).filter(|d| !d.is_zero()) {
+                None => look(),
+                // Too soon: the loop is woken when the time has come, and this runs again.
+                Some(wait) => {
+                    let due = waking.clone();
+                    let timer = handle.insert_source(Timer::from_duration(wait), move |_, _, _| { due.set(false); TimeoutAction::Drop });
+                    waking.set(timer.is_ok());
+                }
+            }
+        }
+    };
 
     event_loop.handle().insert_source(winit, move |event, _, state| { let mut backend = backend.borrow_mut(); match event {
         WinitEvent::Resized { size, .. } => {
@@ -185,14 +207,16 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: 
             state.space.refresh();
             state.popups.cleanup();
             let _ = state.display_handle.flush_clients();
-            if sent { backend.window().request_redraw(); } else { idle.set(true); }
+            // Something moving is paced by the desktop, frame by frame. A still picture is not drawn again at once: the buffer
+            // behind the one just shown is old, so the same picture would be sent a second time (the next look does that).
+            if sent && state.moving.get() { backend.window().request_redraw(); } else { idle.set(true); }
         }
         WinitEvent::CloseRequested => {
             state.end_reason = "window closed".into();
             state.loop_signal.stop();
         }
     }})?;
-    Ok(())
+    Ok(after_turn)
 }
 
 fn edge_cursor(e: &crate::layout::Edges) -> CursorIcon {
