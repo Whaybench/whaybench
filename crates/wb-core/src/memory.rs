@@ -258,11 +258,23 @@ fn schedule_items(d: &crate::paths::Data) -> Vec<Value> {
     out
 }
 
+/// What `board` is made from, as a short text that differs when its sections would: the store's events and nodes (every
+/// change of a node leaves an event; a node gone for good is counted), when the person last looked, the conversation
+/// on show and its map's time, and the schedules, which move with the clock. A session's name alone is not in it.
+pub fn board_mark(data: &Path, current: Option<&str>) -> String {
+    let d = crate::paths::Data::new(data.to_path_buf());
+    let store = db::open(data).and_then(|c| Ok((db::events_mark(&c)?, db::node_count(&c)?))).ok();
+    let schedules: Vec<String> = schedule_items(&d).iter().map(|i| format!("{}{}", i["line"], i["node"]["detail"])).collect();
+    format!("{store:?}{}{current:?}{:?}{schedules:?}", seen_at(data, "person"), current.and_then(|s| crate::sessions::map_changed(&d, s)))
+}
+
 /// The notifications panel's sections (3.19): nodes with a time or due date, the person's marked ones, what changed since the
 /// person last looked, held ones and the deleted ones. Each item is `{session, node, line}`: `session` is where the
 /// node came from, and the node's `id` is its node number, the one `map::person`, `trash` and `purge` take.
 /// `current` is the conversation on show: its open nodes get a section of their own, so any of them can be marked.
-/// shortcut: reads every node each time; ask the store per section when there are many.
+/// Reads every node: call it when `board_mark` differs, not on a timer. Finding nodes of other sessions on the same
+/// subject is not its work: the hooks (`list`, `delta`) and the map tool do that, when a conversation starts, a prompt is
+/// sent or a node is added.
 pub fn board(data: &Path, current: Option<&str>) -> Value {
     let Ok(conn) = db::open(data) else { return json!({}) };
     let mut all = db::nodes(&conn, &format!("1 ORDER BY {RECENT}"), &[]).unwrap_or_default();
@@ -325,6 +337,36 @@ mod tests {
 
     fn put(dir: &Path, sid: &str, nodes: Value) -> Value { map::command(dir, sid, Some(json!({"upsert": nodes}))).unwrap() }
     fn nid(map: &Value, id: &str) -> String { map["nodes"].as_array().unwrap().iter().find(|n| n["id"] == id).unwrap()["nid"].as_str().unwrap().to_string() }
+
+    #[test]
+    fn the_board_is_read_again_when_what_it_is_made_from_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let m = put(d, "s", json!([{"id": "n1", "label": "N", "due": "2030-01-01"}]));
+        let mark = |sid: Option<&str>| board_mark(d, sid);
+        let mut last = mark(Some("s"));
+        assert_eq!(last, mark(Some("s")), "nothing changed");
+        assert_ne!(last, mark(None), "another conversation on show");
+        let mut differs = |what: &str| { let now = mark(Some("s")); assert_ne!(now, last, "{what}"); last = now; };
+        put(d, "s", json!([{"id": "n1", "label": "Renamed"}]));
+        differs("a label");
+        put(d, "other", json!([{"id": "o", "label": "Elsewhere"}]));
+        differs("a node of another session");
+        let n1 = nid(&m, "n1");
+        map::person(d, json!([{"id": n1, "mark": "important"}])).unwrap();
+        differs("the person's mark");
+        map::trash(d, &n1, false).unwrap();
+        differs("the trash");
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        mark_seen(d, "person");
+        differs("the person looked");
+        // Its events gone already, only the node is counted.
+        let mut conn = db::open(d).unwrap();
+        conn.execute("DELETE FROM events", []).unwrap();
+        last = mark(Some("s"));
+        db::purge(&mut conn, &[n1]).unwrap();
+        assert_ne!(last, mark(Some("s")), "a node gone for good");
+    }
 
     #[test]
     fn a_file_touch_is_an_event_by_path() {

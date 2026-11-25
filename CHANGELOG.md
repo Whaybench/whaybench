@@ -19,6 +19,7 @@ names another step.
 - Requests about a project map's change (restore, rework) go to the agent in English in every language.
 - The session list no longer reads every conversation's map every two seconds to name one: with 250 conversations it used
   17% of a processor, now under 1%. It looks at those active in the last half year.
+- The notifications read the nodes again only when one changed, not every two seconds.
 
 ## [0.9.4] - 2026-11-24
 

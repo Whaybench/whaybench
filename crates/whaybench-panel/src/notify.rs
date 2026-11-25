@@ -11,7 +11,8 @@ use crate::common::{confirm, ctl, every};
 
 const SECTIONS: [(&str, &str); 7] = [("due", "notify-due"), ("marked", "notify-marked"), ("changed", "notify-changed"), ("check", "notify-check"), ("open", "notify-open"), ("held", "notify-held"), ("trash", "notify-trash")];
 
-struct View { shown: String, trash_open: bool }
+/// `shown`: what is drawn. `mark`: what it was read from (memory::board_mark), so nothing is read again until it changes.
+struct View { shown: String, mark: String, trash_open: bool }
 
 /// The asks waiting in the answer panel (wb_core::ask), one line each: which session, and a question or which tool.
 fn asks(d: &Data) -> Vec<String> {
@@ -23,8 +24,13 @@ fn asks(d: &Data) -> Vec<String> {
 }
 
 fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) {
-    let board = memory::board(&d.root, wb_core::sessions::target(d).as_deref());
+    let target = wb_core::sessions::target(d);
     let waiting = asks(d);
+    // Looked at every two seconds; the nodes are read only when something they are drawn from changed.
+    let mark = format!("{}{waiting:?}", memory::board_mark(&d.root, target.as_deref()));
+    if !force && view.borrow().mark == mark { return; }
+    let board = memory::board(&d.root, target.as_deref());
+    view.borrow_mut().mark = mark;
     let sig = format!("{}{}{:?}", board, view.borrow().trash_open, waiting);
     if !force && view.borrow().shown == sig { return; }
     view.borrow_mut().shown = sig;
@@ -211,7 +217,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         let (stack2, refresh) = (stack.clone(), history_refresh.clone());
         stack.connect_visible_child_name_notify(move |_| if stack2.visible_child_name().as_deref() == Some("history") { refresh(); });
     }
-    let view = Rc::new(RefCell::new(View { shown: String::new(), trash_open: false }));
+    let view = Rc::new(RefCell::new(View { shown: String::new(), mark: String::new(), trash_open: false }));
     {
         let (d, list2, view) = (d.clone(), list.clone(), view.clone());
         seen.connect_clicked(move |_| { memory::mark_seen(&d.root, "person"); redraw(&d, &list2, &view, true); });

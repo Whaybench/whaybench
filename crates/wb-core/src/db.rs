@@ -267,6 +267,8 @@ pub fn events_drop_before(conn: &Connection, time: &str) -> Result<usize> {
     Ok(conn.execute("DELETE FROM events WHERE time < ?", [time])?)
 }
 
+pub fn node_count(conn: &Connection) -> Result<i64> { Ok(conn.query_row("SELECT count(*) FROM nodes", [], |r| r.get(0))?) }
+
 /// A mark that differs whenever events were added or dropped: the last one's number and how many there are.
 pub fn events_mark(conn: &Connection) -> Result<String> {
     Ok(conn.query_row("SELECT coalesce(max(seq), 0) || ':' || count(*) FROM events", [], |r| r.get(0))?)
