@@ -130,7 +130,8 @@ In **Answer**, a reply can be headed **Task notice** or **Subagent report**.
 Open **Panels → Notifications** and look under **Due** on the **Now** tab for prompts scheduled in running
 Claude Code sessions. A row shows **Repeats**, **Once**, or **Wake-up**. Click it to open the conversation.
 
-A `⟳` beside a Claude Code session means it still runs an older version. Right-click a background session and choose
+A `⟳` beside a session means it still runs an older version of its agent. For Codex, point at the row to see both
+versions; close its tab and open the session again to move it. For Claude Code, right-click a background session and choose
 **Restart on new version**. The choice is off while the session works, waits for you or has a loop pending.
 
 At the bottom of **Notifications**, look for context use and the five-hour and seven-day usage percentages for

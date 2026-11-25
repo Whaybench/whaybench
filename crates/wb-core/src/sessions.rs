@@ -430,11 +430,23 @@ pub fn has_conversation(d: &Data, id: &str) -> bool {
 
 pub fn agent(id: &str) -> Option<Value> { agents().into_iter().find(|a| a.get("sessionId").and_then(Value::as_str) == Some(id)) }
 
-/// The Claude Code a running session's process is on and the one installed now, when they differ: after an update
-/// Claude Code moves only idle sessions that no tab shows onto the new one. None when current or not running.
-pub fn old_version(id: &str) -> Option<(String, String)> {
-    let pid = agent(id)?.get("pid")?.as_u64()?;
-    older(&fs::read_link(format!("/proc/{pid}/exe")).ok()?.to_string_lossy(), &fs::canonicalize(claude_program()).ok()?)
+/// The agent program a running session's process is on and the one installed now, when they differ: after an update
+/// Claude Code moves only idle sessions that no tab shows onto the new one, an add-on agent none. None when current or
+/// not running.
+pub fn old_version(d: &Data, id: &str) -> Option<(String, String)> {
+    let exe = |pid: &str| Some(fs::read_link(format!("/proc/{pid}/exe")).ok()?.to_string_lossy().to_string());
+    if let Some(a) = agent(id) {
+        return older(&exe(&a.get("pid")?.as_u64()?.to_string())?, &fs::canonicalize(claude_program()).ok()?);
+    }
+    // An add-on agent's tab leaves its process number as the heartbeat.
+    if !plain_id(id) { return None; }
+    let beat = alive_dir(&at(d, id)).join(id);
+    if !heartbeat(&beat) { return None; }
+    let pid: u32 = crate::paths::read_text(&beat).ok()?.trim().parse().ok()?;
+    let agent = crate::agents::load(&d.root, record_of(d, id)?["agent"].as_str()?).ok()?;
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let program = versions::find_program(&agent.command, &std::env::var("PATH").unwrap_or_default(), home.as_deref())?;
+    older_release(&exe(&pid.to_string())?, &fs::canonicalize(program).ok()?)
 }
 
 /// The version file a process runs (as /proc shows it) against the one installed now: both names when it is older.
@@ -447,6 +459,23 @@ fn older(running: &str, now: &Path) -> Option<(String, String)> {
     if running.parent() != now.parent() || (running == now && !deleted) { return None; }
     let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_string());
     Some((name(running)?, name(now)?))
+}
+
+/// The same for a program with a folder for each version (Codex: `releases/<version>/bin/codex`): the paths differ in
+/// that folder alone. The build's name both share after the version is left out. Anything else says nothing: node, a
+/// project's container (podman).
+fn older_release(running: &str, now: &Path) -> Option<(String, String)> {
+    let deleted = running.ends_with(" (deleted)");
+    let running = Path::new(running.trim_end_matches(" (deleted)"));
+    if running == now { return deleted.then(|| older(&format!("{} (deleted)", running.display()), now)).flatten(); }
+    if running.file_name() != now.file_name() || running.components().count() != now.components().count() { return None; }
+    let mut differ = running.components().zip(now.components()).filter(|(a, b)| a != b);
+    let (Some((a, b)), None) = (differ.next(), differ.next()) else { return None };
+    let (a, b) = (a.as_os_str().to_string_lossy().to_string(), b.as_os_str().to_string_lossy().to_string());
+    Some(match (a.split_once('-'), b.split_once('-')) {
+        (Some((x, build)), Some((y, other))) if build == other && x != y => (x.to_string(), y.to_string()),
+        _ => (a, b),
+    })
 }
 
 /// Restarts a background session's process on the Claude Code installed now; the conversation goes on. Given up after
@@ -750,6 +779,19 @@ mod tests {
         assert_eq!(older("/h/.local/share/claude/versions/2.1.327 (deleted)", now), pair("2.1.327", "2.1.327"), "replaced under the same name");
         assert_eq!(older("/usr/bin/node", Path::new("/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js")), None, "a package-manager install");
         assert_eq!(older("/usr/bin/zsh", now), None, "a process id another program took");
+    }
+
+    #[test]
+    fn an_agent_with_a_folder_for_each_version_is_compared_by_that_folder() {
+        let now = Path::new("/h/.codex/releases/0.172.0-x86_64-linux/bin/codex");
+        let pair = |a: &str, b: &str| Some((a.to_string(), b.to_string()));
+        assert_eq!(older_release("/h/.codex/releases/0.172.0-x86_64-linux/bin/codex", now), None);
+        assert_eq!(older_release("/h/.codex/releases/0.170.0-x86_64-linux/bin/codex", now), pair("0.170.0", "0.172.0"));
+        assert_eq!(older_release("/h/.codex/releases/0.170.0-x86_64-linux/bin/codex (deleted)", now), pair("0.170.0", "0.172.0"), "its folder removed by the update");
+        assert!(older_release("/h/.codex/releases/0.172.0-x86_64-linux/bin/codex (deleted)", now).is_some(), "replaced in the same place");
+        assert_eq!(older_release("/usr/bin/node", Path::new("/usr/lib/node_modules/@openai/codex/bin/codex.js")), None, "a package-manager install");
+        assert_eq!(older_release("/usr/bin/podman", Path::new("/usr/bin/codex")), None, "a project's container");
+        assert_eq!(older_release("/h/a/1/bin/codex", Path::new("/h/b/2/bin/codex")), None, "two places, not two versions");
     }
 
     #[test]

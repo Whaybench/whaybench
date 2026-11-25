@@ -11,6 +11,8 @@ names another step.
 - The Input panel sends the first prompt to a new Codex tab: before it, Codex has no session, and the panel said none and
   took no text. It waits for Codex to say that it takes input (`ready` in an agent add-on's `agent.json`), so nothing is
   typed into a sign-in or hook trust screen.
+- A Codex session still on an older version than the one installed has the `⟳` in the session list too, both versions in its
+  tooltip.
 - The sessions, files, notifications, menu and status panels draw with the renderer GTK chooses again (the GPU); the input
   panel alone takes Cairo. Under WSL it made no difference worth it.
 - The request for a conversation's name says too that a step (review, commit, push, release) is no name, and to replace one.

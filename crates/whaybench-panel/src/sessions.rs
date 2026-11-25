@@ -79,12 +79,12 @@ fn respawn_block(d: &Data, id: &str) -> Option<&'static str> {
 fn respawn(d: &Data, id: &str) {
     if respawn_block(d, id).is_some() { return; }
     RESPAWNING.lock().unwrap().push(id.to_string());
-    let id = id.to_string();
+    let (d, id) = (d.clone(), id.to_string());
     std::thread::spawn(move || {
         if let Err(e) = sessions::respawn(&id) { record::warn("session", "not restarted on the new Claude Code", &e, &[("session", id.clone())]); }
         sessions::refresh_agents();
         // The supervisor may still be on the old one and start the session there again: the mark stays.
-        if let Some((now, installed)) = sessions::old_version(&id) {
+        if let Some((now, installed)) = sessions::old_version(&d, &id) {
             record::warn("session", "still on the old Claude Code", "its supervisor has not moved to the new one yet", &[("session", id.clone()), ("running", now), ("installed", installed)]);
         }
         RESPAWNING.lock().unwrap().retain(|r| r != &id);
@@ -119,8 +119,8 @@ fn describe(d: &Data, info: &Value, asking: &std::collections::BTreeSet<String>)
     }
     let name = sessions::session_name(d, id);
     let title = if name.is_empty() { wb_core::i18n::t("empty-session").into() } else { cut(&name, 34) };
-    // On an older Claude Code than the one installed: a small mark on the title, the restart is in its right-click menu.
-    let title = if alive && sessions::old_version(id).is_some() { format!("⟳ {title}") } else { title };
+    // On an older agent than the one installed: a small mark on the title. Claude Code's restart is in its right-click menu.
+    let title = if alive && sessions::old_version(d, id).is_some() { format!("⟳ {title}") } else { title };
     (title, parts.join(" · "))
 }
 
@@ -175,7 +175,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let now = wb_core::clock::now_ms();
     let signature = format!("{}{only:?}{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}{:?}", all.len(), stubs.iter().map(|s| (&s.id, &s.name, s.open())).collect::<Vec<_>>(), open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().filter(|s| recent(s, now)).map(|s| {
         let id = sid(s);
-        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_changed(d, id), subagents_note(d, id), sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).len(), sessions::old_version(id))
+        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_changed(d, id), subagents_note(d, id), sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).len(), sessions::old_version(d, id))
     }).collect::<Vec<_>>());
     if !force && view.borrow().signature == signature { return; }
     view.borrow_mut().signature = signature;
@@ -187,6 +187,8 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
             let (title, sub) = describe(d, info, &waiting);
             let r = row(&title, &sub, note.as_deref(), faded);
             r.set_widget_name(sid(info));
+            // An add-on agent has no restart in the menu that names the versions.
+            if info.get("agent").is_some() && let Some((running, installed)) = sessions::old_version(d, sid(info)) { r.set_tooltip_text(Some(&format!("{running} → {installed}"))); }
             if chosen.as_deref() == Some(sid(info)) { r.add_css_class("chosen"); }
             list.append(&r);
         };
@@ -369,7 +371,7 @@ fn list_menu(list: &gtk::ListBox, d: &Data, view: &Rc<RefCell<View>>) {
             if running { menu.append(Some(wb_core::i18n::t("end-session")), Some("s.end")); }
             // A background session on an older Claude Code: restart it on the new one, or say why not now (an item
             // with no action shows dimmed).
-            let old = sessions::old_version(&id).filter(|_| running && sessions::background(&id));
+            let old = sessions::old_version(&d, &id).filter(|_| running && sessions::background(&id));
             let block = old.as_ref().and_then(|_| respawn_block(&d, &id));
             if let Some((_, installed)) = &old {
                 match block {
