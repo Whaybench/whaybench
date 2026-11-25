@@ -108,6 +108,7 @@ pub fn init_window(event_loop: &mut EventLoop<App>, state: &mut App, own_frame: 
             state.redraw = true;
             record::detail("screen", "window focus", &[("focused", focused.to_string())]);
             state.host_focused = focused;
+            if !focused { state.release_keys(); }
             // Back from the desktop: what was copied there comes in, where the desktop cannot be watched.
             if focused { state.clip.read_once(); }
         }

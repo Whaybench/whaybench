@@ -25,6 +25,12 @@ const LEFT: u32 = 0x110;
 const TAB_SLACK: f64 = 6.0;
 
 impl App {
+    /// The desktop took the keyboard away: a key held then (Alt of its Alt+Tab) is released there, never here, and would
+    /// stay pressed for every key typed after.
+    pub fn release_keys(&mut self) {
+        self.seat.get_keyboard().unwrap().release_source(self, smithay::input::keyboard::KeyboardSource::MAIN);
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         self.redraw = true;
         match event {

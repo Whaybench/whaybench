@@ -14,6 +14,10 @@ names another step.
 - The sessions, files, notifications, menu and status panels draw with GTK's Cairo renderer, as the input panel does: less
   memory each. `GSK_RENDERER` set by hand still wins.
 
+### Fixed
+- A key held while the desktop takes the keyboard (Alt of Alt+Tab) no longer stays pressed inside Whaybench: every key
+  typed after went in as Alt+key until Alt was pressed again.
+
 ## [0.9.5] - 2026-11-25
 
 ### Changed

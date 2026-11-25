@@ -290,6 +290,20 @@ mod tests {
         let _ = state.display_handle.flush_clients();
     }
 
+    /// Alt pressed, then the desktop takes the keyboard (Alt+Tab): no key typed after is Alt+key.
+    #[test]
+    fn keys_held_when_the_desktop_takes_the_keyboard_are_released() {
+        use smithay::{backend::input::{InputTime, KeyState, Keycode}, input::keyboard::FilterResult, utils::SERIAL_COUNTER};
+        let data = tempfile::tempdir().unwrap();
+        let (_events, mut state) = start(&wb_core::paths::Data::new(data.path().to_path_buf()));
+        let keyboard = state.seat.get_keyboard().unwrap();
+        // The left Alt key: evdev 56, 8 more in xkb.
+        keyboard.input::<(), _>(&mut state, Keycode::new(64), KeyState::Pressed, SERIAL_COUNTER.next_serial(), InputTime::now(), |_, _, _| FilterResult::Forward);
+        assert!(keyboard.modifier_state().alt);
+        state.release_keys();
+        assert!(!keyboard.modifier_state().alt && keyboard.pressed_keys().is_empty());
+    }
+
     /// Serves the app until it says the step is done (an app that failed ends the test, not hangs it).
     fn until<T>(rx: &mpsc::Receiver<T>, state: &mut crate::App, events: &mut Loop) -> T {
         let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
