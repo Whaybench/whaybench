@@ -339,7 +339,7 @@ fn token_terminal(d: &Data) {
 /// the page it asks for in the browser beside it. The login stays in the project.
 fn agent_login(d: &Data, id: &str, agent: &str) {
     let (Some(st), Ok(agent)) = (stub_of(d, id).filter(|st| st.open() && wb_core::container::opened_isolated(st)), wb_core::agents::load(&d.root, agent)) else { return };
-    // Not the program's own add-on as it came: confirmed where its conversations are, first.
+    // Not an add-on the program brings: confirmed where its conversations are, first.
     if !agent.trusted(&d.root) { status::say(d, &wb_core::i18n::f("briefsafe-login-confirm-first", &[("name", agent.name.clone())]), 10); return; }
     let d = d.clone();
     // Off the panel's thread: podman may be slow.

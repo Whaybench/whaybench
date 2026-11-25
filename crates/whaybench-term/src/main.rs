@@ -738,7 +738,7 @@ fn main() {
         (_, Some(r)) => vec!["--resume".into(), r.clone()],
         _ => new_id.map(|id| vec!["--session-id".into(), id]).unwrap_or_default(),
     };
-    // An add-on agent runs a program as the person: one not as the program brings it is shown and asked first.
+    // An add-on agent runs a program as the person: one the program does not bring is shown and asked first.
     if let Some(agent) = wb_core::agents::active().and_then(|id| wb_core::agents::load(&relay.data.root, &id).ok()) {
         if !agent.trusted(&relay.data.root) && !confirm_agent(&relay.data, &agent) {
             record::decide("session", "agent not started", "the person did not confirm the add-on", &[("agent", agent.id.clone())]);

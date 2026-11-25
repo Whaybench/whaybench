@@ -86,11 +86,11 @@ Ordinary Codex tabs share the sign-in of your own Codex.
 
 ## Add-ons
 
-A bundled agent add-on runs as it came. For any other, or one that was changed, the tab first shows the command, the
-settings files it merges or writes and the instructions it gives the agent. Nothing of it is set up until you press
-<kbd>y</kbd>. The approval holds for exactly those files.
+A bundled agent add-on runs without a question. For any other, the tab first shows the command, the settings files it
+merges or writes and the instructions it gives the agent. Nothing of it is set up until you press <kbd>y</kbd>. You are
+asked once for each add-on; one that changes afterwards is not asked about again.
 
-A map style's instructions are shown before they go to the agent, and again when they change. Codex asks you to trust
+A map style's instructions are shown once, before they first go to the agent. Codex asks you to trust
 Whaybench's hooks itself, with `/hooks`.
 
 ## Releases

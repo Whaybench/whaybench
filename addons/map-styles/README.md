@@ -93,4 +93,4 @@ The side worker calls a small model (haiku) once. It does not appear in the conv
 
 ## Confirming instructions
 
-`instruction` and `request` items go to the AI as written. A style from elsewhere shows them for confirmation before first use, and again when they change.
+`instruction` and `request` items go to the AI as written. A style from elsewhere shows them for confirmation before first use, once for each style.

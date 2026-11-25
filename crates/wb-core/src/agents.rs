@@ -153,31 +153,16 @@ pub fn shell_quote(path: &Path) -> Result<String> {
 fn trust_file(data: &Path) -> PathBuf { data.join("addon-trust.json") }
 
 impl Agent {
-    /// Every file the add-on brings, in a fixed order: what the person confirms before it runs.
-    fn fingerprint(&self) -> Result<String> {
-        use sha1::{Digest, Sha1};
-        let mut names: Vec<&String> = self.merge.values().chain(self.write.values()).chain(&self.context).chain(&self.prompt_context).collect();
-        names.sort();
-        let mut h = Sha1::new();
-        for n in std::iter::once(&"agent.json".to_string()).chain(names) {
-            h.update(n.as_bytes());
-            h.update([0]);
-            h.update(fs::read(self.dir.join(n))?);
-            h.update([0]);
-        }
-        Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
-    }
-
-    /// An add-on agent runs programs as the person: it runs only as the program brings it, or once the person has
-    /// confirmed exactly these files (map styles' instructions are confirmed the same way).
+    /// An add-on agent runs programs as the person: it runs when the program brings it, or once the person has confirmed
+    /// it. Confirmed once, it is trusted: what it holds may change afterwards.
     pub fn trusted(&self, data: &Path) -> bool {
-        crate::addons::bundled_as_is(&crate::paths::Data::new(data.to_path_buf()), &format!("agents/{}", self.id))
-            || self.fingerprint().ok().is_some_and(|f| crate::map::read_json(&trust_file(data), Value::Null).ok().is_some_and(|t| t[format!("agents/{}", self.id)] == f))
+        let place = format!("agents/{}", self.id);
+        crate::addons::bundled(&place) || crate::map::read_json(&trust_file(data), Value::Null).ok().is_some_and(|t| !t[place].is_null())
     }
 
     pub fn trust(&self, data: &Path) -> Result<()> {
         let mut t = crate::map::read_json(&trust_file(data), serde_json::json!({}))?;
-        t[format!("agents/{}", self.id)] = Value::String(self.fingerprint()?);
+        t[format!("agents/{}", self.id)] = Value::Bool(true);
         write_json(&trust_file(data), &t)
     }
 
@@ -554,11 +539,8 @@ mod tests {
         assert!(codex.context("sid", true)?.unwrap().contains("Its description has the rules"), "the whole note at the start");
         let each = codex.context("sid", false)?.unwrap();
         assert!(each.starts_with("Whaybench session sid.") && each.len() < 200, "one line with each prompt: {each}");
-        // The person confirms the per-prompt text too: changing it asks again.
-        let before = codex.fingerprint()?;
+        // The person confirms the per-prompt text too.
         assert!(codex.summary().2.contains("Whaybench session {session}. Conversation map"));
-        fs::write(codex.folder().join("prompt.md"), "something else")?;
-        assert_ne!(codex.fingerprint()?, before);
         Ok(())
     }
 
@@ -566,15 +548,17 @@ mod tests {
     fn an_add_on_runs_as_brought_or_once_confirmed() -> Result<()> {
         let dir = tempfile::tempdir()?;
         with_addons(dir.path());
-        let codex = load(dir.path(), "codex")?;
-        assert!(codex.trusted(dir.path()), "the program's own, unchanged");
-        fs::write(dir.path().join("addons/agents/codex/context.md"), "changed")?;
-        let codex = load(dir.path(), "codex")?;
-        assert!(!codex.trusted(dir.path()), "changed: confirm first");
-        codex.trust(dir.path())?;
-        assert!(codex.trusted(dir.path()));
-        fs::write(dir.path().join("addons/agents/codex/agent.json"), fs::read_to_string(dir.path().join("addons/agents/codex/agent.json"))?.replace("--no-daemon", "--other"))?;
-        assert!(!load(dir.path(), "codex")?.trusted(dir.path()), "a confirmation holds for those files only");
+        assert!(load(dir.path(), "codex")?.trusted(dir.path()), "the program's own");
+        let (from, other) = (dir.path().join("addons/agents/codex"), dir.path().join("addons/agents/other"));
+        fs::create_dir_all(&other)?;
+        for f in fs::read_dir(from)?.flatten() { fs::copy(f.path(), other.join(f.file_name()))?; }
+        assert!(!load(dir.path(), "other")?.trusted(dir.path()), "from elsewhere: confirm first");
+        load(dir.path(), "other")?.trust(dir.path())?;
+        assert!(load(dir.path(), "other")?.trusted(dir.path()));
+        fs::write(other.join("agent.json"), fs::read_to_string(other.join("agent.json"))?.replace("--no-daemon", "--other"))?;
+        assert!(load(dir.path(), "other")?.trusted(dir.path()), "one that changes is not asked about again");
+        fs::write(trust_file(dir.path()), r#"{"agents/other":"4876ab8bef7dbd12adb57afb723090c7e97f0581"}"#)?;
+        assert!(load(dir.path(), "other")?.trusted(dir.path()), "a confirmation kept by an earlier version holds");
         Ok(())
     }
 

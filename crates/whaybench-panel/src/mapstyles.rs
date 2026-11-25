@@ -6,7 +6,7 @@ use std::{collections::{HashMap, HashSet}, fs, path::PathBuf};
 use serde_json::{Value, json};
 use wb_core::paths::Data;
 
-use wb_store::{arr, read, s, sha, write_json};
+use wb_store::{arr, read, s, write_json};
 
 pub const DEFAULT: &str = "default";
 const FRAMES: [&str; 5] = ["tree", "columns", "route", "time", "questions"];
@@ -251,19 +251,18 @@ pub fn draw_request(style: &Style, session: &str, scope: Option<(&str, &str)>) -
     wb_core::i18n::ai_f("map-style-show-in-the-style", &[("a1", (style.name).to_string()), ("target", (target).to_string()), ("a2", map), ("a3", (style.instruction().trim()).to_string()), ("title", (title).to_string())])
 }
 
-// A style's free text goes into the AI as written, so it is used only after the person read and confirmed it;
-// a confirmation holds for that exact text.
+// A style's free text goes into the AI as written, so it is used only after the person read and confirmed it, once for
+// each style.
 fn trust_file(d: &Data) -> PathBuf { d.root.join("addon-trust.json") }
 
-/// A style's free text may be used: it is the one the person confirmed. One with none has nothing to confirm.
+/// A style's free text may be used: the person confirmed the style. One with none has nothing to confirm.
 pub fn allowed(d: &Data, style: &Style) -> bool {
-    let text = style.free_text();
-    text.trim().is_empty() || read(&trust_file(d)).is_some_and(|k| s(&k, &style.path.to_string_lossy()) == sha(&text))
+    style.free_text().trim().is_empty() || read(&trust_file(d)).is_some_and(|k| !k[style.path.to_string_lossy().as_ref()].is_null())
 }
 
 pub fn allow(d: &Data, style: &Style) {
     let mut k = kept(&trust_file(d));
-    k[style.path.to_string_lossy().as_ref()] = Value::String(sha(&style.free_text()));
+    k[style.path.to_string_lossy().as_ref()] = Value::Bool(true);
     let _ = write_json(&trust_file(d), &k);
 }
 
@@ -360,7 +359,7 @@ mod tests {
         allow(&st.data, &m);
         assert!(allowed(&st.data, &m));
         fs::write(&m.path, r#"{"node_menu":[{"label":"summary","do":"request","arg":"other text"}]}"#).unwrap();
-        assert!(!allowed(&st.data, &find(&st.data, "m").unwrap()), "changed text is confirmed again");
+        assert!(allowed(&st.data, &find(&st.data, "m").unwrap()), "a style that changes is not asked about again");
     }
     #[test]
     fn a_persons_settings_go_over_the_style_but_only_its_frames_and_only_valid_ones() {

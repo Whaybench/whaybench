@@ -46,7 +46,10 @@ pub fn valid_id(id: &str) -> bool { !id.is_empty() && id.chars().all(|c| c.is_as
 
 fn valid_file(f: &str) -> bool { !f.is_empty() && !f.starts_with('.') && !f.contains('/') }
 
-/// Whether an add-on is exactly as the program brings it: then it is the program's own and needs no confirmation.
+/// Whether the program brings an add-on: then it needs no confirmation.
+pub fn bundled(place: &str) -> bool { BUNDLED.iter().any(|(p, _, _)| *p == place) }
+
+/// Whether an add-on is exactly as the program brings it.
 pub fn bundled_as_is(data: &Data, place: &str) -> bool {
     let mine: Vec<_> = BUNDLED.iter().filter(|(p, _, _)| *p == place).collect();
     !mine.is_empty() && mine.iter().all(|(p, f, text)| fs::read_to_string(data.root.join("addons").join(p).join(f)).ok().as_deref() == Some(*text))
