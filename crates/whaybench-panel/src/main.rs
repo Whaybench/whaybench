@@ -24,15 +24,22 @@ mod view;
 
 use gtk::{gio, glib, prelude::*};
 
+/// GSK_RENDERER is this panel's choice, not the person's.
+static OWN_RENDERER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn main() -> glib::ExitCode {
     wb_core::paths::private_files();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let kind = args.first().cloned().unwrap_or_default();
     // GTK's GL renderer leaves the top of a just-typed glyph undrawn in a text view until the next full redraw
     // (GTK 4.22, fonts without their own top room such as Noto Sans CJK); the Cairo one does not. One small field.
-    if kind == "input" && std::env::var_os("GSK_RENDERER").is_none() {
+    // The panels of lists and text take it too: without a GL context each holds tens of megabytes less (sessions
+    // 109 -> 17 MB). Kept for a theme whose effects inside a panel need GL: the input panel alone on Cairo, as before.
+    // if kind == "input" && std::env::var_os("GSK_RENDERER").is_none() {
+    if matches!(kind.as_str(), "input" | "menu" | "status" | "sessions" | "files" | "notify") && std::env::var_os("GSK_RENDERER").is_none() {
         // SAFETY: no other thread exists yet.
         unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
+        OWN_RENDERER.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let view_name = args.get(1).cloned().unwrap_or_else(|| wb_core::view::FIRST_VIEW.to_string());
     let view_app = wb_core::view::app_of(&view_name);

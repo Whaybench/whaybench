@@ -11,6 +11,8 @@ names another step.
 - Claude Code is asked which sessions run (`claude agents --json`) when one starts or ends, when Whaybench opens, ends or
   restarts one and when a listed process is gone, and else every 50 seconds. Before, about every four seconds, also at rest.
 - The sessions panel no longer stands still while Claude Code answers that.
+- The sessions, files, notifications, menu and status panels draw with GTK's Cairo renderer, as the input panel does: less
+  memory each. `GSK_RENDERER` set by hand still wins.
 
 ## [0.9.5] - 2026-11-25
 
