@@ -453,6 +453,9 @@ fn listed(roots: Vec<Data>) -> Vec<Value> {
 /// shortcut: opens the store on every call; share one connection if a panel's refresh shows up in a profile.
 pub fn map_of(d: &Data, id: &str) -> Option<Value> { crate::map::view(&at(d, id).root, id).ok().filter(|m| m.get("nodes").is_some()) }
 
+/// When a session's map file last changed.
+pub fn map_changed(d: &Data, id: &str) -> Option<SystemTime> { crate::paths::meta(&at(d, id).root.join(format!("{id}.json"))).and_then(|m| m.modified()).ok() }
+
 pub fn unend(d: &Data, id: &str) {
     let p = sessions_dir(&at(d, id)).join(format!("{id}.json"));
     if let Some(mut r) = read_json(&p) {

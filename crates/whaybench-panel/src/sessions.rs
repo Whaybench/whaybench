@@ -146,6 +146,12 @@ fn row(title: &str, sub: &str, note: Option<&str>, faded: bool) -> gtk::ListBoxR
     r
 }
 
+/// How long a conversation is looked at every two seconds after its last activity: half a year. An older one stays in the
+/// list as it was last drawn; its next start makes it recent again.
+const LOOKED_AT_MS: i64 = 183 * 86_400_000;
+
+fn recent(info: &Value, now: i64) -> bool { now - info.get("lastActive").and_then(Value::as_i64).unwrap_or(0) < LOOKED_AT_MS }
+
 fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) {
     // One project's list reads that project's conversations, not every one; with none to show, nothing.
     let one = view.borrow().only.clone();
@@ -166,9 +172,10 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     let (query, show_hidden, only) = { let v = view.borrow(); (v.query.clone(), v.show_hidden, v.only.clone()) };
     let waiting = asking(d);
     let stubs = wb_core::roots::stubs(d);
-    let signature = format!("{only:?}{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}{:?}", stubs.iter().map(|s| (&s.id, &s.name, s.open())).collect::<Vec<_>>(), open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().map(|s| {
+    let now = wb_core::clock::now_ms();
+    let signature = format!("{}{only:?}{chosen:?}{show_hidden}{query}{latest:?}{waiting:?}{:?}{:?}{:?}", all.len(), stubs.iter().map(|s| (&s.id, &s.name, s.open())).collect::<Vec<_>>(), open.iter().map(|t| (&t.tab, &t.session)).collect::<Vec<_>>(), all.iter().filter(|s| recent(s, now)).map(|s| {
         let id = sid(s);
-        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_of(d, id).map(|m| cut(&m.to_string(), 200)), subagents_note(d, id), sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).len(), sessions::old_version(id))
+        (id.to_string(), s.get("lastActive").cloned(), sessions::alive(d, id), sessions::state_of(d, id), s.get("ended").cloned(), sessions::map_changed(d, id), subagents_note(d, id), sessions::schedules::live(&wb_core::roots::for_session(d, id).root, id).len(), sessions::old_version(id))
     }).collect::<Vec<_>>());
     if !force && view.borrow().signature == signature { return; }
     view.borrow_mut().signature = signature;
@@ -405,6 +412,13 @@ fn list_menu(list: &gtk::ListBox, d: &Data, view: &Rc<RefCell<View>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_conversation_is_looked_at_for_half_a_year_after_its_last_activity() {
+        let day = 86_400_000;
+        let last = |days: i64| serde_json::json!({"id": "s", "lastActive": 1000 * day - days * day});
+        assert!(recent(&last(0), 1000 * day) && recent(&last(182), 1000 * day));
+        assert!(!recent(&last(184), 1000 * day));
+    }
     #[test]
     fn helpers_are_counted_by_agent() {
         let root = std::env::temp_dir().join(format!("wb-helpers-{}", std::process::id()));

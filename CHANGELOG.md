@@ -17,6 +17,8 @@ names another step.
 - A `settings.json` or `addon-trust.json` with a mistake in it is set aside when the map style settings or a style's
   confirmation write to it, as elsewhere; before, the indent setting replaced all settings.
 - Requests about a project map's change (restore, rework) go to the agent in English in every language.
+- The session list no longer reads every conversation's map every two seconds to name one: with 250 conversations it used
+  17% of a processor, now under 1%. It looks at those active in the last half year.
 
 ## [0.9.4] - 2026-11-24
 
