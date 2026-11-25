@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-11-25
+
 ### Changed
 - Claude Code is asked which sessions run (`claude agents --json`) when one starts or ends, when Whaybench opens, ends or
   restarts one and when a listed process is gone, and else every 50 seconds. Before, about every four seconds, also at rest.

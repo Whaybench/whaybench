@@ -3090,7 +3090,7 @@ dependencies = [
 
 [[package]]
 name = "wb-core"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "fluent-bundle",
  "glob",
@@ -3109,7 +3109,7 @@ dependencies = [
 
 [[package]]
 name = "wb-store"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "libc",
  "regex",
@@ -3174,7 +3174,7 @@ dependencies = [
 
 [[package]]
 name = "whaybench"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "ab_glyph",
  "libc",
@@ -3191,7 +3191,7 @@ dependencies = [
 
 [[package]]
 name = "whaybench-panel"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "gtk4",
  "libc",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "whaybench-term"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "libc",
  "serde_json",
@@ -3217,7 +3217,7 @@ dependencies = [
 
 [[package]]
 name = "whaybench-tools"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "gio",
  "glob",
