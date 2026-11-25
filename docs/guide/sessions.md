@@ -131,7 +131,8 @@ Open **Panels → Notifications** and look under **Due** on the **Now** tab for 
 Claude Code sessions. A row shows **Repeats**, **Once**, or **Wake-up**. Click it to open the conversation.
 
 A `⟳` beside a session means it still runs an older version of its agent. For Codex, point at the row to see both
-versions; close its tab and open the session again to move it. For Claude Code, right-click a background session and choose
+versions; close its tab and open the session again to move it. Codex installed with npm, or in a project's container, has no mark.
+For Claude Code, right-click a background session and choose
 **Restart on new version**. The choice is off while the session works, waits for you or has a loop pending.
 
 At the bottom of **Notifications**, look for context use and the five-hour and seven-day usage percentages for

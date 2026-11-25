@@ -77,10 +77,10 @@ pub fn write_tab(d: &Data, tab: &str, session: Option<&str>, attached: bool) {
     let _ = write_atomic(&tab_file(d, tab), v.to_string());
 }
 
-/// Notes that the tab's agent waits for its first prompt. The next `write_tab` takes the note off.
-pub fn mark_ready(d: &Data, tab: &str) {
-    let Some(mut v) = read_json(&tab_file(d, tab)).filter(|v| v["ready"] != true) else { return };
-    v["ready"] = Value::Bool(true);
+/// Notes whether the tab's agent waits for its first prompt. `write_tab` takes the note off.
+pub fn mark_ready(d: &Data, tab: &str, ready: bool) {
+    let Some(mut v) = read_json(&tab_file(d, tab)).filter(|v| (v["ready"] == true) != ready) else { return };
+    v["ready"] = Value::Bool(ready);
     let _ = write_atomic(&tab_file(d, tab), v.to_string());
 }
 
@@ -149,12 +149,14 @@ mod tests {
         write_tab(&d, "t1", None, false);
         set_focus_empty(&d, "t1", "test", false);
         assert!(first_prompt_tab(&d).is_none() && !queue_first(&d, "t1", "hello"), "a sign-in or trust screen");
-        mark_ready(&d, "t1");
+        mark_ready(&d, "t1", true);
         assert_eq!(first_prompt_tab(&d).as_deref(), Some("t1"));
         assert!(queue_first(&d, "t1", "hello"));
         assert_eq!(fs::read_dir(tab_inbox(&d, "t1")).unwrap().count(), 1);
+        mark_ready(&d, "t1", false);
+        assert!(first_prompt_tab(&d).is_none() && !queue_first(&d, "t1", "hello"), "it works");
         write_tab(&d, "t2", None, false);
-        mark_ready(&d, "t2");
+        mark_ready(&d, "t2", true);
         set_focus_empty(&d, "t2", "test", false);
         assert_eq!(first_prompt_tab(&d).as_deref(), Some("t2"), "another empty tab came to the front");
         write_tab(&d, "t2", Some("s2"), false);

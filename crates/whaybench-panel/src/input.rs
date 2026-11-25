@@ -24,10 +24,23 @@ impl To {
 
     fn project(&self, d: &Data) -> Option<String> {
         match self {
-            To::Session(s) => wb_core::roots::Roots::new(d.clone()).project_of(s),
+            // A new conversation's record comes with its first hook: until then, the project of the tab that shows it.
+            To::Session(s) => wb_core::roots::Roots::new(d.clone()).project_of(s).or_else(|| {
+                let tab = sessions::open_tabs(d).into_iter().find(|t| t.session.as_ref() == Some(s))?;
+                sessions::tab_project(d, &tab.tab)
+            }),
             To::Tab(t) => sessions::tab_project(d, t),
         }
     }
+}
+
+/// The project a draft begun now is of ("" is the host's): the conversation's it goes to, or of the tab in front that
+/// takes no text yet.
+fn owner_of_draft(d: &Data, to: Option<&To>) -> String {
+    match to {
+        Some(to) => to.project(d),
+        None => sessions::empty_tab(d).and_then(|t| sessions::tab_project(d, &t)),
+    }.unwrap_or_default()
 }
 
 /// Where a sent text goes.
@@ -83,7 +96,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             if b.char_count() == 0 { *owner.borrow_mut() = None; *goes.borrow_mut() = None; }
             else if owner.borrow().is_none() {
                 let to = To::front(&d);
-                *owner.borrow_mut() = Some(to.as_ref().and_then(|t| t.project(&d)).unwrap_or_default());
+                *owner.borrow_mut() = Some(owner_of_draft(&d, to.as_ref()));
                 *goes.borrow_mut() = to;
             }
         });
@@ -226,6 +239,20 @@ mod tests {
         assert_eq!(draft_goes_to(Some(&a), Some(&t), true), Some(s("a")), "an agent opened a tab with no session yet");
         assert_eq!(draft_goes_to(Some(&a), None, true), Some(s("a")), "or one that takes no prompt yet");
         assert_eq!(draft_goes_to(Some(&a), None, false), None, "the person did");
+    }
+    #[test]
+    fn a_draft_begun_before_a_projects_tab_takes_text_is_the_projects() {
+        let d = Data::new(std::env::temp_dir().join(format!("whaybench-owner-{}", std::process::id())));
+        sessions::write_tab(&d, "t", None, false);
+        sessions::set_tab_project(&d, "t", Some("p1"));
+        sessions::set_focus_empty(&d, "t", "test", false);
+        assert!(To::front(&d).is_none(), "it takes no text yet");
+        assert_eq!(owner_of_draft(&d, None), "p1");
+        sessions::write_tab(&d, "t", Some("new"), false);
+        assert_eq!(owner_of_draft(&d, Some(&To::Session("new".into()))), "p1", "a session with no record yet");
+        sessions::set_tab_project(&d, "t", None);
+        assert_eq!(owner_of_draft(&d, None), "", "a host tab");
+        let _ = std::fs::remove_dir_all(&d.root);
     }
     #[test]
     fn a_draft_for_an_empty_tab_follows_the_conversation_it_makes() {

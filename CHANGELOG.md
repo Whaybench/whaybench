@@ -9,10 +9,14 @@ names another step.
 
 ### Changed
 - The Input panel sends the first prompt to a new Codex tab: before it, Codex has no session, and the panel said none and
-  took no text. It waits for Codex to say that it takes input (`ready` in an agent add-on's `agent.json`), so nothing is
-  typed into a sign-in or hook trust screen.
+  took no text. It waits for Codex to say that it takes input (`ready` and `busy` in an agent add-on's `agent.json`), so
+  nothing is typed into the sign-in or the first question about hooks. The hooks review screen opened from there looks the
+  same to it as the prompt.
 - A Codex session still on an older version than the one installed has the `⟳` in the session list too, both versions in its
   tooltip.
+- A draft begun for a Briefsafe project's tab before the tab takes text, or before its conversation is recorded, stays the
+  project's.
+- A text waiting for a tab is read only once it is whole, so it cannot be typed in twice.
 - The sessions, files, notifications, menu and status panels draw with the renderer GTK chooses again (the GPU); the input
   panel alone takes Cairo. Under WSL it made no difference worth it.
 - The request for a conversation's name says too that a step (review, commit, push, release) is no name, and to replace one.

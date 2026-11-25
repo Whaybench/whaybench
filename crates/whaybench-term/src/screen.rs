@@ -62,19 +62,23 @@ impl Titles {
     }
 }
 
-/// Looks for a mark in what a program writes, also when it arrives split over reads.
-pub struct Mark { mark: Vec<u8>, tail: Vec<u8> }
+/// Follows what an agent writes when it waits for input and when it works, also when it arrives split over reads.
+pub struct Waits { ready: Vec<u8>, busy: Vec<u8>, tail: Vec<u8> }
 
-impl Mark {
-    /// None for an empty mark, which everything would hold.
-    pub fn new(mark: &str) -> Option<Mark> { (!mark.is_empty()).then(|| Mark { mark: mark.into(), tail: Vec::new() }) }
+impl Waits {
+    /// None without a `ready` mark: an empty one is in everything. An empty `busy` is never seen.
+    pub fn new(ready: &str, busy: &str) -> Option<Waits> { (!ready.is_empty()).then(|| Waits { ready: ready.into(), busy: busy.into(), tail: Vec::new() }) }
 
-    pub fn seen(&mut self, bytes: &[u8]) -> bool {
+    /// Whether it waits now, by the last mark in what was read; None without one.
+    pub fn read(&mut self, bytes: &[u8]) -> Option<bool> {
         self.tail.extend_from_slice(bytes);
-        let seen = self.tail.windows(self.mark.len()).any(|w| w == self.mark);
-        let keep = self.tail.len().saturating_sub(self.mark.len() - 1);
-        self.tail.drain(..keep);
-        seen
+        let last = |mark: &[u8]| if mark.is_empty() { None } else { self.tail.windows(mark.len()).rposition(|w| w == mark) };
+        let (ready, busy) = (last(&self.ready), last(&self.busy));
+        // A mark already told is not told again from what is kept for the next read.
+        let told = ready.max(busy).map_or(0, |at| at + 1);
+        let cut = self.tail.len().saturating_sub(self.ready.len().max(self.busy.len()) - 1).max(told);
+        self.tail.drain(..cut);
+        if ready.is_none() && busy.is_none() { None } else { Some(ready > busy) }
     }
 }
 
@@ -98,12 +102,19 @@ mod tests {
         assert_eq!(typed_command(""), None);
     }
     #[test]
-    fn a_mark_is_seen_once_also_split() {
-        assert!(Mark::new("").is_none());
-        let mut m = Mark::new("\x1b]7501;state=idle").unwrap();
-        assert!(!m.seen(b"\x1b]7501;state=working\x1b\\text\x1b]7501;sta"));
-        assert!(m.seen(b"te=idle:app=codex\x1b\\"));
-        assert!(!m.seen(b"more"), "not again without a new one");
+    fn the_last_mark_says_whether_the_agent_waits() {
+        assert!(Waits::new("", "b").is_none());
+        let (idle, working) = (b"\x1b]7501;state=idle:app=codex\x1b\\", b"\x1b]7501;state=working:app=codex\x1b\\");
+        let mut w = Waits::new("\x1b]7501;state=idle", "\x1b]7501;state=working").unwrap();
+        assert_eq!(w.read(b"a start screen"), None);
+        assert_eq!(w.read(&[&idle[..], &working[..]].concat()), Some(false), "Codex starting");
+        assert_eq!(w.read(&idle[..9]), None, "split over reads");
+        assert_eq!(w.read(&idle[9..]), Some(true));
+        assert_eq!(w.read(working), Some(false));
+        let mut only = Waits::new("R", "").unwrap();
+        assert_eq!((only.read(b"R"), only.read(b"x")), (Some(true), None));
+        let mut short = Waits::new("R", "longer").unwrap();
+        assert_eq!((short.read(b"R"), short.read(b"x")), (Some(true), None), "not again from the part kept");
     }
     #[test]
     fn titles_are_removed_and_the_rest_stays() {

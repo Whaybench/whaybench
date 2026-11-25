@@ -438,7 +438,7 @@ pub fn old_version(d: &Data, id: &str) -> Option<(String, String)> {
     if let Some(a) = agent(id) {
         return older(&exe(&a.get("pid")?.as_u64()?.to_string())?, &fs::canonicalize(claude_program()).ok()?);
     }
-    // An add-on agent's tab leaves its process number as the heartbeat.
+    // An add-on agent's tab leaves its process number as the heartbeat (the hooks keep it).
     if !plain_id(id) { return None; }
     let beat = alive_dir(&at(d, id)).join(id);
     if !heartbeat(&beat) { return None; }
@@ -601,10 +601,15 @@ pub fn set_focus_empty(d: &Data, tab: &str, who: &str, agent: bool) {
 /// Whether the tab in front has no session yet (set_focus_empty).
 pub fn empty_chosen(d: &Data) -> bool { read_json(&focus_file(d)).is_some_and(|v| v["sessionId"].is_null()) }
 
-/// The tab in front, when it has no session yet and its agent waits for its first prompt.
+/// The tab in front, when it has no session yet (set_focus_empty).
+pub fn empty_tab(d: &Data) -> Option<String> {
+    read_json(&focus_file(d)).filter(|v| v["sessionId"].is_null())?["tab"].as_str().map(String::from)
+}
+
+/// The same, when its agent waits for its first prompt.
 pub fn first_prompt_tab(d: &Data) -> Option<String> {
-    let v = read_json(&focus_file(d)).filter(|v| v["sessionId"].is_null())?;
-    open_tabs(d).into_iter().find(|t| v["tab"] == t.tab.as_str() && t.session.is_none() && t.ready).map(|t| t.tab)
+    let tab = empty_tab(d)?;
+    open_tabs(d).into_iter().find(|t| t.tab == tab && t.session.is_none() && t.ready).map(|t| t.tab)
 }
 
 pub fn set_focus(d: &Data, id: &str, who: &str) { set_focus_by(d, id, who, false) }

@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use screen::{Mark, Titles, typed_command};
+use screen::{Titles, Waits, typed_command};
 use wb_core::{log as record, paths::{self, Data}, sessions};
 
 const TICK: Duration = Duration::from_secs(2);
@@ -49,8 +49,9 @@ struct Relay {
     typed_at: Option<i64>,
     screen: vt100::Parser,
     titles: Titles,
-    /// The add-on agent's `ready`.
-    ready: Option<Mark>,
+    /// The add-on agent's `ready` and `busy`, and what the last of them said.
+    marks: Option<Waits>,
+    waits: bool,
     title: String,
     /// When set, the relay ends at that moment.
     leave_at: Option<Instant>,
@@ -90,7 +91,8 @@ impl Relay {
         let size = size_of(0);
         let agent = wb_core::agents::active().map(|id| wb_core::agents::load(&self.data.root, &id)).transpose().map_err(|e| e.to_string())?;
         let addon = agent.is_some();
-        self.ready = agent.as_ref().and_then(|a| Mark::new(a.ready.as_deref()?));
+        self.marks = agent.as_ref().and_then(|a| Waits::new(a.ready.as_deref()?, a.busy.as_deref().unwrap_or_default()));
+        self.waits = false;
         let program = if let Some(a) = &agent {
             let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
             wb_core::versions::find_program(&a.command, &std::env::var("PATH").unwrap_or_default(), home.as_deref()).ok_or_else(|| format!("{} is not installed", a.command))?
@@ -259,6 +261,12 @@ impl Relay {
 
     fn save_tab(&self) { sessions::write_tab(&self.data, &self.tab, self.session.as_deref(), self.attached); }
 
+    /// Whether the agent of a tab with no session waits for its first prompt.
+    fn set_waits(&mut self, on: bool) {
+        self.waits = on;
+        sessions::mark_ready(&self.data, &self.tab, on);
+    }
+
     /// What the person typed reached the Enter key.
     fn input(&mut self, bytes: &[u8]) {
         if !self.running { return; }
@@ -348,8 +356,7 @@ impl Relay {
         }
         self.master = -1;
         record::decide("session", "program ended", "this tab's agent ended", &[("tab", self.tab.clone())]);
-        // It waits for no first prompt any more.
-        self.save_tab();
+        self.set_waits(false);
         if self.closing { self.leave_at = Some(Instant::now()); return; }
         // Attaching ended at once: nothing runs under that name any more. The conversation is on disk: open it from there.
         if self.attached && self.started.elapsed() < ATTACH_FAILS_WITHIN
@@ -482,6 +489,9 @@ impl Relay {
                 // One text a turn: after one, the next waits until its turn is seen (or none comes).
                 if self.typed_at.is_some_and(|at| !turn_pending(at, &state, wb_core::clock::now_ms())) { self.typed_at = None; }
                 waiting |= state["state"] != "done" || self.typed_at.is_some();
+            } else if self.marks.is_some() {
+                // A first prompt that came as the agent began to work waits for it too.
+                waiting |= !self.waits;
             }
             waiting
         };
@@ -513,8 +523,9 @@ impl Relay {
                 std::thread::sleep(Duration::from_millis(150));
                 write_all(self.master, b"\r");
                 if !text.trim_start().starts_with('/') { self.typed_at = Some(wb_core::clock::now_ms()); commands_only = true; }
-                // A first prompt: no other one until its session is known, or the agent waits again.
-                if self.session.is_none() { self.save_tab(); }
+                // A first prompt: no other one until its session is known, or the agent waits again. A command may start
+                // no turn, and then the agent writes nothing.
+                if self.session.is_none() && !text.trim_start().starts_with('/') { self.set_waits(false); }
             }
         }
     }
@@ -544,7 +555,7 @@ impl Relay {
                     } else {
                         let bytes = &buffer[..got as usize];
                         self.screen.process(bytes);
-                        if self.session.is_none() && self.ready.as_mut().is_some_and(|m| m.seen(bytes)) { sessions::mark_ready(&self.data, &self.tab); }
+                        if self.session.is_none() && let Some(on) = self.marks.as_mut().and_then(|m| m.read(bytes)) { self.set_waits(on); }
                         if !self.closing { let shown = self.titles.strip(bytes); write_all(1, &shown); }
                     }
                 }
@@ -593,10 +604,10 @@ impl Relay {
     }
 }
 
-/// The requests waiting in a tab's inbox in the order to type them: the person's own (an answer to a held question is
+/// The requests waiting in a tab's inbox (not one still being written) in the order to type them: the person's own (an answer to a held question is
 /// one) before other conversations', each oldest first (a name is its time).
 fn inbox(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Option<serde_json::Value>)> {
-    let mut all: Vec<_> = fs::read_dir(dir).into_iter().flatten().flatten().map(|f| f.path())
+    let mut all: Vec<_> = fs::read_dir(dir).into_iter().flatten().flatten().map(|f| f.path()).filter(|p| p.extension().is_some_and(|e| e == "json"))
         .map(|p| { let v = fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()); (p, v) }).collect();
     all.sort_by_key(|(p, v)| (v.as_ref().is_some_and(|v| v["other"] == true), p.clone()));
     all
@@ -715,7 +726,7 @@ fn main() {
     let session = attach.clone().or_else(|| resume.clone()).or_else(|| new_id.clone());
     let mut relay = Relay {
         data, tab, session, attached: attach.is_some(), master: -1, child: 0, running: false, started: Instant::now(), started_at: std::time::SystemTime::now(), hooked: false, typed_at: None,
-        screen: vt100::Parser::new(40, 120, 0), titles: Titles::default(), ready: None, title: String::new(),
+        screen: vt100::Parser::new(40, 120, 0), titles: Titles::default(), marks: None, waits: false, title: String::new(),
         leave_at: None, closing: false, map_from, resumed_at: None,
     };
     // Before the session is known (an add-on agent tells it with its first hook): the agent's name.
@@ -765,11 +776,41 @@ mod tests {
     fn one_text_a_turn_the_persons_first_then_oldest_first() {
         let dir = tempfile::tempdir().unwrap();
         for (n, t) in [("20", r#"{"text":"b","other":true}"#), ("10", r#"{"text":"a","other":true}"#), ("30", r#"{"text":"answer"}"#)] { fs::write(dir.path().join(format!("{n}.json")), t).unwrap(); }
+        fs::write(dir.path().join("40.77.tmp"), r#"{"text":"half"}"#).unwrap();
         let order: Vec<String> = inbox(dir.path()).into_iter().map(|(_, v)| v.unwrap()["text"].as_str().unwrap().to_string()).collect();
         assert_eq!(order, ["answer", "a", "b"]);
         let st = |s: &str, at: i64| serde_json::json!({"state": s, "at": at});
         assert!(turn_pending(100, &st("done", 50), 200), "its hook has not come");
         assert!(!turn_pending(100, &st("working", 150), 200) && !turn_pending(100, &st("done", 180), 200), "its turn began, or is over");
         assert!(!turn_pending(100, &st("done", 50), 20_000), "no turn came of it");
+    }
+
+    #[test]
+    fn a_first_prompt_waits_for_the_agent_and_takes_the_note_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = Data::new(dir.path().to_path_buf());
+        let mut fds = [0; 2];
+        assert_eq!(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK) }, 0);
+        let mut r = Relay {
+            data: data.clone(), tab: "t".into(), session: None, attached: false, master: fds[1], child: 0, running: true, started: Instant::now(), started_at: std::time::SystemTime::now(), hooked: false, typed_at: None,
+            screen: vt100::Parser::new(40, 120, 0), titles: Titles::default(), marks: Waits::new("idle", "work"), waits: false, title: String::new(),
+            leave_at: None, closing: false, map_from: None, resumed_at: None,
+        };
+        let typed = || { let mut b = [0u8; 256]; let n = unsafe { libc::read(fds[0], b.as_mut_ptr().cast(), b.len()) }; String::from_utf8_lossy(&b[..n.max(0) as usize]).to_string() };
+        let ready = || sessions::open_tabs(&data)[0].ready;
+        r.save_tab();
+        r.set_waits(true);
+        assert!(ready() && sessions::queue_first(&data, "t", "hello"));
+        r.set_waits(false);
+        r.requests();
+        assert_eq!(typed(), "", "it began to work meanwhile");
+        r.set_waits(true);
+        r.requests();
+        assert!(typed().contains("hello") && !ready(), "typed once, and no other until it waits again");
+        r.set_waits(true);
+        assert!(sessions::queue_first(&data, "t", "/status"));
+        r.requests();
+        assert!(typed().contains("/status") && ready(), "a command starts no turn");
+        unsafe { libc::close(fds[0]); libc::close(fds[1]); }
     }
 }

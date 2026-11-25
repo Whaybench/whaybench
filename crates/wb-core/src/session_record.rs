@@ -63,11 +63,13 @@ pub fn set(data: &Path, sid: &str, key: &str, value: Value) -> Result<()> {
     write_json(&path, &r)
 }
 
-/// The heartbeat: fresh while a process holds the session, "0" once none does.
+/// The heartbeat: fresh while a process holds the session, "0" once none does. The process number an add-on agent's
+/// tab left there stays (`sessions::old_version` reads it).
 pub fn alive(data: &Path, sid: &str, on: bool) -> Result<()> {
     let path = data.join("cache/alive").join(safe_id(sid)?);
     crate::paths::create_dir_all(path.parent().unwrap())?;
-    crate::paths::write_atomic(&path, if on { now_ms().to_string() } else { "0".into() })?;
+    let pid = crate::paths::read_text(&path).ok().filter(|t| t.trim().parse::<u32>().is_ok_and(|n| n > 0));
+    crate::paths::write_atomic(&path, if on { pid.unwrap_or_else(|| now_ms().to_string()) } else { "0".into() })?;
     Ok(())
 }
 
@@ -128,6 +130,23 @@ pub fn carry_from(data: &Path, sid: &str, from: &str) -> Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn a_hook_keeps_the_process_number_in_the_heartbeat() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join("cache/alive/s1");
+        let is = || fs::read_to_string(&file).unwrap();
+        alive(dir.path(), "s1", true)?;
+        assert!(is().parse::<u32>().is_err(), "a time, which is no process number");
+        fs::write(&file, "1234")?;
+        alive(dir.path(), "s1", true)?;
+        assert_eq!(is(), "1234");
+        alive(dir.path(), "s1", false)?;
+        assert_eq!(is(), "0");
+        alive(dir.path(), "s1", true)?;
+        assert_ne!(is(), "0", "alive again");
+        Ok(())
+    }
 
     #[test]
     fn an_active_session_does_not_stay_moved_to_itself() -> Result<()> {
