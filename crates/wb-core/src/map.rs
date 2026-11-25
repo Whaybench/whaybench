@@ -267,11 +267,33 @@ fn entries_of(session: &Value) -> Vec<(String, String)> {
 }
 
 fn session_write(data: &Path, sid: &str, entries: &[(String, String)], current: &Value, turn: u64, latest: bool) -> Result<Value> {
-    let file = json!({"sessionId": sid, "nodes": entries.iter().map(|(id, nid)| json!({"id": id, "nid": nid})).collect::<Vec<_>>(),
+    let mut file = json!({"sessionId": sid, "nodes": entries.iter().map(|(id, nid)| json!({"id": id, "nid": nid})).collect::<Vec<_>>(),
         "current": current, "turn": turn, "version": 3, "updatedAt": now_ms()});
+    if let Some(t) = title(data, sid) { file["title"] = json!(t); }
     write_json(&session_path(data, sid)?, &file)?;
     if latest { write_json(&data.join("latest.json"), &file)?; }
     Ok(file)
+}
+
+/// The name the agent gave the conversation, if it gave one.
+pub fn title(data: &Path, sid: &str) -> Option<String> { session_read(data, sid).ok()?["title"].as_str().filter(|t| !t.is_empty()).map(String::from) }
+
+/// The agent's name for the conversation, on one line of at most 60 characters.
+pub fn set_title(data: &Path, sid: &str, title: &str) -> Result<()> {
+    let _lock = lock(data, sid)?;
+    let mut file = session_read(data, sid)?;
+    file["title"] = json!(crate::hook::title_form(title).chars().take(60).collect::<String>());
+    write_json(&session_path(data, sid)?, &file)
+}
+
+/// What the conversation worked on last: its open and done nodes by the time they were made, newest first, the ten
+/// latest times. What one call made (options, steps, a branch) has one time, so it counts once.
+pub fn latest_work(nodes: &[Value]) -> Vec<(i64, Vec<&Value>)> {
+    let mut by: std::collections::BTreeMap<i64, Vec<&Value>> = Default::default();
+    for n in nodes.iter().filter(|n| !["dropped", "removed"].contains(&n["state"].as_str().unwrap_or(""))) {
+        by.entry(n["opened"]["at"].as_i64().unwrap_or(0)).or_default().push(n);
+    }
+    by.into_iter().rev().take(10).collect()
 }
 
 /// The nodes a session shows: `(its id for the node, the node's number)`.
@@ -503,10 +525,11 @@ fn change_by(data: &Path, scope: Scope, input: Value, latest: bool, person: bool
         let mut nodes = Vec::new();
         upsert(&mut nodes, replacement, &stamp, false)?;
         // A regrouping names the same nodes again: each keeps what the program gave it (its number, its memory id
-        // unless the agent sent one, the session it came from) and the person's mark, which only the person takes off.
+        // unless the agent sent one, the session it came from, when it was made) and the person's mark, which only the
+        // person takes off.
         for n in &mut nodes {
             let Some(old) = before.iter().find(|o| o["id"] == n["id"]) else { continue };
-            for key in ["nid", "origin", "mark"] { if let Some(v) = old.get(key) { n[key] = v.clone(); } }
+            for key in ["nid", "origin", "mark", "opened"] { if let Some(v) = old.get(key) { n[key] = v.clone(); } }
             if replacement.as_array().into_iter().flatten().find(|r| r["id"] == n["id"]).is_some_and(|r| r.get("memid").is_none())
                 && let Some(m) = old.get("memid") { n["memid"] = m.clone(); }
         }
@@ -847,6 +870,8 @@ pub fn empty_old_trash(data: &Path) -> usize {
 /// `whaybench map SESSION --end-turn`: one more finished turn, so the stamps of the next changes say in
 /// which turn they were made. `latest.json` is rewritten only while it shows this session.
 pub fn end_turn(data: &Path, sid: &str) -> Result<Value> {
+    // With the lock: a name saved meanwhile by another process is kept.
+    let _lock = lock(data, sid)?;
     let session = session_read(data, sid)?;
     let latest = read_json(&data.join("latest.json"), Value::Null)?["sessionId"] == sid;
     session_write(data, sid, &entries_of(&session), &session["current"], session.get("turn").and_then(Value::as_u64).unwrap_or(0) + 1, latest)
@@ -1224,6 +1249,10 @@ mod tests {
         assert_eq!(crate::db::nodes(&crate::db::open(dir.path())?, "label = 'no-such-node'", &[])?.len(), 0);
         command(dir.path(), "s", Some(json!({"nodes": [{"id":"q","label":"question"},{"id":"o","label":"option","parent":"q"},{"id":"d","label":"decided","state":"done"}]})))?;
         assert_eq!(get(dir.path(), "s", "o").unwrap()["mark"], json!("important"), "a regrouping leaves the person's mark");
+        let made = get(dir.path(), "s", "o").unwrap()["opened"].clone();
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        command(dir.path(), "s", Some(json!({"nodes": [{"id":"q","label":"question"},{"id":"o","label":"renamed","parent":"q"},{"id":"d","label":"decided","state":"done"}]})))?;
+        assert_eq!(get(dir.path(), "s", "o").unwrap()["opened"], made, "and when a node was made");
         person(dir.path(), json!([{"id": o, "mark":null}]))?;
         assert!(get(dir.path(), "s", "o").unwrap().get("mark").is_none(), "and take it off");
         assert_eq!(get(dir.path(), "s", "o").unwrap()["parent"], "q", "the person's change leaves the rest as it was");

@@ -1,104 +1,54 @@
-//! What a session is called: from its map's topics, told apart when two sessions share one.
+//! What a session is called: by its own map.
 use super::*;
 
 /// A node label as a name: the part before ' → ' (the topic, not its conclusion).
-fn short(label: &str, n: usize) -> String {
+pub(crate) fn short(label: &str, n: usize) -> String {
     let head = label.split(" → ").next().unwrap_or("").trim();
     if head.chars().count() <= n { head.to_string() } else { format!("{}…", head.chars().take(n - 1).collect::<String>()) }
 }
 
-/// How many of the latest nodes choose the main topic: the name follows where the work is now, and one or two nodes
-/// on a side topic do not move it.
-const RECENT: usize = 20;
-
-/// (main topic, what it is on now): the top branch holding the most of the latest `RECENT` nodes (a map keeps nodes in
-/// the order they came), and the step under it holding the current one. The whole map's biggest branch would keep the
-/// name of whatever grew first.
-pub fn map_topics(map: &Value) -> (String, String) {
-    let nodes = map.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
-    if nodes.is_empty() { return Default::default(); }
-    let sid = |n: &Value| n.get("id").and_then(Value::as_str).unwrap_or("").to_string();
-    let parent = |n: &Value| n.get("parent").and_then(Value::as_str).unwrap_or("").to_string();
-    let by: std::collections::HashMap<String, &Value> = nodes.iter().map(|n| (sid(n), n)).collect();
-    let top_of = |start: &Value| -> String {
-        let (mut x, mut seen) = (start, Vec::new());
-        while let Some(up) = by.get(&parent(x)) {
-            if seen.contains(&sid(x)) { break; }
-            seen.push(sid(x));
-            x = up;
-        }
-        sid(x)
+/// The topic of a map without a name: the top branch most of its latest work is in (`map::latest_work`); of equals, the
+/// one that comes last in the map.
+pub fn main_topic(map: &Value) -> String {
+    let nodes = map.get("nodes").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    let by: std::collections::HashMap<&str, &Value> = nodes.iter().filter_map(|n| Some((n["id"].as_str()?, n))).collect();
+    let top_of = |start: &Value| {
+        let mut x = start;
+        for _ in 0..nodes.len() { match x["parent"].as_str().and_then(|p| by.get(p)) { Some(up) => x = up, None => break } }
+        x["id"].as_str().unwrap_or("").to_string()
     };
     let mut counts: Vec<(String, usize)> = Vec::new();
-    for n in &nodes[nodes.len().saturating_sub(RECENT)..] {
-        let t = top_of(n);
-        match counts.iter_mut().find(|c| c.0 == t) { Some(c) => c.1 += 1, None => counts.push((t, 1)) }
-    }
-    // Most nodes; of equals, the one that comes last in the map.
-    let position = |id: &str| nodes.iter().position(|n| sid(n) == id).unwrap_or(0);
-    let main = counts.iter().max_by_key(|c| (c.1, position(&c.0))).map(|c| c.0.clone()).unwrap_or_default();
-    let label = |id: &str| by.get(id).and_then(|n| n.get("label")).and_then(Value::as_str).unwrap_or("").to_string();
-    let current = map.get("current").and_then(Value::as_str).unwrap_or("");
-    let mut now = String::new();
-    if let Some(cur) = by.get(current) {
-        if top_of(cur) != main {
-            now = label(&top_of(cur));
-        } else {
-            let mut step = (*cur).clone();
-            let mut guard = 0;
-            let mut last = String::new();
-            while sid(&step) != main && guard < 200 {
-                last = sid(&step);
-                match by.get(&parent(&step)) { Some(up) => step = (*up).clone(), None => break }
-                guard += 1;
-            }
-            if !last.is_empty() { now = label(&last); }
+    for (_, group) in crate::map::latest_work(nodes) {
+        for t in group.iter().map(|n| top_of(n)).collect::<std::collections::BTreeSet<_>>() {
+            match counts.iter_mut().find(|c| c.0 == t) { Some(c) => c.1 += 1, None => counts.push((t, 1)) }
         }
     }
-    (short(&label(&main), 26), short(&now, 22))
+    let position = |id: &str| nodes.iter().position(|n| n["id"] == id).unwrap_or(0);
+    let main = counts.iter().max_by_key(|c| (c.1, position(&c.0))).map(|c| c.0.as_str()).unwrap_or("");
+    short(by.get(main).and_then(|n| n["label"].as_str()).unwrap_or(""), 26)
 }
 
-/// Names from the maps, made distinct: main topic, then with what it is on, then with the date of last activity.
-pub fn map_titles(d: &Data) -> std::collections::HashMap<String, String> {
-    use std::collections::HashMap;
-    let mut rows: Vec<(String, String, String, i64)> = Vec::new();
-    for info in all(d) {
-        if info.get("movedTo").and_then(Value::as_str).is_some_and(|m| !m.is_empty()) { continue; }
-        let id = info["id"].as_str().unwrap_or("").to_string();
-        let Some(map) = map_of(d, &id) else { continue };
-        let (main, now) = map_topics(&map);
-        if !main.is_empty() { rows.push((id, main, now, info.get("lastActive").and_then(Value::as_i64).unwrap_or(0))); }
-    }
-    let mut names: HashMap<String, String> = HashMap::new();
-    for (id, main, now, _) in &rows {
-        let same = rows.iter().filter(|r| r.1 == *main).count();
-        names.insert(id.clone(), if same == 1 || now.is_empty() { main.clone() } else { format!("{main} · {now}") });
-    }
-    let snapshot = names.clone();
-    for (id, _, _, at) in &rows {
-        let name = &snapshot[id];
-        if snapshot.values().filter(|v| *v == name).count() > 1 {
-            let stamp = crate::clock::local(*at, "%m-%d %H:%M");
-            names.insert(id.clone(), format!("{name} · {stamp}"));
-        }
-    }
-    names
+/// What a session's own map calls it: the name the agent gave, else its topic. No other session is looked at. Kept by
+/// the map file's identity and time, so a map that did not change is not read again (a node renamed or deleted
+/// from another conversation, or by the person, shows once this one's map changes).
+pub fn map_name(d: &Data, id: &str) -> Option<String> {
+    type Kept = std::collections::HashMap<PathBuf, ((SystemTime, u64), Option<String>)>;
+    static NAMES: Mutex<Option<Kept>> = Mutex::new(None);
+    if !plain_id(id) { return None; }
+    let root = at(d, id).root;
+    let file = root.join(format!("{id}.json"));
+    let m = crate::paths::meta(&file).ok()?;
+    let key = (m.modified().ok()?, std::os::unix::fs::MetadataExt::ino(&m));
+    let mut names = NAMES.lock().unwrap();
+    let names = names.get_or_insert_with(Default::default);
+    if let Some((k, n)) = names.get(&file) && *k == key { return n.clone(); }
+    // A map that could not be read is not kept as one without a name: it is tried again.
+    let name = match crate::map::title(&root, id) { Some(t) => Some(t), None => Some(main_topic(&map_of(d, id)?)).filter(|t| !t.is_empty()) };
+    names.insert(file, (key, name.clone()));
+    name
 }
 
-static TITLES: Mutex<Option<(Instant, PathBuf, std::collections::HashMap<String, String>)>> = Mutex::new(None);
-
-/// `map_titles`, kept for a second: it reads every record and every map, and a list of sessions asks for
-/// each session's name in turn.
-fn titles_kept(d: &Data) -> std::collections::HashMap<String, String> {
-    let mut g = TITLES.lock().unwrap();
-    if let Some((at, root, titles)) = g.as_ref()
-        && at.elapsed() < Duration::from_secs(1) && *root == d.root { return titles.clone(); }
-    let titles = map_titles(d);
-    *g = Some((Instant::now(), d.root.clone(), titles.clone()));
-    titles
-}
-
-/// The session's name: its main topic from its map; without a map, the name Claude Code gives it
+/// The session's name: the one its own map gives it; without a map, the name Claude Code gives it
 /// (without the " (n)" it adds per /background), remembered after the session stops; else the first prompt.
 pub fn session_name(d: &Data, id: &str) -> String {
     // A name the person gave in Claude Code (/rename, --name) comes first: the program does not undo it.
@@ -111,7 +61,7 @@ pub fn session_name(d: &Data, id: &str) -> String {
         names[id] = Value::String(running.clone());
         let _ = write_atomic(&file, names.to_string());
     }
-    if let Some(n) = titles_kept(d).get(id) { return n.clone(); }
+    if let Some(n) = map_name(d, id) { return n; }
     if !running.is_empty() { return running; }
     if let Some(n) = names.get(id).and_then(Value::as_str) { return n.to_string(); }
     record_of(d, id).and_then(|r| r.get("firstPrompt").and_then(Value::as_str).map(String::from)).unwrap_or_default()
@@ -132,30 +82,42 @@ mod tests {
     use crate::sessions::tests::{data, rec};
 
     #[test]
-    fn a_map_names_a_session_by_its_biggest_branch() {
-        let m = serde_json::json!({"current":"c","nodes":[{"id":"a","label":"small branch"},{"id":"b","label":"big topic → conclusion"},{"id":"c","parent":"b","label":"first step"},{"id":"d","parent":"c","label":"detail"}]});
-        assert_eq!(map_topics(&m), ("big topic".to_string(), "first step".to_string()));
-        assert_eq!(map_topics(&serde_json::json!({"nodes":[]})), Default::default());
-        // An early topic grown large gives the name up to the one the latest nodes are in.
-        let mut nodes = vec![serde_json::json!({"id":"old","label":"old topic"})];
-        nodes.extend((0..40).map(|i| serde_json::json!({"id":format!("o{i}"),"parent":"old","label":"o"})));
-        nodes.push(serde_json::json!({"id":"new","label":"new topic"}));
-        nodes.extend((0..15).map(|i| serde_json::json!({"id":format!("n{i}"),"parent":"new","label":"n"})));
-        assert_eq!(map_topics(&serde_json::json!({"current":"n3","nodes":nodes})).0, "new topic");
+    fn a_map_names_a_session_by_the_branch_of_its_latest_work() {
+        let n = |id: &str, parent: &str, at: i64, state: &str| serde_json::json!({"id":id,"parent":parent,"label":format!("{id} → x"),"state":state,"opened":{"at":at}});
+        assert_eq!(main_topic(&serde_json::json!({"nodes":[]})), "");
+        // Twelve options of one call count once; the dropped ones not at all.
+        let mut nodes = vec![n("old", "", 1, "done"), n("new", "", 2, "")];
+        nodes.extend((0..12).map(|i| n(&format!("o{i}"), "old", 10, if i < 6 { "dropped" } else { "done" })));
+        nodes.extend((0..3).map(|i| n(&format!("w{i}"), "new", 20 + i, "doing")));
+        assert_eq!(main_topic(&serde_json::json!({"nodes":nodes})), "new");
+        // Only the ten latest times count.
+        nodes.extend((0..10).map(|i| n(&format!("z{i}"), "old", 100 + i, "")));
+        assert_eq!(main_topic(&serde_json::json!({"nodes":nodes})), "old");
+        // Nodes that name each other as parent do not loop.
+        assert!(!main_topic(&serde_json::json!({"nodes":[n("a", "b", 1, ""), n("b", "a", 1, "")]})).is_empty());
     }
     #[test]
-    fn the_same_topic_in_two_sessions_is_told_apart() {
+    fn a_session_is_named_by_its_own_map_alone() {
         let d = data("titles");
         rec(&d, "s1", serde_json::json!({"id":"s1","lastActive":1000}));
         rec(&d, "s2", serde_json::json!({"id":"s2","lastActive":2000}));
         rec(&d, "s3", serde_json::json!({"id":"s3","firstPrompt":"first question"}));
-        let map = |cur: &str| Some(serde_json::json!({"current":cur,"nodes":[{"id":"a","label":"same topic"},{"id":"x","parent":"a","label":"one"},{"id":"y","parent":"a","label":"two"}]}));
-        crate::map::command(&d.root, "s1", map("x")).unwrap();
-        crate::map::command(&d.root, "s2", map("y")).unwrap();
-        let t = map_titles(&d);
-        assert_eq!(t["s1"], "same topic · one");
-        assert_eq!(t["s2"], "same topic · two");
+        for s in ["s1", "s2"] { crate::map::command(&d.root, s, Some(serde_json::json!({"upsert":[{"id":"a","label":"same topic"}]}))).unwrap(); }
+        assert_eq!((session_name(&d, "s1"), session_name(&d, "s2")), ("same topic".into(), "same topic".into()));
         assert_eq!(session_name(&d, "s3"), "first question", "without a map, the first prompt");
+        crate::map::set_title(&d.root, "s1", "Own\nname").unwrap();
+        assert_eq!(session_name(&d, "s1"), "Own name", "the agent's name, on one line");
+        assert_eq!(session_name(&d, "s2"), "same topic");
+        // A change of the map, a turn's end and a move to another number keep it; a map taken over does not.
+        crate::map::command(&d.root, "s1", Some(serde_json::json!({"upsert":[{"id":"b","label":"more"}]}))).unwrap();
+        crate::map::end_turn(&d.root, "s1").unwrap();
+        assert_eq!(session_name(&d, "s1"), "Own name");
+        crate::map::take_over(&d.root, "s4", &crate::map::view(&d.root, "s1").unwrap()).unwrap();
+        assert_eq!(crate::map::title(&d.root, "s4"), None);
+        adopt(&d, "s1", "s5");
+        assert_eq!(session_name(&d, "s5"), "Own name");
+        rec(&d, "s1", serde_json::json!({"id":"s1","titleByPerson":"the person's"}));
+        assert_eq!(session_name(&d, "s1"), "the person's");
     }
     #[test]
     fn the_count_claude_code_adds_is_removed() {

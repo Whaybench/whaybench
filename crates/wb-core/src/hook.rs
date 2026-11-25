@@ -19,7 +19,7 @@ const TEXT_KEPT: usize = 40_000;
 pub struct Agent<'a> { pub name: &'a str, pub tab: Option<&'a str>, pub inside: bool }
 
 fn files_dir(data: &Path) -> std::path::PathBuf { data.join("files") }
-fn state_file(data: &Path, kind: &str, sid: &str) -> std::path::PathBuf { data.join("cache").join("hook").join(format!("{sid}.{kind}.json")) }
+pub(crate) fn state_file(data: &Path, kind: &str, sid: &str) -> std::path::PathBuf { data.join("cache").join("hook").join(format!("{sid}.{kind}.json")) }
 
 /// One event; the result is what the agent reads on stdout.
 pub fn run(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
@@ -81,6 +81,8 @@ fn handle(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
         // The panel follows latest.json until the person selects a session; a resumed conversation shows its map.
         write_json(&data.join("latest.json"), &session_map)?;
     }
+    // The name is looked at again five minutes from here on.
+    if name == "SessionStart" && matches!(event["source"].as_str(), Some("startup" | "resume" | "fork") | None) { crate::map_tool::title_from_now(data, sid); }
     // The agent's process is this session from now on: the MCP server, its child too, finds the session by it.
     if name == "SessionStart" || name == "UserPromptSubmit" { note_agent_process(data, sid); }
     // The map a tab started from comes in once, when the agent starts; /clear starts a session in the same process.
@@ -164,24 +166,25 @@ fn handle(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
 }
 
 /// A name as Claude Code keeps it: control and format characters and line breaks as spaces, trimmed, 200 characters.
-fn title_form(t: &str) -> String {
+pub(crate) fn title_form(t: &str) -> String {
     let odd = |c: char| c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{feff}');
     t.chars().map(|c| if odd(c) { ' ' } else { c }).collect::<String>().trim().chars().take(200).collect()
 }
 
-/// The name Claude Code should give the session (`/resume`, `claude agents`): the main topic of its map, sent when
+/// The name Claude Code should give the session (`/resume`, `claude agents`): the one its map gives, sent when
 /// Claude Code's name differs, on a start, resume, move or prompt (Claude Code ignores it after a compaction or
-/// /clear). A name the person gave there (/rename, --name: neither the one sent last nor the topic) is theirs: it is
-/// kept, Whaybench shows it too, and nothing is sent over it until the person gives the topic's name back.
+/// /clear). A name the person gave there (/rename, --name: neither the one sent last nor the map's) is theirs: it is
+/// kept, Whaybench shows it too, and nothing is sent over it until the person gives the map's name back.
 fn title(data: &Path, sid: &str, name: &str, event: &Value) -> Option<String> {
     let source = event["source"].as_str();
     if name == "SessionStart" && !matches!(source, Some("startup" | "resume" | "fork")) { return None; }
     let d = crate::paths::Data::new(data.to_path_buf());
     let record = crate::sessions::record_of(&d, sid).unwrap_or_default();
     let sent = record["titleSent"].as_str().map(String::from);
-    // " (n)" is Claude Code's own, added when a name is taken.
+    // " (n)" is Claude Code's own, added when a name is taken: not told apart from one in our own name, so it is left
+    // out of both.
     let have = event["session_title"].as_str().map(|t| crate::sessions::strip_count(&title_form(t))).filter(|t| !t.is_empty());
-    let mine = crate::sessions::map_of(&d, sid).map(|m| title_form(&crate::sessions::map_topics(&m).0)).filter(|t| !t.is_empty());
+    let mine = crate::sessions::map_name(&d, sid).map(|t| crate::sessions::strip_count(&title_form(&t))).filter(|t| !t.is_empty());
     // A moved conversation's new number starts with the name it carries, before Whaybench follows the move: a name is
     // the person's only where Whaybench has sent one, or at a start or resume (--name).
     let judged = sent.is_some() || matches!(source, Some("startup" | "resume"));
@@ -190,7 +193,7 @@ fn title(data: &Path, sid: &str, name: &str, event: &Value) -> Option<String> {
         return None;
     }
     if record.get("titleByPerson").is_some() {
-        // The person gave the topic's own name back: the topic leads again.
+        // The person gave the map's own name back: it leads again.
         if have.is_some() && have == mine {
             let _ = session_record::set(data, sid, "titleByPerson", Value::Null);
             let _ = session_record::set(data, sid, "titleSent", json!(mine));
@@ -920,7 +923,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_is_given_the_maps_topic_as_the_name_and_a_persons_name_is_kept() {
+    fn claude_code_is_given_the_maps_name_and_a_persons_name_is_kept() {
         let dir = tempfile::tempdir().unwrap();
         let a = Agent { name: crate::agents::CLAUDE, tab: None, inside: false };
         let d = crate::paths::Data::new(dir.path().to_path_buf());
@@ -958,13 +961,21 @@ mod tests {
         assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "go"}))).as_deref(), Some("two lines"));
         assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "on", "session_title": "two lines"}))), None);
         assert!(by_person("n").is_none());
-        // The person renames, then gives the topic's name back: the topic leads again.
+        // The person renames, then gives the map's name back: it leads again.
         named(ev("n", "UserPromptSubmit", json!({"prompt": "x", "session_title": "mine"})));
         assert_eq!(by_person("n"), Some(json!("mine")));
         named(ev("n", "UserPromptSubmit", json!({"prompt": "y", "session_title": "two lines"})));
         assert!(by_person("n").is_none());
         map::command(dir.path(), "n", Some(json!({"upsert": [{"id": "t", "label": "three"}]}))).unwrap();
         assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "z", "session_title": "two lines"}))).as_deref(), Some("three"));
+        // An agent's name that ends like Claude Code's own count is not the person's, and a later one is sent.
+        map::set_title(dir.path(), "n", "Issue cleanup (12)").unwrap();
+        assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "a", "session_title": "three"}))).as_deref(), Some("Issue cleanup"));
+        assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "b", "session_title": "Issue cleanup"}))), None);
+        assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "c", "session_title": "Issue cleanup (12)"}))), None);
+        assert!(by_person("n").is_none());
+        map::set_title(dir.path(), "n", "Other work").unwrap();
+        assert_eq!(named(ev("n", "UserPromptSubmit", json!({"prompt": "d", "session_title": "Issue cleanup"}))).as_deref(), Some("Other work"));
     }
 
     #[test]

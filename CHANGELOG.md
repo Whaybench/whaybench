@@ -8,6 +8,8 @@ names another step.
 ## [Unreleased]
 
 ### Changed
+- A conversation is named by its own agent, in its map (`title` in the map tool, asked for every five minutes when the work
+  changed); until then by its map's topic. Names are no longer told apart by comparing conversations.
 - A tab dragged along its title bar changes places with the others, and follows the pointer; only dragged up or down, away
   from the bar, is it pulled out into a panel. Before, 60 pixels sideways pulled it out.
 

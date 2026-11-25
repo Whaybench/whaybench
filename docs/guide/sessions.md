@@ -36,8 +36,9 @@ click the session row again.
 
 ## Name and find conversations
 
-Whaybench usually names a conversation from the main topic of its map. Without a map title, it can use Claude Code's
-session name or the first recorded question. To give a Claude Code conversation your own name, use this in its tab.
+A conversation's agent names it in the map while you talk, and changes the name when the work changes. Until it does, the
+name is the topic of the map's latest work. Without a map it can be Claude Code's session name or the first recorded
+question. A name does not depend on your other conversations. To give a Claude Code conversation your own name, use this in its tab.
 
 ```text
 /rename

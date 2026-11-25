@@ -99,6 +99,7 @@ whaybench map --file saved-map.json
 | `remove` | Takes nodes and their descendants off this map. The nodes stay in memory. |
 | `current` | Sets the node the conversation is on. |
 | `nodes` | Replaces the session's list of nodes. Nodes the person deleted stay in **Deleted**. |
+| `title` | Names the conversation, for the map tool only (`whaybench map` does not take it). |
 
 Whaybench checks the result before saving. A duplicate ID in `nodes`, a missing parent or current node, or a parent
 cycle leaves the stored map as it was. Repeated IDs in `upsert` apply in order. The caller gets an error and can retry

@@ -37,6 +37,7 @@ pub fn definition() -> Value {
         "upsert": {"type": "array", "items": node_schema(&["id"])},
         "remove": {"type": "array", "items": {"type": "string"}},
         "current": {"type": "string", "description": "id of the node the conversation is on now"},
+        "title": {"type": "string", "description": "the name of this conversation in the session list: what it is working on now, about 24 characters, a noun phrase in its language. Not a step such as a review or a commit."},
         "show": {"type": "boolean"}
     }}})
 }
@@ -76,10 +77,55 @@ pub fn call(data: &Path, sid: &str, input: &Value) -> Result<String> {
             i18n::ai_f("map-kept", &[("id", k["id"].as_str().unwrap_or("").into()), ("key", k["key"].as_str().unwrap_or("").into()), ("value", value)])
         }));
     }
+    if let Some(t) = input["title"].as_str().filter(|t| !t.trim().is_empty()) {
+        map::set_title(data, sid, t)?;
+        named(data, sid);
+    }
     if input.get("show") == Some(&json!(true)) { return Ok(as_text(&map::command(data, sid, None)?)); }
+    if input["title"].as_str().is_none_or(|t| t.trim().is_empty()) { similar.extend(title_due(data, sid)); }
     let mut out = if notes.is_empty() { "Map updated.".to_string() } else { format!("{}\n{}", i18n::ai("map-check"), notes.join("\n")) };
     for l in similar { out.push('\n'); out.push_str(&l); }
     Ok(out)
+}
+
+/// When the name was last looked at, and the work (its times) the agent last named or was asked about.
+fn title_file(data: &Path, sid: &str) -> std::path::PathBuf { crate::hook::state_file(data, "title", sid) }
+
+/// The conversation starts or goes on: its name is looked at five minutes from now.
+pub fn title_from_now(data: &Path, sid: &str) {
+    let mut v = map::read_json(&title_file(data, sid), json!({})).unwrap_or_else(|_| json!({}));
+    v["checked"] = json!(crate::clock::now_ms());
+    let _ = map::write_json(&title_file(data, sid), &v);
+}
+
+fn work_of(data: &Path, sid: &str) -> Vec<Value> { map::view(data, sid).unwrap_or_default()["nodes"].as_array().cloned().unwrap_or_default() }
+fn times(work: &[(i64, Vec<&Value>)]) -> Value { json!(work.iter().map(|g| g.0).collect::<Vec<_>>()) }
+
+/// The agent named it for the work as it is.
+fn named(data: &Path, sid: &str) { let _ = map::write_json(&title_file(data, sid), &json!({"checked": crate::clock::now_ms(), "for": times(&map::latest_work(&work_of(data, sid)))})); }
+
+/// Every five minutes: a line asking whether the name still says the work, when there is other work than it was given
+/// for. The map changes only in a call, so a call is where it is looked at. Not where the person named it: theirs stays.
+fn title_due(data: &Path, sid: &str) -> Option<String> {
+    const EVERY: i64 = 5 * 60_000;
+    let seen = map::read_json(&title_file(data, sid), json!({})).ok()?;
+    let Some(checked) = seen["checked"].as_i64() else { title_from_now(data, sid); return None };
+    if crate::clock::now_ms() - checked < EVERY { return None; }
+    let record = crate::sessions::record_of(&crate::paths::Data::new(data.to_path_buf()), sid);
+    if record.is_some_and(|r| r["titleByPerson"].as_str().is_some_and(|t| !t.is_empty())) { return None; }
+    let nodes = work_of(data, sid);
+    let work = map::latest_work(&nodes);
+    let now = times(&work);
+    if work.is_empty() || now == seen["for"] { title_from_now(data, sid); return None; }
+    let _ = map::write_json(&title_file(data, sid), &json!({"checked": crate::clock::now_ms(), "for": now}));
+    let items = work.iter().map(|(_, g)| {
+        let top = g.iter().find(|n| !g.iter().any(|p| p["id"] == n["parent"])).unwrap_or(&g[0]);
+        crate::sessions::short(top["label"].as_str().unwrap_or(""), 26)
+    }).collect::<Vec<_>>().join("; ");
+    Some(match map::title(data, sid) {
+        Some(t) => i18n::ai_f("map-title", &[("title", t), ("items", items)]),
+        None => i18n::ai_f("map-no-title", &[("items", items)]),
+    })
 }
 
 /// The `#n` memory id numbers a change uses, with the node that uses each.
@@ -283,6 +329,40 @@ mod tests {
         let err = call(d, "s", &json!({"upsert": [{"id": "z", "label": "Z", "memid": "#99"}]})).unwrap_err();
         assert!(err.to_string().contains("#99"), "{err}");
         assert_eq!(crate::memory::show(d, "2")["nodes"][0]["label"], "Unrelated", "show takes the bare number");
+    }
+
+    #[test]
+    fn the_name_is_asked_for_after_five_minutes_when_the_work_is_other_than_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let later = |d: &Path| { let mut v = map::read_json(&title_file(d, "s"), json!({})).unwrap(); v["checked"] = json!(crate::clock::now_ms() - 6 * 60_000); map::write_json(&title_file(d, "s"), &v).unwrap(); };
+        let up = |id: &str, title: Value| { std::thread::sleep(std::time::Duration::from_millis(3)); let mut c = json!({"upsert": [{"id": id, "label": format!("{id} → x")}]}); if !title.is_null() { c["title"] = title; } call(d, "s", &c).unwrap() };
+        assert_eq!(up("a", Value::Null), "Map updated.", "not before five minutes");
+        later(d);
+        let told = up("b", Value::Null);
+        assert!(told.contains("no title yet. Latest work first: b; a."), "{told}");
+        assert_eq!(up("c", Value::Null), "Map updated.", "asked once in five minutes");
+        assert_eq!(up("c", json!("Naming work")), "Map updated.");
+        assert_eq!(map::title(d, "s").as_deref(), Some("Naming work"));
+        later(d);
+        assert_eq!(up("c", Value::Null), "Map updated.", "the same work: nothing to ask");
+        later(d);
+        let told = up("e", Value::Null);
+        assert!(told.contains("title \"Naming work\" may no longer fit. Latest work first: e; c; b; a."), "{told}");
+        assert!(call(d, "s", &json!({"show": true})).unwrap().contains("[e]"));
+        // Started again: five minutes from there.
+        later(d);
+        title_from_now(d, "s");
+        assert_eq!(up("f", Value::Null), "Map updated.");
+        later(d);
+        // A blank title is no name, and it does not stop the question; a name of the person's does.
+        assert!(call(d, "s", &json!({"title": "  "})).unwrap().contains("Naming work"));
+        later(d);
+        call(d, "s", &json!({"upsert": [{"id": "g", "label": "g"}]})).unwrap();
+        later(d);
+        crate::session_record::set(d, "s", "titleByPerson", json!("mine")).unwrap();
+        assert_eq!(up("h", Value::Null), "Map updated.", "the person named it");
+        assert_eq!(map::title(d, "s").as_deref(), Some("Naming work"));
     }
 
     #[test]
