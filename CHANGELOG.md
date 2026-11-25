@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-11-25
+
 ### Changed
 - A conversation is named by its own agent, in its map (`title` in the map tool, asked for every five minutes when the work
   changed); until then by its map's topic. Names are no longer told apart by comparing conversations.
