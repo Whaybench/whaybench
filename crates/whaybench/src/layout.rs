@@ -27,6 +27,13 @@ pub fn tab_slot(rects: &[Rect], i: usize, left: f64) -> usize {
     to
 }
 
+/// The place a tab dragged to `left` takes where it would also stay: at the end of a narrow bar a tab is cut short, and
+/// one that just took that place would go back at the next movement. `rects_at`: the tabs with the dragged one there.
+pub fn tab_place(i: usize, left: f64, mut rects_at: impl FnMut(usize) -> Vec<Rect>) -> usize {
+    let to = tab_slot(&rects_at(i), i, left);
+    if to == i || tab_slot(&rects_at(to), to, left) == to { to } else { i }
+}
+
 pub const SNAP: f64 = 12.0;
 pub const GRIP: f64 = 7.0;
 pub const TOUCH: f64 = 2.0;
@@ -709,6 +716,17 @@ mod tests {
         let cases = [((0, 10.0), 0), ((0, 53.0), 0), ((0, 55.0), 1), ((0, 150.0), 2), ((0, 900.0), 2), ((2, 130.0), 2), ((2, 100.0), 1), ((2, -50.0), 0), ((1, 30.0), 1), ((1, 29.0), 0), ((9, 5.0), 9)];
         for ((i, left), to) in cases { assert_eq!(tab_slot(&rects, i, left), to, "tab {i} at {left}"); }
         assert_eq!((tab_left(&rects, 0, 900.0), tab_left(&rects, 2, -50.0)), (148.0, 0.0), "not past the ends");
+        // A narrow bar, its last tab cut short: dragged one way, a tab never goes back, and reaches the end.
+        let narrow = |_| [(0.0, 60.0), (64.0, 60.0), (128.0, 42.0)].map(|(x, w)| Rect::new(x, 3.0, w, 24.0)).to_vec();
+        for (start, step) in [(0, 1.0), (1, 1.0), (2, -1.0), (1, -1.0)] {
+            let mut at = start;
+            for n in 0..300 {
+                let to = tab_place(at, narrow(at)[start].x + step * n as f64, narrow);
+                assert!(if step > 0.0 { to >= at } else { to <= at }, "tab {start} at {n} px: {at} -> {to}");
+                at = to;
+            }
+            assert_eq!(at, if step > 0.0 { 2 } else { 0 });
+        }
         let mut s = Surface::new(1000.0, 600.0);
         let tab = |id| Tab { id, key: format!("a#{id}"), name: String::new() };
         s.panels.push(Panel::new(7, tab(1), Rect::new(0.0, 0.0, 400.0, 300.0)));

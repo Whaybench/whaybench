@@ -171,8 +171,13 @@ impl App {
                 if (y - sy).abs() <= title() {
                     if !slid && (x - sx).abs() <= TAB_SLACK { return; }
                     self.act = Act::TabPull { pid, tab: id, x: sx, y: sy, grab, slid: true };
-                    let rects = crate::render::tab_rects(self, &p);
-                    self.surface.move_tab(pid, tab, crate::layout::tab_slot(&rects, tab, x - grab));
+                    let to = crate::layout::tab_place(tab, x - grab, |to| {
+                        let mut p = p.clone();
+                        let t = p.tabs.remove(tab);
+                        p.tabs.insert(to, t);
+                        crate::render::tab_rects(self, &p)
+                    });
+                    self.surface.move_tab(pid, tab, to);
                 } else {
                     if let Some(new) = self.surface.tear_out(pid, tab, x, y) {
                         record::decide("screen", "tab pulled out", "a tab dragged out of the title bar", &[("panel", new.to_string())]);

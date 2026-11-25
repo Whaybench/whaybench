@@ -179,79 +179,83 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
     }).collect::<Vec<_>>());
     if !force && view.borrow().signature == signature { return; }
     view.borrow_mut().signature = signature;
-    // Rows only, by index: a menu opened on the list is its child too, and GTK's own remove_all loops on it forever.
-    while let Some(r) = list.row_at_index(0) { list.remove(&r); }
-    let mut first = None;
-    let add = |info: &Value, faded: bool, note: Option<String>| {
-        let (title, sub) = describe(d, info, &waiting);
-        let r = row(&title, &sub, note.as_deref(), faded);
-        r.set_widget_name(sid(info));
-        if chosen.as_deref() == Some(sid(info)) { r.add_css_class("chosen"); }
-        list.append(&r);
-    };
-    let moved = |s: &Value| !text(s, "movedTo").is_empty();
-    if !query.is_empty() {
-        for info in all.iter().filter(|s| !moved(s) && !text(s, "firstPrompt").is_empty() && !sessions::ghost(d, &all, sid(s))) {
-            if let Some(note) = search_note(&query, &pairs(d, info)) {
-                if first.is_none() { first = Some(sid(info).to_string()); }
-                add(info, info.get("ended") == Some(&Value::Bool(true)), Some(note));
-            }
-        }
-        if first.is_none() {
-            let r = row(wb_core::i18n::t("no-matching-session"), "", None, true);
-            r.set_selectable(false);
-            r.set_activatable(false);
+    let rows = || {
+        // Rows only, by index: a menu opened on the list is its child too, and GTK's own remove_all loops on it forever.
+        while let Some(r) = list.row_at_index(0) { list.remove(&r); }
+        let mut first = None;
+        let add = |info: &Value, faded: bool, note: Option<String>| {
+            let (title, sub) = describe(d, info, &waiting);
+            let r = row(&title, &sub, note.as_deref(), faded);
+            r.set_widget_name(sid(info));
+            if chosen.as_deref() == Some(sid(info)) { r.add_css_class("chosen"); }
             list.append(&r);
-        }
-    } else {
-        if only.is_none() {
-            let follow = row(wb_core::i18n::t("follow-latest-session"), &wb_core::i18n::f("current-2", &[("a1", (latest.as_deref().map(|l| cut(l, 8)).unwrap_or_else(|| wb_core::i18n::t("none").into())).to_string())]), None, false);
-            follow.set_widget_name("__follow__");
-            if chosen.is_none() { follow.add_css_class("chosen"); }
-            list.append(&follow);
-        }
-        let held = |s: &Value| open.iter().any(|t| t.tab == text(s, "tab") || t.session.as_deref() == Some(sid(s)));
-        let mut hidden = Vec::new();
-        // The host's conversations, then each Briefsafe project's under its name (spec 3.22): a locked one is its name
-        // only, nothing of its conversations.
-        let roots = wb_core::roots::Roots::new(d.clone());
-        let of: Vec<Option<String>> = all.iter().map(|i| roots.project_of(sid(i))).collect();
-        let groups = only.is_none().then_some(None).into_iter().chain(stubs.iter().filter(|st| only.as_ref().is_none_or(|o| *o == st.id)).map(Some));
-        for group in groups {
-            if only.is_some() && group.is_some_and(|st| !st.open()) { continue; }
-            if let Some(st) = group.filter(|_| only.is_none()) {
-                let head = row(&format!("▣ {}", st.name), if st.open() { wb_core::i18n::t("briefsafe-open") } else { wb_core::i18n::t("briefsafe-locked") }, None, !st.open());
-                head.set_widget_name("__project__");
-                head.set_activatable(false);
+        };
+        let moved = |s: &Value| !text(s, "movedTo").is_empty();
+        if !query.is_empty() {
+            for info in all.iter().filter(|s| !moved(s) && !text(s, "firstPrompt").is_empty() && !sessions::ghost(d, &all, sid(s))) {
+                if let Some(note) = search_note(&query, &pairs(d, info)) {
+                    if first.is_none() { first = Some(sid(info).to_string()); }
+                    add(info, info.get("ended") == Some(&Value::Bool(true)), Some(note));
+                }
+            }
+            if first.is_none() {
+                let r = row(wb_core::i18n::t("no-matching-session"), "", None, true);
+                r.set_selectable(false);
+                r.set_activatable(false);
+                list.append(&r);
+            }
+        } else {
+            if only.is_none() {
+                let follow = row(wb_core::i18n::t("follow-latest-session"), &wb_core::i18n::f("current-2", &[("a1", (latest.as_deref().map(|l| cut(l, 8)).unwrap_or_else(|| wb_core::i18n::t("none").into())).to_string())]), None, false);
+                follow.set_widget_name("__follow__");
+                if chosen.is_none() { follow.add_css_class("chosen"); }
+                list.append(&follow);
+            }
+            let held = |s: &Value| open.iter().any(|t| t.tab == text(s, "tab") || t.session.as_deref() == Some(sid(s)));
+            let mut hidden = Vec::new();
+            // The host's conversations, then each Briefsafe project's under its name (spec 3.22): a locked one is its name
+            // only, nothing of its conversations.
+            let roots = wb_core::roots::Roots::new(d.clone());
+            let of: Vec<Option<String>> = all.iter().map(|i| roots.project_of(sid(i))).collect();
+            let groups = only.is_none().then_some(None).into_iter().chain(stubs.iter().filter(|st| only.as_ref().is_none_or(|o| *o == st.id)).map(Some));
+            for group in groups {
+                if only.is_some() && group.is_some_and(|st| !st.open()) { continue; }
+                if let Some(st) = group.filter(|_| only.is_none()) {
+                    let head = row(&format!("▣ {}", st.name), if st.open() { wb_core::i18n::t("briefsafe-open") } else { wb_core::i18n::t("briefsafe-locked") }, None, !st.open());
+                    head.set_widget_name("__project__");
+                    head.set_activatable(false);
+                    list.append(&head);
+                    if !st.open() { continue; }
+                }
+                let want = group.map(|st| st.id.as_str());
+                for (info, p) in all.iter().zip(&of) {
+                    if p.as_deref() != want { continue; }
+                    let spoken = !text(info, "firstPrompt").is_empty();
+                    // Moved on, or stopped without ever being spoken in: gone. Never spoken in and in no tab: a spare process.
+                    if moved(info) || (!spoken && !sessions::alive(d, sid(info))) || (!spoken && !held(info)) { continue; }
+                    // A number left behind by a move that did not hold: its conversation is listed under the number it went on in.
+                    if sessions::ghost(d, &all, sid(info)) { continue; }
+                    if info.get("ended") == Some(&Value::Bool(true)) { hidden.push(info); continue; }
+                    add(info, false, subagents_note(d, sid(info)));
+                }
+            }
+            if only.as_ref().is_some_and(|o| !o.is_empty()) && list.row_at_index(0).is_none() && hidden.is_empty() {
+                let r = row(wb_core::i18n::t("briefsafe-no-sessions"), "", None, true);
+                r.set_selectable(false);
+                r.set_activatable(false);
+                list.append(&r);
+            }
+            if !hidden.is_empty() {
+                let head = row(&wb_core::i18n::f("hidden-sessions", &[("a1", (if show_hidden { "▾" } else { "▸" }).to_string()), ("a2", (hidden.len()).to_string())]), "", None, false);
+                head.set_widget_name("__hidden__");
                 list.append(&head);
-                if !st.open() { continue; }
-            }
-            let want = group.map(|st| st.id.as_str());
-            for (info, p) in all.iter().zip(&of) {
-                if p.as_deref() != want { continue; }
-                let spoken = !text(info, "firstPrompt").is_empty();
-                // Moved on, or stopped without ever being spoken in: gone. Never spoken in and in no tab: a spare process.
-                if moved(info) || (!spoken && !sessions::alive(d, sid(info))) || (!spoken && !held(info)) { continue; }
-                // A number left behind by a move that did not hold: its conversation is listed under the number it went on in.
-                if sessions::ghost(d, &all, sid(info)) { continue; }
-                if info.get("ended") == Some(&Value::Bool(true)) { hidden.push(info); continue; }
-                add(info, false, subagents_note(d, sid(info)));
+                if show_hidden { for info in hidden { add(info, true, None); } }
             }
         }
-        if only.as_ref().is_some_and(|o| !o.is_empty()) && list.row_at_index(0).is_none() && hidden.is_empty() {
-            let r = row(wb_core::i18n::t("briefsafe-no-sessions"), "", None, true);
-            r.set_selectable(false);
-            r.set_activatable(false);
-            list.append(&r);
-        }
-        if !hidden.is_empty() {
-            let head = row(&wb_core::i18n::f("hidden-sessions", &[("a1", (if show_hidden { "▾" } else { "▸" }).to_string()), ("a2", (hidden.len()).to_string())]), "", None, false);
-            head.set_widget_name("__hidden__");
-            list.append(&head);
-            if show_hidden { for info in hidden { add(info, true, None); } }
-        }
-    }
-    view.borrow_mut().first = first;
+        view.borrow_mut().first = first;
+    };
+    // At another search or a choice in the list it is drawn anew; a conversation that changed leaves the list where it was scrolled.
+    if force { rows() } else { crate::common::keep_scroll(list, rows) }
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {

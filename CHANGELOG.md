@@ -20,6 +20,7 @@ names another step.
 - The session list no longer reads every conversation's map every two seconds to name one: with 250 conversations it used
   17% of a processor, now under 1%. It looks at those active in the last half year.
 - The notifications read the nodes again only when one changed, not every two seconds.
+- The session list stays where it was scrolled when a conversation changes; before, it went back to the top.
 
 ## [0.9.4] - 2026-11-24
 

@@ -27,8 +27,8 @@ another panel.
 
 Click a tab to bring it forward. Drag it along the title bar to change the order of the tabs. To separate it,
 drag the tab up or down, away from the title bar, until it becomes a panel of its own. Keep dragging to dock it
-somewhere else. After a move that changes the layout, click **↩** within ten seconds to undo it while the arrow
-is available.
+somewhere else. After a panel or a pulled-out tab is moved and the layout changes, click **↩** within ten seconds to
+undo it while the arrow is available. A changed order of tabs has no **↩**: drag the tab back.
 
 ## Close, reopen, and reset panels
 
