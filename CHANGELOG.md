@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-11-26
+
 ### Added
 - The view panel scrolls by holding the middle (wheel) button and dragging: the page, or the box under the pointer that
   scrolls that way, inside a frame of the page too (the PDF viewer).
