@@ -7,6 +7,10 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- The view panel scrolls by holding the middle (wheel) button and dragging: the page, or the box under the pointer that
+  scrolls that way, inside a frame of the page too (the PDF viewer).
+
 ### Changed
 - An add-on from elsewhere (an agent, a map style's instructions) is confirmed once, before its first use: one that
   changes afterwards is not asked about again.

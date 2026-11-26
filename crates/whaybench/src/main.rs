@@ -34,7 +34,7 @@ whaybench ctl [--data-dir DIR] session new [--agent ID] [--project ID] [MAP-FROM
 whaybench ctl [--data-dir DIR] quit
 whaybench ctl [--data-dir DIR] shot --out FILE.png [--panel N]    N: panel number, default the whole surface
 whaybench ctl [--data-dir DIR] theme NAME    default or a theme in addons/themes of the data directory
-whaybench ctl [--data-dir DIR] pointer X Y | press | release | panels FILE    for tests
+whaybench ctl [--data-dir DIR] pointer X Y | press [right|middle] | release [right|middle] | panels FILE    for tests
 whaybench --version";
 
 struct Args {

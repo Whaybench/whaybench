@@ -30,8 +30,8 @@ pub enum Request {
     CloseTerm { tab: String },
     /// For tests: the same path as a person's pointer, without a person.
     Pointer { x: f64, y: f64 },
-    Press { right: bool },
-    Release { right: bool },
+    Press { right: bool, #[serde(default)] middle: bool },
+    Release { right: bool, #[serde(default)] middle: bool },
     /// For tests: a line per panel with its place, tabs and stacking.
     Panels { out: PathBuf },
 }
@@ -94,8 +94,8 @@ pub fn parse_request(words: &[String]) -> Result<Request, String> {
             let n = |i: usize| words.get(i).and_then(|v| v.parse().ok()).ok_or("pointer needs X Y");
             Ok(Request::Pointer { x: n(1)?, y: n(2)? })
         }
-        Some("press") => Ok(Request::Press { right: words.get(1).is_some_and(|w| w == "right") }),
-        Some("release") => Ok(Request::Release { right: words.get(1).is_some_and(|w| w == "right") }),
+        Some("press") => Ok(Request::Press { right: words.get(1).is_some_and(|w| w == "right"), middle: words.get(1).is_some_and(|w| w == "middle") }),
+        Some("release") => Ok(Request::Release { right: words.get(1).is_some_and(|w| w == "right"), middle: words.get(1).is_some_and(|w| w == "middle") }),
         Some("panels") => Ok(Request::Panels { out: words.get(1).map(PathBuf::from).ok_or("panels needs FILE")? }),
         _ => Err("ctl needs quit, restart, shot, theme, pointer, press, release or panels".into()),
     }
@@ -609,8 +609,8 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
                     Some(Request::Browser { out }) => state.move_browser(out),
                     Some(Request::CloseTerm { tab }) => state.close_term(&tab),
                     Some(Request::Pointer { x, y }) => state.test_pointer(x, y),
-                    Some(Request::Press { right }) => state.test_button(true, if right { 0x111 } else { 0x110 }),
-                    Some(Request::Release { right }) => state.test_button(false, if right { 0x111 } else { 0x110 }),
+                    Some(Request::Press { right, middle }) => state.test_button(true, if middle { 0x112 } else if right { 0x111 } else { 0x110 }),
+                    Some(Request::Release { right, middle }) => state.test_button(false, if middle { 0x112 } else if right { 0x111 } else { 0x110 }),
                     Some(Request::Panels { out }) => { let _ = write_atomic(&out, state.describe().as_bytes()); }
                     None => record::warn("run", "request not read", "the request file format differs", &[("file", f.file_name().to_string_lossy().to_string())]),
                 }

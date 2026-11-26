@@ -500,6 +500,39 @@ fn tick(s: &Shared) {
     if front { status::front_app(&d, &view::app_of(&name)); }
 }
 
+/// The page held with the middle (wheel) button and dragged moves under the pointer, as a hand moves paper: WebKit on
+/// Linux has no such grab. Across and down are each taken by the nearest box under the pointer that scrolls that way
+/// (a code block that scrolls only across leaves a drag down to the page), inside a frame of the same page too (the
+/// PDF viewer is one), else the page; the boxes found at the press move until the release. The press is taken at once
+/// (WebKit's own click would take it first and end the drag), so a middle click in the view is the grab only.
+fn grab_with_middle(web: &webkit6::WebView) {
+    const MOVE: &str = "(function(x,y,dx,dy,first){var g=window.__wbGrab;\
+        if(first||!g){var doc=document,win=window,e=null;\
+        for(var i=0;i<8;i++){e=doc.elementFromPoint(x,y);if(!e||e.tagName!=='IFRAME')break;\
+        try{var d=e.contentDocument;if(!d)break;var r=e.getBoundingClientRect();x-=r.left;y-=r.top;doc=d;win=e.contentWindow;}catch(_){break;}}\
+        var can=function(el,down){var s=win.getComputedStyle(el),o=down?s.overflowY:s.overflowX;\
+        return /(auto|scroll|overlay)/.test(o)&&(down?el.scrollHeight>el.clientHeight:el.scrollWidth>el.clientWidth);};\
+        var find=function(down){for(var el=e;el&&el!==doc.documentElement;el=el.parentElement){if(can(el,down))return el;}return doc.scrollingElement||doc.documentElement;};\
+        g=window.__wbGrab={across:find(false),down:find(true)};}\
+        if(dx)g.across.scrollBy(dx,0);if(dy)g.down.scrollBy(0,dy);})";
+    let drag = gtk::GestureDrag::new();
+    drag.set_button(gtk::gdk::BUTTON_MIDDLE);
+    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+    // Where it was held, how far the last move had gone, and whether the boxes to move are found yet.
+    let at = Rc::new(std::cell::Cell::new((0.0, 0.0, 0.0, 0.0, false)));
+    let a = at.clone();
+    drag.connect_drag_begin(move |g, x, y| { g.set_state(gtk::EventSequenceState::Claimed); a.set((x, y, 0.0, 0.0, false)); });
+    let w = web.clone();
+    drag.connect_drag_update(move |_, dx, dy| {
+        let (x, y, lx, ly, found) = at.get();
+        at.set((x, y, dx, dy, true));
+        let z = w.zoom_level().max(0.1);
+        let script = format!("{MOVE}({},{},{},{},{})", x / z, y / z, -(dx - lx) / z, -(dy - ly) / z, !found);
+        w.evaluate_javascript(&script, None, None, None::<&gio::Cancellable>, |_| {});
+    });
+    web.add_controller(drag);
+}
+
 pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
     // A mark left by a view that ended: what it showed is not on screen now.
     let _ = std::fs::remove_file(view::protected_mark(&d, &name));
@@ -513,6 +546,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
     crate::common::set_up_web(&web, &d);
     web.set_vexpand(true);
     web.set_hexpand(true);
+    grab_with_middle(&web);
     if let Some(settings) = webkit6::prelude::WebViewExt::settings(&web) { settings.set_allow_file_access_from_file_urls(false); settings.set_allow_universal_access_from_file_urls(false); settings.set_default_charset("utf-8"); }
     // A link that wants a new window stays in this view.
     web.connect_create(|w, action| {
