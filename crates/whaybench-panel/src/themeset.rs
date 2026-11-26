@@ -165,5 +165,20 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         entry.connect_activate(move |_| save());
     }
     // A theme chosen elsewhere, or a new one: the list and the keys follow, when the system tells of the change.
-    crate::common::on_change("themeset", &[(d.root.clone(), &["theme.json"]), (d.root.join("addons/themes"), &[])], Rc::new(move || refresh(false)));
+    arm(&d, Rc::new(refresh));
+}
+
+/// Watches the file naming the theme in force, the folder of themes and each theme's theme.json (a theme folder made
+/// first and filled after shows when its theme.json comes); watched again when the folder of themes changes.
+fn arm(d: &Data, refresh: Rc<dyn Fn(bool)>) {
+    let mut folders: Vec<(std::path::PathBuf, &[&str])> = vec![(d.root.clone(), &["theme.json"]), (d.root.join("addons/themes"), &[])];
+    folders.extend(theme::list(d).into_iter().filter(|(id, _)| id != theme::DEFAULT).map(|(id, _)| (d.root.join("addons/themes").join(id), &["theme.json"][..])));
+    if let Ok(dirs) = std::fs::read_dir(d.root.join("addons/themes")) {
+        for e in dirs.flatten().filter(|e| e.path().is_dir()) {
+            let p = e.path();
+            if !folders.iter().any(|(f, _)| *f == p) { folders.push((p, &["theme.json"])); }
+        }
+    }
+    let (d2, r2) = (d.clone(), refresh.clone());
+    crate::common::on_change("themeset", &folders, Rc::new(move || { r2(false); arm(&d2, r2.clone()); }));
 }

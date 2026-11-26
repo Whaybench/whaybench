@@ -45,8 +45,8 @@ struct V {
     style: String,
     /// When each picture file was last taken, to see a new one.
     seen: HashMap<String, u128>,
-    /// The session whose picture and requests are watched now (watch_session).
-    watched: Option<Option<String>>,
+    /// What the watches are for now (`watch_key`): the theme, the followed session and its root, the open roots.
+    watched: Option<String>,
     web: webkit6::WebView,
     place: gtk::Label,
     tie: gtk::Button,
@@ -335,6 +335,9 @@ fn bind(s: &Shared, link: Link) {
     v.link = link;
     switch(&mut v);
     retitle(&v);
+    drop(v);
+    // The session chosen: its picture and requests watched now, what it has shown so far taken.
+    tick(s);
 }
 
 fn link_menu(s: &Shared) {
@@ -500,12 +503,20 @@ fn tick(s: &Shared) {
         front = true;
     }
     if front { status::front_app(&d, &view::app_of(&name)); }
-    // Following another session now: its picture and requests are what to watch.
+    // Another theme, session, session root or set of open projects: the watches follow them.
     let followed = v.followed.clone();
-    let anew = v.watched.as_ref() != Some(&followed);
-    if anew { v.watched = Some(followed.clone()); }
+    let key = watch_key(&d, followed.as_deref());
+    let anew = v.watched.as_ref() != Some(&key);
+    if anew { v.watched = Some(key); }
     drop(v);
-    if anew { watch_session(s, followed.as_deref()); }
+    if anew { watch_view(s); watch_session(s, followed.as_deref()); }
+}
+
+/// What the view's watches depend on: the theme in force, the followed session and the root it is in, the open roots.
+fn watch_key(d: &Data, followed: Option<&str>) -> String {
+    let root = followed.map(|id| wb_core::roots::for_session(d, id).root);
+    let roots: Vec<_> = wb_core::roots::all_of(d).into_iter().map(|r| r.root).collect();
+    format!("{} {followed:?} {root:?} {roots:?}", wb_core::theme::load_active(d).name)
 }
 
 /// The page held with the middle (wheel) button and dragged moves under the pointer, as a hand moves paper: WebKit on
@@ -640,6 +651,11 @@ fn watch_view(s: &Shared) {
         (d.root.clone(), &["focus.json", "latest.json", "theme.json", "panel-zoom.json"][..]),
         (wb_core::sessions::sessions_dir(&d), &[][..]), (d.cache().join("open"), &[][..])];
     folders.extend(crate::common::theme_files(&d, &theme).into_iter().skip(1));
+    // Each open project's own latest conversation and session records (a move to another id).
+    for r in wb_core::roots::all_of(&d).into_iter().filter(|r| r.root != d.root) {
+        folders.push((r.root.clone(), &["latest.json"][..]));
+        folders.push((wb_core::sessions::sessions_dir(&r), &[][..]));
+    }
     let s2 = s.clone();
     crate::common::on_change(&format!("view {name}"), &folders, Rc::new(move || tick(&s2)));
 }

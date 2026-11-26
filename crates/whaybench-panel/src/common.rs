@@ -67,7 +67,10 @@ pub fn on_change(key: &str, folders: &[(std::path::PathBuf, &[&str])], f: Rc<dyn
         let (names, f) = (names.iter().map(|n| n.to_string()).collect::<Vec<_>>(), f.clone());
         m.connect_changed(move |_, file, other, event| {
             use gio::FileMonitorEvent as E;
-            if !matches!(event, E::ChangesDoneHint | E::Created | E::Deleted | E::MovedIn | E::MovedOut | E::Renamed) { return; }
+            // A file is read once written (ChangesDoneHint), not as it is made and still empty; a folder made is news
+            // at once (a new theme's).
+            let made_folder = event == E::Created && file.query_file_type(gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS, None::<&gio::Cancellable>) == gio::FileType::Directory;
+            if !made_folder && !matches!(event, E::ChangesDoneHint | E::Deleted | E::MovedIn | E::MovedOut | E::Renamed) { return; }
             let named = |x: Option<&gio::File>| x.and_then(|x| x.basename()).is_some_and(|b| names.is_empty() || names.iter().any(|n| b.as_os_str() == n.as_str()));
             if named(Some(file)) || named(other) { f(); }
         });
@@ -79,8 +82,10 @@ pub fn on_change(key: &str, folders: &[(std::path::PathBuf, &[&str])], f: Rc<dyn
 /// The files a panel's look comes from: the file naming the theme in force, the panels' zoom, the default theme's
 /// settings, and the theme's own folder (theme.json, settings.json).
 pub fn theme_files(d: &Data, theme: &str) -> Vec<(std::path::PathBuf, &'static [&'static str])> {
-    vec![(d.root.clone(), &["theme.json", "panel-zoom.json"]), (d.root.join("addons"), &["themes-default-settings.json"]),
-         (d.root.join("addons/themes").join(theme), &[])]
+    let mut f: Vec<(std::path::PathBuf, &'static [&'static str])> = vec![(d.root.clone(), &["theme.json", "panel-zoom.json"]), (d.root.join("addons"), &["themes-default-settings.json"])];
+    // The default theme has no folder of its own (its settings are the file above): none is made to watch.
+    if theme != theme::DEFAULT { f.push((d.root.join("addons/themes").join(theme), &[])); }
+    f
 }
 
 /// A web view in the panel follows the panel's zoom, until it is gone: set again when the zoom file changes.
