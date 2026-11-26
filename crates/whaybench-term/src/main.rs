@@ -370,6 +370,8 @@ impl Relay {
         self.set_title(wb_core::i18n::t("ended"));
         if let Some(s) = self.session.clone()
             && !self.attached && !sessions::background(&s) { sessions::mark_off(&self.data, &s); }
+        // The panels watch the tabs, not the heartbeats: written again, the end shows at once.
+        self.save_tab();
     }
 
     /// Every 2 seconds: which session this tab holds, its name, and whether it carried on under a new id.

@@ -5,7 +5,7 @@ use gtk::{gio, glib, prelude::*};
 use serde_json::Value;
 use wb_core::{log as record, paths::Data, sessions, status};
 
-use crate::common::{ago, ctl, cut, every};
+use crate::common::{ago, ctl, cut};
 
 fn sid(v: &Value) -> &str { v.get("id").and_then(Value::as_str).unwrap_or("") }
 fn text<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
@@ -261,7 +261,7 @@ fn redraw(d: &Data, list: &gtk::ListBox, view: &Rc<RefCell<View>>, force: bool) 
 }
 
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
-    sessions::watch_agents();
+    crate::common::follow_agents();
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some(wb_core::i18n::t("search-sessions-names-questions-answers-maps")));
     let list = gtk::ListBox::new();
@@ -295,17 +295,26 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         });
     }
     list_menu(&list, &d, &view);
-    {
-        let (d, search) = (d.clone(), search.clone());
-        every(300, move || {
-            // Session → Search sessions in the menu bar: this panel takes the keyboard in its search line.
-            if status::take(&d, "sessions").is_some() {
-                search.grab_focus();
-                search.select_region(0, -1);
-            }
-        });
-    }
-    every(2000, move || redraw(&d, &list, &view, false));
+    // Session → Search sessions in the menu bar (a message to this panel), and the sessions themselves: read when they
+    // change; "n minutes ago" moves on with the clock, once a minute.
+    // A session of an add-on agent shown running ends when its heartbeat runs out: looked at again then.
+    let d0 = d.clone();
+    let (d2, list2, view2) = (d.clone(), list.clone(), view.clone());
+    let again: crate::common::Wake = Rc::default();
+    let a2 = again.clone();
+    let f: Rc<dyn Fn()> = Rc::new(move || {
+        if status::take(&d, "sessions").is_some() {
+            search.grab_focus();
+            search.select_region(0, -1);
+        }
+        redraw(&d, &list, &view, false);
+        if let Some(wait) = sessions::next_stale(&d) { crate::common::wake_at(&a2, wait + std::time::Duration::from_millis(100)); }
+    });
+    again.borrow_mut().0 = Some(f.clone());
+    // Changes taken together for two seconds, as it read before; the menu bar's search at once.
+    crate::common::on_change("sessions-message", &[(d0.cache().join("panels"), &["sessions.json"])], f.clone());
+    crate::common::follow_data("sessions", &d0, 2000, |_| Vec::new(), f);
+    glib::timeout_add_seconds_local(60, move || { redraw(&d2, &list2, &view2, false); glib::ControlFlow::Continue });
 }
 
 fn data_arg(d: &Data) -> Vec<String> { vec!["--data-dir".to_string(), d.root.to_string_lossy().to_string()] }

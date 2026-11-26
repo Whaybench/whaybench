@@ -1,11 +1,11 @@
 //! The input panel: text to the chosen session. Enter sends. Shift+Enter is a new line, also when the
 //! input method re-sends the Enter that ends a syllable without Shift: Shift is tracked here.
-use std::{cell::{Cell, RefCell}, rc::Rc, sync::{Arc, Mutex}};
+use std::{cell::{Cell, RefCell}, rc::Rc};
 
 use gtk::{gdk, glib, prelude::*};
 use wb_core::{paths::Data, sessions, status};
 
-use crate::common::{ctl, cut, every};
+use crate::common::{ctl, cut};
 
 /// What a text is for: a conversation, or a tab whose agent makes its conversation with its first prompt (Codex).
 #[derive(Clone, Debug, PartialEq)]
@@ -62,6 +62,16 @@ pub fn draft_goes_to(begun: Option<&To>, front: Option<&To>, by_agent: bool) -> 
     if by_agent && begun.is_some() { begun } else { front }.cloned()
 }
 
+thread_local! {
+    /// Writes the line under the field again (who it goes to): set by `build`.
+    static REFRESH: RefCell<Option<Rc<dyn Fn()>>> = RefCell::new(None);
+}
+
+/// The line under the field written again `ms` from now (a name that came, "sent" that has had its moment).
+fn refresh_soon(ms: u64) {
+    if let Some(f) = REFRESH.with(|r| r.borrow().clone()) { glib::timeout_add_local_once(std::time::Duration::from_millis(ms), move || f()); }
+}
+
 pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     let view = gtk::TextView::new();
     view.set_wrap_mode(gtk::WrapMode::WordChar);
@@ -93,7 +103,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         let (hint, owner, goes, d) = (hint.clone(), owner.clone(), goes.clone(), d.clone());
         view.buffer().connect_changed(move |b| {
             hint.set_visible(b.char_count() == 0);
-            if b.char_count() == 0 { *owner.borrow_mut() = None; *goes.borrow_mut() = None; }
+            // Emptied: the line under it says again where a prompt goes now.
+            if b.char_count() == 0 { *owner.borrow_mut() = None; *goes.borrow_mut() = None; refresh_soon(0); }
             else if owner.borrow().is_none() {
                 let to = To::front(&d);
                 *owner.borrow_mut() = Some(owner_of_draft(&d, to.as_ref()));
@@ -119,40 +130,43 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         let (d, hint, sent_at, owner, view) = (d.clone(), hint.clone(), sent_at.clone(), owner.clone(), view.clone());
         let target = target.clone();
         // The keys that switch the input language, as fcitx5 has them now (they are set in Settings → Input…): asked
-        // every ten seconds, not every second (each ask is a process).
-        let (switch, asked): (Rc<RefCell<String>>, Rc<Cell<i64>>) = Default::default();
-        // A conversation's name can take Claude Code's answer (a process): asked off this thread, which types.
-        type Line = Arc<Mutex<(Option<String>, Option<(String, String)>)>>;
-        let line: Line = Default::default();
-        {
-            let (line, root) = (line.clone(), d.root.clone());
-            // Once for each conversation the field is empty for: it reads every record.
-            std::thread::spawn(move || {
-                let mut asked = None;
-                loop {
-                    let want = line.lock().unwrap_or_else(|e| e.into_inner()).0.clone();
-                    if let Some(s) = want.clone().filter(|_| want != asked) {
-                        let text = wb_core::agents::session_line(&root, &s);
-                        line.lock().unwrap_or_else(|e| e.into_inner()).1 = Some((s, text));
-                    }
-                    asked = want;
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                }
-            });
-        }
-        every(1000, move || {
+        // again when its settings change.
+        let switch: Rc<RefCell<String>> = Default::default();
+        let keys_changed = Rc::new(Cell::new(true));
+        let line: Rc<RefCell<(Option<String>, Option<(String, String)>)>> = Default::default();
+        // Who it goes to and what it is called: looked at when the conversations, the tabs, the projects or the input
+        // method's settings change, as the system tells; "sent" stays its moment and goes by a timer of its own.
+        let d0 = d.clone();
+        let k2 = keys_changed.clone();
+        let f: Rc<dyn Fn()> = Rc::new(move || {
             let now = glib::monotonic_time();
-            if now - asked.get() > 10_000_000 || asked.get() == 0 {
-                asked.set(now);
+            // The input method's settings changed (or first): its keys asked again (each ask is a process).
+            if keys_changed.replace(false) {
                 let keys = wb_core::input::switch_keys();
                 *switch.borrow_mut() = if keys.is_empty() { String::new() } else { wb_core::i18n::f("input-switch", &[("keys", keys.join(" / "))]) };
             }
             // A draft for a project that locked: nothing of it stays on screen (spec 3.22).
             let gone = owner.borrow().as_deref().filter(|p| !p.is_empty()).is_some_and(|p| !wb_core::roots::stubs(&d).iter().any(|s| s.id == p && s.open()));
             if gone { view.buffer().set_text(""); }
-            if now - sent_at.get() < 1_500_000 { hint.set_text(wb_core::i18n::t("sent")); return; }
+            // Just sent: "sent" for its moment, and the name asked again after (the first prompt may give one).
+            if now - sent_at.get() < 1_500_000 { line.borrow_mut().0 = None; hint.set_text(wb_core::i18n::t("sent")); return; }
             let to = target();
-            let known = { let mut l = line.lock().unwrap_or_else(|e| e.into_inner()); l.0 = match &to { Some(To::Session(s)) if view.buffer().char_count() == 0 => Some(s.clone()), _ => None }; l.1.clone() };
+            // A conversation's name can take Claude Code's answer (a process): asked off this thread, once for each
+            // conversation the field is empty for, and the line written again when it comes.
+            let want = match &to { Some(To::Session(s)) if view.buffer().char_count() == 0 => Some(s.clone()), _ => None };
+            if want.is_none() { line.borrow_mut().0 = None; }
+            if let Some(s) = want.clone().filter(|w| line.borrow().0.as_ref() != Some(w)) {
+                line.borrow_mut().0 = Some(s.clone());
+                let (root, line2) = (d.root.clone(), line.clone());
+                glib::spawn_future_local(async move {
+                    let s2 = s.clone();
+                    if let Ok(text) = gtk::gio::spawn_blocking(move || wb_core::agents::session_line(&root, &s2)).await {
+                        // Only the one still wanted: an earlier conversation's answer coming last does not take its place.
+                        if line2.borrow().0.as_ref() == Some(&s) { line2.borrow_mut().1 = Some((s, text)); refresh_soon(0); }
+                    }
+                });
+            }
+            let known = line.borrow().1.clone();
             let who = match to {
                 None => wb_core::i18n::t("none").into(),
                 Some(To::Tab(t)) => {
@@ -163,6 +177,19 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             };
             hint.set_text(&wb_core::i18n::f("input-enter-to-send-shift-enter", &[("a1", who), ("switch", switch.borrow().clone())]));
         });
+        REFRESH.with(|r| *r.borrow_mut() = Some(f.clone()));
+        // fcitx5's own settings folder: the switching keys are set there.
+        let fcitx = |_: &Data| -> Vec<(std::path::PathBuf, &'static [&'static str])> { std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+            .map(|c| (c.join("fcitx5"), &[][..])).into_iter().collect() };
+        // Its keys asked again only when fcitx5's settings change (each ask is a process); the rest on any change.
+        let f2 = f.clone();
+        let (k3, f3) = (k2.clone(), f2.clone());
+        crate::common::on_change_existing("input-keys", &fcitx(&d0), Rc::new(move || { k2.set(true); f2(); }));
+        // fcitx5 coming up (or again) on the session bus: its keys are asked then; it may start after this panel.
+        // Watched for the panel's life (the watch is not dropped by its id going).
+        let _ = gtk::gio::bus_watch_name(gtk::gio::BusType::Session, "org.fcitx.Fcitx5", gtk::gio::BusNameWatcherFlags::NONE,
+            move |_, _, _| { k3.set(true); f3(); }, |_, _| {});
+        crate::common::follow_data("input", &d0, 250, |_| Vec::new(), f);
     }
     let shift = Rc::new(Cell::new(false));
     let keys = gtk::EventControllerKey::new();
@@ -195,6 +222,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
                     if queued {
                         buffer.set_text("");
                         sent_at.set(glib::monotonic_time());
+                        refresh_soon(0);
+                        refresh_soon(1600);
                     } else {
                         status::say(&d, &wb_core::i18n::f("request-not-sent-session-is-off", &[("a1", cut(id, 8).to_string())]), 8);
                     }

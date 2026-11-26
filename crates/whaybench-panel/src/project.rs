@@ -83,6 +83,16 @@ struct P {
 }
 type Shared = Rc<RefCell<P>>;
 
+thread_local! {
+    /// Looks at the panel again (and, while a step runs, each second): set by `build`, called when a step starts.
+    static JOB_STARTED: RefCell<Option<Rc<dyn Fn()>>> = RefCell::new(None);
+}
+
+/// A step started: the panel looks at it each second until it ends.
+pub(super) fn job_started() {
+    if let Some(f) = JOB_STARTED.with(|j| j.borrow().clone()) { glib::idle_add_local_once(move || f()); }
+}
+
 fn stamp_of(st: &Store, pid: &str) -> String {
     let base = st.pdir(pid);
     ["events", "map.json", "project.json"].iter().map(|f| wb_core::paths::meta(&base.join(f)).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |t| t.as_nanos()).to_string()).collect::<Vec<_>>().join(",")
@@ -740,6 +750,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         });
     }
     { let s2 = s_.clone(); new.connect_clicked(move |_| new_project(&s2)); }
+    let (s4, d4) = (s_.clone(), s_.borrow().d.clone());
     let run = move || {
         // A bad file must not stop the panel for good: the next tick tries again, and the reason is on the path line.
         let s3 = s_.clone();
@@ -752,7 +763,43 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             }
         }
     };
-    crate::common::every(2000, run);
+    // The projects, their documents' templates and what is in them: read when they change, as the system tells. A step
+    // running (a child process) is looked at each second until it ends.
+    fn extra(d: &Data) -> Vec<(std::path::PathBuf, &'static [&'static str])> {
+        let mut f: Vec<(std::path::PathBuf, &'static [&'static str])> = vec![(d.root.join("addons/project-docs"), &[])];
+        for r in wb_core::roots::all_of(d) {
+            let projects = r.root.join("projects");
+            f.extend(std::fs::read_dir(&projects).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir())
+                .flat_map(|p| [p.join("events"), p.clone()]).map(|p| (p, &[][..])));
+            f.push((projects, &[]));
+        }
+        f.extend(std::fs::read_dir(d.root.join("addons/project-docs")).into_iter().flatten().flatten().map(|e| (e.path(), &[][..])).filter(|(p, _)| p.is_dir()));
+        // Each Briefsafe project's snapshots beside its folder: a snapshot taken elsewhere shows its time.
+        f.extend(wb_core::roots::stubs(d).iter().map(|st| (wb_store::folder::snapshot_dir(&st.folder), &[][..])));
+        f
+    }
+    let run: Rc<dyn Fn()> = Rc::new(run);
+    let job_running = { let s4 = s4.clone(); move || s4.try_borrow().is_ok_and(|p| p.job.is_some()) };
+    let again: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::default();
+    let (a2, r2) = (again.clone(), run.clone());
+    // Its conversations' list: an add-on agent's session shown running ends when its heartbeat runs out, looked at then.
+    let stale: crate::common::Wake = Rc::default();
+    let (st2, d5) = (stale.clone(), d4.clone());
+    let f: Rc<dyn Fn()> = Rc::new(move || {
+        r2();
+        if job_running() && let Some(f) = a2.borrow().clone() { f(); }
+        if let Some(wait) = sessions::next_stale(&d5) { crate::common::wake_at(&st2, wait + Duration::from_millis(100)); }
+    });
+    // One look a second while a step runs, however many changes come meanwhile.
+    *again.borrow_mut() = Some(crate::common::once_soon(1000, f.clone()));
+    let f = crate::common::once_soon(0, f);
+    stale.borrow_mut().0 = Some(f.clone());
+    JOB_STARTED.with(|j| *j.borrow_mut() = Some(f.clone()));
+    // Claude Code's list of running sessions, as the processes that ask it share it: a session started or ended shows.
+    if let Some(run_dir) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
+        crate::common::on_change_existing("project-agents", &[(std::path::PathBuf::from(run_dir), &["whaybench-agents.json", "whaybench-agents-changed"])], f.clone());
+    }
+    crate::common::follow_data("project", &d4, 2000, extra, f);
 }
 
 #[cfg(test)]

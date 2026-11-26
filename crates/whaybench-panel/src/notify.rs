@@ -7,7 +7,7 @@ use gtk::{gio, glib, prelude::*};
 use serde_json::{Value, json};
 use wb_core::{i18n::t, memory, paths::Data, status};
 
-use crate::common::{confirm, ctl, every};
+use crate::common::{confirm, ctl};
 
 const SECTIONS: [(&str, &str); 7] = [("due", "notify-due"), ("marked", "notify-marked"), ("changed", "notify-changed"), ("check", "notify-check"), ("open", "notify-open"), ("held", "notify-held"), ("trash", "notify-trash")];
 
@@ -295,18 +295,33 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     }
     list.add_controller(click);
     redraw(&d, &list, &view, true);
-    let show_usage = { let d = d.clone(); move || {
-        let text = wb_core::sessions::target(&d).and_then(|t| wb_core::usage::latest(&d.root, Some(&t))).map(|u| wb_core::usage::line(&u)).unwrap_or_default();
+    // The usage line, read again when its files change and once when the soonest limit shown resets (that passing
+    // changes no file).
+    let reset: crate::common::Wake = Rc::default();
+    let show_usage = { let (d, reset) = (d.clone(), reset.clone()); move || {
+        let u = wb_core::sessions::target(&d).and_then(|t| wb_core::usage::latest(&d.root, Some(&t)));
+        let text = u.as_ref().map(wb_core::usage::line).unwrap_or_default();
         if usage.text() != text { usage.set_text(&text); }
         usage.set_visible(!text.is_empty());
+        let next = u.iter().flat_map(|u| ["five_hour", "seven_day"].map(|k| u[k]["resets_at"].as_i64())).flatten().min();
+        if let Some(at) = next { crate::common::wake_at(&reset, std::time::Duration::from_millis((at * 1000 - wb_core::clock::now_ms()).max(0) as u64 + 500)); }
     } };
+    let show_usage: Rc<dyn Fn()> = Rc::new(show_usage);
+    reset.borrow_mut().0 = Some(show_usage.clone());
     show_usage();
     let (d2, l2, v2) = (d.clone(), list.clone(), view.clone());
-    every(2000, move || {
+    let (d3, l3, v3) = (d.clone(), list.clone(), view.clone());
+    // The notifications, the usage and the history: read when they change; "n minutes ago" and what falls due once a
+    // minute (times, not files).
+    let notify_f: Rc<dyn Fn()> = Rc::new(move || {
         redraw(&d2, &l2, &v2, false);
         show_usage();
         if stack.visible_child_name().as_deref() == Some("history") { history_refresh(); }
     });
+    // Asks shown whose hook ended or whose time ran out go.
+    // Its own: the usage files (only this panel reads them).
+    crate::common::follow_data("notify", &d.clone(), 2000, |d| wb_core::roots::all_of(d).iter().map(|r| (r.cache().join("usage"), &[][..])).collect(), crate::common::with_asks(&d, notify_f));
+    glib::timeout_add_seconds_local(60, move || { redraw(&d3, &l3, &v3, false); glib::ControlFlow::Continue });
 }
 
 const HISTORY_STEP: usize = 200;

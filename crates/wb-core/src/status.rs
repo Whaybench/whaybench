@@ -22,14 +22,18 @@ pub fn unsay(d: &Data, text: &str) {
 }
 
 /// The message to show now, if any: the newest of the host's and the open projects' (each says in its own root).
-pub fn current(d: &Data) -> Option<String> {
+pub fn current(d: &Data) -> Option<String> { current_until(d).map(|m| m.0) }
+
+/// The message shown now and when it goes (ms since 1970), read together: one that runs out between two reads is
+/// neither shown nor waited for.
+pub fn current_until(d: &Data) -> Option<(String, u128)> {
     crate::roots::all_of(d).iter().filter_map(|r| {
         let v: serde_json::Value = serde_json::from_str(&crate::paths::read_text(&status_file(r)).ok()?).ok()?;
         let until = v.get("until")?.as_u64()? as u128;
         // Gone once over: a message about a project (a node's name) does not stay in the host's folder.
         if until <= now_ms() && !crate::roots::is_project_root(r) { let _ = fs::remove_file(status_file(r)); }
         (until > now_ms()).then(|| Some((until, v.get("text")?.as_str()?.to_string()))).flatten()
-    }).max_by_key(|m| m.0).map(|m| m.1)
+    }).max_by_key(|m| m.0).map(|(until, text)| (text, until))
 }
 
 /// Leaves a request for the running compositor (see `whaybench ctl`).
@@ -45,6 +49,13 @@ pub fn focus_app(d: &Data, app: &str) { let _ = post(d, &json!({"cmd": "focusapp
 
 /// The tab of this app comes up in its panel; the keyboard stays where it is.
 pub fn front_app(d: &Data, app: &str) { let _ = post(d, &json!({"cmd": "frontapp", "app": app})); }
+
+/// The folder the running Whaybench's program is in: a new version put there shows as one waiting for a restart.
+pub fn program_folder(d: &Data) -> Option<PathBuf> {
+    let pid = fs::read_to_string(d.instance()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|v| v.get("pid")?.as_u64())?;
+    let exe = fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+    PathBuf::from(exe.to_string_lossy().trim_end_matches(" (deleted)")).parent().map(PathBuf::from)
+}
 
 /// Whether the running program is older than the one now installed: its file has been replaced.
 pub fn new_version_waiting(d: &Data) -> bool {

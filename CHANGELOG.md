@@ -18,6 +18,14 @@ names another step.
   changes afterwards is not asked about again.
 - Whaybench and the panels read the theme, the panels' zoom and what the view follows when the system says a file
   changed (inotify), not by looking every quarter or half second.
+- The other panels (menu bar, status line, map, sessions, files, answers, input, projects, notifications) read their
+  data the same way, not every 0.3 to 3 seconds: each folder they read is watched, a folder not there yet is waited
+  for by its name in the nearest one that is, and what changes with time alone (a status message running out, a
+  heartbeat ending, a usage limit resetting, an ask's hook ending) wakes them once at that moment.
+- The answer panel says it is open by holding a lock, not by writing the time each second. A panel that does not read
+  an ask within four seconds (or a ping every ten while one waits) is taken for stuck: the ask goes to the terminal at
+  once, not after ten minutes, and Whaybench ends that panel and starts it again where it was, for a project's
+  conversation in its container too. Panels opened again from the menu are restarted after a crash as well.
 - Codex's Interrupt and SessionEnd hooks ask for 3 seconds, the most Codex gives them: at 10 it warned at each start.
 
 ## [0.9.7] - 2026-11-25

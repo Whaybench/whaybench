@@ -51,6 +51,7 @@ pub(super) fn start_job(p: &mut P, id: &str, kind: &str, what: &str, args: &[&st
             if let Some(mut i) = child.stdin.take() { let _ = std::io::Write::write_all(&mut i, input.as_deref().unwrap_or_default().as_bytes()); }
             let from = shown_at(p);
             p.job = Some(Job { id: id.into(), kind: kind.into(), what: what.into(), child, started: std::time::Instant::now(), out, err, args: args.iter().map(|a| a.to_string()).collect(), input, from });
+            super::job_started();
             // Another project's message stays for it.
             p.bs_msg.remove(id);
             p.stamp.clear();
@@ -294,6 +295,8 @@ pub(super) fn ask_keyring(s_: &Shared) {
                 if a.kind == "new" { let _ = std::fs::remove_file(new_map_file(&p.d, &a.id)); status::say(&p.d, &wb_core::i18n::f("creation-failed", &[("e", why)]), 10); }
                 else { p.bs_msg.insert(a.id, (a.kind, why)); }
                 p.stamp.clear();
+                // Shown now: nothing else changes for it.
+                super::job_started();
             }
             glib::Propagation::Proceed
         });

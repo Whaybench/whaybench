@@ -116,7 +116,9 @@ pub struct Undo { pub at: Instant, pub mark: u64, pub start: Vec<Panel>, pub was
 #[derive(Clone, PartialEq, Debug)]
 pub enum Comer { Process(u32), App(String) }
 
-pub struct Outside { pub app: String, pub name: String, pub command: String, pub home: Option<layout::Home>, pub pid: u32 }
+pub struct Outside { pub app: String, pub name: String, pub command: String, pub home: Option<layout::Home>, pub pid: u32,
+    /// How it was started out there (its size with it): started so again if it is stuck.
+    pub line: String }
 
 pub enum Act {
     Idle,
@@ -202,6 +204,8 @@ pub struct App {
     pub theme_dirty: bool,
     /// The folder of the theme in force was made anew: ThemeWatch watches the new one.
     pub theme_folder_new: bool,
+    /// A project opened or closed, or an ask folder appeared: the stuck answer panel is watched for again (askwatch).
+    pub ask_roots_new: bool,
     pub window_size: (i32, i32),
     pub save_due: bool,
 
@@ -299,7 +303,7 @@ impl App {
             drag_from: None,
             undos: Vec::new(),
             browser_away: (false, now),
-            shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_dirty: true, theme_folder_new: false, window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
+            shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_dirty: true, theme_folder_new: false, ask_roots_new: false, window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
             compositor_state, xdg_shell_state, layer_shell_state, shm_state, dmabuf: None, gpu: None, seat_state, data_device_state, clip,
             popups: PopupManager::default(), seat, browsers: Default::default(), builtin_ime,
@@ -345,6 +349,33 @@ impl App {
 
     pub fn spawn(&self, command: &str) {
         crate::start::spawn_app(command, &self.socket_name, &self.data, &record::run_id(&self.data));
+    }
+
+    /// The answer panel `pid` is stuck (a hook said so: it did not read an ask in time). Only one Whaybench started, and
+    /// only the answer panel: it is ended and started again the way it was, in its place here or out on the desktop.
+    pub fn restart_answer(&mut self, pid: u32) {
+        let answer = std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| {
+            let mut args = c.split(|&b| b == 0).filter(|a| !a.is_empty());
+            args.next().is_some_and(|a| a.ends_with(b"whaybench-panel")) && args.next() == Some(&b"answer"[..])
+        });
+        if !answer { return; }
+        let run = record::run_id(&self.data);
+        if let Some(o) = self.outside.iter_mut().find(|o| o.pid == pid) {
+            crate::start::forget_outside(pid);
+            // Safety: a signal to the process started out there by us, still listed as it.
+            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+            let display = std::env::var_os("WAYLAND_DISPLAY").unwrap_or_default();
+            o.pid = crate::start::spawn_outside(&o.line, &display, &self.data, &run).unwrap_or(0);
+            record::warn("screen", "answer panel started again", "it did not read an ask in time", &[("where", "desktop".into())]);
+            return;
+        }
+        // Where it is now, to come back there.
+        let client = |w: &Window| smithay::reexports::wayland_server::Resource::client(w.toplevel().unwrap().wl_surface()).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32);
+        let tab = self.windows.iter().find(|(_, w)| client(w) == Some(pid)).map(|(t, _)| *t);
+        let home = tab.and_then(|t| layout::home_of(&self.surface.panels, t));
+        let Some(command) = crate::start::kill_panel(pid) else { return };
+        record::warn("screen", "answer panel started again", "it did not read an ask in time", &[("where", "frame".into())]);
+        if let (Some(new), Some(h)) = (crate::start::spawn_panel(&command, &self.socket_name, &self.data, &run), home) { self.homes.push((Comer::Process(new), h)); }
     }
 
     /// When a drag of the panel showing `tab` begins: the layout to go back to. A move of the same panel while its ↩
@@ -406,7 +437,7 @@ impl App {
         let outside = format!("export {}={size}; {command}", wb_core::view::ENV_OUTSIDE);
         let out = crate::start::spawn_outside(&outside, &display, &self.data, &record::run_id(&self.data)).unwrap_or(0);
         record::decide("screen", "panel moved out", "dropped at the window's edge", &[("app", app.clone())]);
-        self.outside.push(Outside { app, name, command, home, pid: out });
+        self.outside.push(Outside { app, name, command, home, pid: out, line: outside });
     }
 
     /// The way back of a panel out on the desktop: it ends out there and starts here again, where it was.
@@ -587,7 +618,9 @@ impl App {
             (None, Some(c)) => {
                 if key == wb_core::view::FIREFOX_APP { wb_core::view::set_detached(&self.data, false); self.ask_browser(key); }
                 self.starting.insert(key.to_string(), Instant::now());
-                self.spawn(c);
+                // One of Whaybench's own panels opened again is one of them again: started anew if it crashes or is stuck.
+                if key.starts_with("dev.whaybench.") && c.contains("whaybench-panel") { crate::start::spawn_panel(c, &self.socket_name, &self.data, &record::run_id(&self.data)); }
+                else { self.spawn(c); }
             }
             (None, None) => {}
         }

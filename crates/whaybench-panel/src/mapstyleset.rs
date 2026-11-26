@@ -2,7 +2,7 @@
 //! chosen, the settings its frame has. A change is saved at once in the style's settings.json and the map follows.
 use std::{cell::RefCell, rc::Rc};
 
-use gtk::{glib, prelude::*};
+use gtk::prelude::*;
 use serde_json::{Value, json};
 use wb_core::paths::Data;
 
@@ -163,6 +163,13 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         });
     }
     { let (d, chosen) = (d.clone(), chosen.clone()); reset.connect_clicked(move |_| { mapstyles::reset(&d, &chosen.borrow()); show(); }); }
-    // A style added or deleted meanwhile: the list follows.
-    glib::timeout_add_local(std::time::Duration::from_secs(2), move || { refresh(); glib::ControlFlow::Continue });
+    // A style added or deleted meanwhile: the list follows, as the system tells.
+    // In each style's folder too: one made folder first and its file after shows once its file is there.
+    let watched = |d: &Data| -> Vec<(std::path::PathBuf, &'static [&'static str])> {
+        let top = d.root.join("addons/map-styles");
+        let mut f: Vec<(std::path::PathBuf, &'static [&'static str])> = vec![(top.clone(), &[])];
+        f.extend(wb_core::paths::list_dir(&top).into_iter().filter(|p| p.is_dir()).map(|p| (p, &[][..])));
+        f
+    };
+    crate::common::follow_data("mapstyleset", &d, 250, watched, Rc::new(refresh));
 }

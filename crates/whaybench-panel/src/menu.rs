@@ -306,7 +306,8 @@ fn make(win: &gtk::ApplicationWindow, d: &Data) -> (gio::Menu, gio::SimpleAction
 }
 
 /// What the menus depend on; they are made again only when it changes.
-fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {:?} {} {:?} {:?} {}", view::chosen_browser(d), wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), wb_core::i18n::active(d, Some(wb_core::i18n::lang()))) }
+// The agents installed too: their entries in New conversation and New tab.
+fn signature(d: &Data) -> String { format!("{:?} {:?} {:?} {:?} {:?} {} {:?} {:?} {} {:?}", view::chosen_browser(d), wb_core::update::newer(d), wb_core::update::ready(d), open_keys(d), sessions::target(d), theme::load_active(d).name, theme::list(d), wb_core::i18n::list(d), wb_core::i18n::active(d, Some(wb_core::i18n::lang())), wb_core::agents::list(&d.root)) }
 
 /// Whether one of the bar's menus is showing.
 fn menu_open(w: &gtk::Widget) -> bool {
@@ -350,8 +351,15 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         });
     }
     let (w, last) = (win.clone(), RefCell::new(signature(&d)));
-    glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
-        if inside.get() || menu_open(bar.upcast_ref()) { return glib::ControlFlow::Continue; }
+    // Made again when what it lists changes, as the system tells; not under the person's hand: while a menu is open or
+    // the pointer is on the bar, looked at again a second later, until it can be.
+    let check: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::default();
+    let (again, d0) = (check.clone(), d.clone());
+    let f: Rc<dyn Fn()> = Rc::new(move || {
+        if inside.get() || menu_open(bar.upcast_ref()) {
+            if let Some(f) = again.borrow().clone() { f(); }
+            return;
+        }
         let now = signature(&d);
         if *last.borrow() != now {
             let (model, group) = make(&w, &d);
@@ -359,6 +367,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             bar.set_menu_model(Some(&model));
             *last.borrow_mut() = now;
         }
-        glib::ControlFlow::Continue
     });
+    // One look a second while it waits, however many changes come meanwhile.
+    *check.borrow_mut() = Some(crate::common::once_soon(1000, f.clone()));
+    crate::common::follow_data("menu", &d0, 250, |_| Vec::new(), f);
 }

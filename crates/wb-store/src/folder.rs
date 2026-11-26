@@ -93,7 +93,7 @@ fn rename_new(from: &Path, to: &Path) -> Res<()> {
     Ok(())
 }
 
-fn snapshot_dir(dir: &Path) -> PathBuf {
+pub fn snapshot_dir(dir: &Path) -> PathBuf {
     let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     dir.with_file_name(format!(".{name}.snapshots"))
 }

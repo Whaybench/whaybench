@@ -373,12 +373,23 @@ static WATCHED: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 thread_local! { static WATCHES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 
 /// From here on `agents()` on this thread (a panel's own loop) gives what another thread was last told, and never waits
-/// for Claude Code: its answer takes up to half a second, in which a panel would neither draw nor take input.
-pub fn watch_agents() {
-    let ask = || { let list = agents(); *WATCHED.lock().unwrap() = list; };
+/// for Claude Code: its answer takes up to half a second, in which a panel would neither draw nor take input. `told`
+/// runs on that thread when the list changed (a session started or ended): nothing else says so.
+pub fn watch_agents(told: impl Fn() + Send + 'static) {
+    let ask = || { let list = agents(); let mut w = WATCHED.lock().unwrap(); let changed = *w != list; *w = list; changed };
     ask();
     WATCHES.set(true);
-    std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(2)); ask(); });
+    std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(2)); if ask() { told(); } });
+}
+
+/// When the soonest heartbeat of an add-on agent's session (30 seconds) runs out, from now: a session shown running
+/// is shown ended then, though no file changes.
+pub fn next_stale(d: &Data) -> Option<Duration> {
+    let now = SystemTime::now();
+    crate::roots::all_of(d).iter().flat_map(|r| crate::paths::list_dir(&alive_dir(r))).filter_map(|p| {
+        let age = now.duration_since(crate::paths::meta(&p).and_then(|m| m.modified()).ok()?).ok()?;
+        Duration::from_secs(30).checked_sub(age).filter(|_| !crate::paths::read_text(&p).is_ok_and(|t| t.trim() == "0"))
+    }).min()
 }
 
 /// Running sessions as Claude Code reports them, kept as `holds` says. `kind` "interactive" is held by a

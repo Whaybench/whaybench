@@ -75,6 +75,27 @@ fn attached(d: &Data, pattern: &str) -> Vec<std::path::PathBuf> {
     hits(pattern).filter(|h| fs::canonicalize(h).is_ok_and(|r| r.starts_with(&folder) && !r.starts_with(&resting))).take(MOST).collect()
 }
 
+/// The folders a conversation's attached patterns are matched in (the part of each before its first wildcard): a file
+/// made there may be a new match. shortcut: a `**` pattern's subfolders are not among them, only its first folder;
+/// they would be listed and watched one by one if deep patterns need it.
+pub fn attach_folders(d: &Data, id: &str) -> Vec<std::path::PathBuf> {
+    let d = &crate::roots::for_session(d, id);
+    let wild = |s: &str| s.contains(['*', '?', '[']);
+    let mut out: Vec<std::path::PathBuf> = lineage(d, id).iter()
+        .filter_map(|sid| crate::paths::read_text(&d.root.join("node-files").join(format!("{sid}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()))
+        .flat_map(|t| t.as_object().into_iter().flatten().flat_map(|(_, p)| p.as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>()).collect::<Vec<_>>())
+        .filter_map(|p| {
+            let path = std::path::Path::new(&p);
+            let fixed: std::path::PathBuf = path.components().take_while(|c| !wild(&c.as_os_str().to_string_lossy())).collect();
+            // A pattern without wildcards names one file: its folder.
+            if fixed == path { path.parent().map(std::path::Path::to_path_buf) } else { Some(fixed) }
+        })
+        .filter(|p| p.is_absolute()).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Every recorded read and change of the conversation, and the files attached to its nodes as `attached` touches.
 pub fn touches(d: &Data, id: &str) -> Vec<Value> {
     let d = &crate::roots::for_session(d, id);
@@ -136,6 +157,16 @@ pub fn file_counts(d: &Data, id: &str) -> HashMap<String, usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_attached_pattern_is_watched_where_it_is_matched() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = Data::new(dir.path().to_path_buf());
+        std::fs::create_dir_all(dir.path().join("node-files")).unwrap();
+        std::fs::write(dir.path().join("node-files/s1.json"), r#"{"n1": ["/w/docs/*.md", "/w/a/b.txt", "/w/src/**/*.rs"]}"#).unwrap();
+        let got = attach_folders(&d, "s1");
+        assert_eq!(got, vec![std::path::PathBuf::from("/w/a"), "/w/docs".into(), "/w/src".into()]);
+    }
+
     use serde_json::json;
 
     #[test]

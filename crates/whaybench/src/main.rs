@@ -1,5 +1,6 @@
 //! Whaybench: one window, one surface, panels on it. Each panel is an app of its own, shown and
 //! operated only inside its area, which this nested Wayland compositor gives it.
+mod askwatch;
 mod ctl;
 mod handlers;
 mod input;

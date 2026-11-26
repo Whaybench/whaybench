@@ -272,6 +272,20 @@ pub fn end_panel(pid: u32) {
     unsafe { libc::kill(pid as i32, libc::SIGTERM); }
 }
 
+/// One of Whaybench's own panels ended at once (SIGKILL: it does not run, so it could not end itself) and taken off the
+/// panels started again on a crash, so its new one is started by the caller, where it was: its command, if it was one.
+pub fn kill_panel(pid: u32) -> Option<String> {
+    let mut panels = PANELS.lock().unwrap();
+    let i = panels.iter().position(|p| p.child.id() == pid)?;
+    let p = panels.remove(i);
+    let command = p.command.clone();
+    APPS.lock().unwrap().push(p.child);
+    drop(panels);
+    // Safety: a signal to our own child, still listed as ours a moment ago.
+    unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+    Some(command)
+}
+
 /// A command line as `sh -c` runs it again, each argument quoted.
 pub fn exec_line(args: &[String]) -> String {
     format!("exec {}", args.iter().map(|a| format!("'{}'", a.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" "))

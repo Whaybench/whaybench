@@ -15,7 +15,7 @@ use wb_store::{Store, s};
 use crate::mapstyles;
 use webkit6::prelude::*;
 
-use crate::{common::{cut, every}, mapimport};
+use crate::{common::cut, mapimport};
 
 /// The mark at a node.
 pub fn glyph(n: &Value, current: &str) -> &'static str {
@@ -214,6 +214,13 @@ fn popup(on: &impl IsA<gtk::Widget>, items: Items, x: f64, y: f64) {
     pop.set_has_arrow(false);
     pop.connect_closed(|p| { let p = p.clone(); glib::idle_add_local_once(move || p.unparent()); });
     pop.popup();
+}
+
+thread_local! {
+    /// The folder of the imported map this panel shows, if it shows one.
+    static IMPORTED_IN: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
+    /// The folders the shown conversation's attached patterns are matched in.
+    static ATTACH_IN: RefCell<Vec<std::path::PathBuf>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The path of a panel's imported map. Such a panel's scope is `@<path>` and its title.
@@ -887,7 +894,19 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
     };
     show_style(&stack, &web, &panel, &d, scope.as_ref(), &on_web);
     let (win2, win3) = (win.clone(), win.clone());
-    every(1000, move || {
+    // The map, its style and what the menu bar asks: read when they change, as the system tells.
+    fn map_folders(d: &Data) -> Vec<(std::path::PathBuf, &'static [&'static str])> {
+        let mut f: Vec<(std::path::PathBuf, &'static [&'static str])> = vec![(d.maps(), &[])];
+        f.extend(mapstyles::list(d).into_iter().map(|x| (d.root.join("addons/map-styles").join(&x.id), &[][..])));
+        f.extend(IMPORTED_IN.with(|i| i.borrow().clone()).map(|p| (p, &[][..])));
+        // Where the shown conversation's attached patterns are matched: a node's file count follows files made there.
+        f.extend(ATTACH_IN.with(|a| a.borrow().clone()).into_iter().map(|p| (p, &[][..])));
+        f
+    }
+    // An imported map's file is read where it is: its folder watched too.
+    IMPORTED_IN.with(|i| *i.borrow_mut() = imported_of(scope.as_ref()).and_then(|p| std::path::Path::new(p).parent().map(std::path::Path::to_path_buf)));
+    let d0 = d.clone();
+    crate::common::follow_data("map", &d0, 250, map_folders, Rc::new(move || {
         // From the menu bar and the project panel; a branch panel takes none.
         if branch_root(scope.as_ref()).is_none() {
             let key = imported_of(scope.as_ref()).map_or("map".to_string(), mapimport::message_key);
@@ -986,6 +1005,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
             },
         };
         let text = data.as_ref().map(Value::to_string).unwrap_or_default();
+        ATTACH_IN.with(|a| *a.borrow_mut() = sessions::target(&d).map(|t| records::attach_folders(&d, &t)).unwrap_or_default());
         let counts = sessions::target(&d).map(|t| { let mut c: Vec<_> = records::file_counts(&d, &t).into_iter().collect(); c.sort(); format!("{c:?}") }).unwrap_or_default();
         // The style's settings too: a change in Display style settings draws the map again.
         let settings = mapstyles::find(&d, &panel.borrow().style).map(|x| x.raw.to_string()).unwrap_or_default();
@@ -997,7 +1017,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, scope: Option<(String, Strin
         panel.borrow_mut().data = data;
         draw(&list, &panel, &d, scope.as_ref());
         show_style(&stack, &web, &panel, &d, scope.as_ref(), &on_web);
-    });
+    }));
 }
 
 #[cfg(test)]

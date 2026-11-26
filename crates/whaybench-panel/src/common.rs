@@ -59,17 +59,67 @@ thread_local! {
 /// Calls `f` when a file in one of `folders` is written, made, removed or moved there, as the system tells (inotify):
 /// only the names given, or any with none. Kept under `key`; a new call with the same key replaces the watch (a panel
 /// that now follows another session watches that one's folder). Nothing is looked for on a clock.
-pub fn on_change(key: &str, folders: &[(std::path::PathBuf, &[&str])], f: Rc<dyn Fn()>) {
+pub fn on_change(key: &str, folders: &[(std::path::PathBuf, &[&str])], f: Rc<dyn Fn()>) { watch(key, folders, 40, true, f) }
+
+/// `on_change` for folders that are someone else's (a program's settings): one not there is not made.
+pub fn on_change_existing(key: &str, folders: &[(std::path::PathBuf, &[&str])], f: Rc<dyn Fn()>) { watch(key, folders, 40, false, f) }
+
+/// `on_change`, with the changes of `ms` after the first taken as one. A folder not there (and not made, unless `make`)
+/// is waited for: its nearest folder that is there is watched for that one name only, and once it appears the watch is
+/// made again, on it alone. Nothing more is watched than what is read.
+fn watch(key: &str, folders: &[(std::path::PathBuf, &[&str])], ms: u64, make: bool, f: Rc<dyn Fn()>) {
+    // Several changes at once (a write and a rename, a burst from an agent) are one call, a moment after the first.
+    let run = once_soon(ms, f.clone());
+    let owned: Rc<Vec<(std::path::PathBuf, Vec<String>)>> = Rc::new(folders.iter().map(|(d, n)| (d.clone(), n.iter().map(|x| x.to_string()).collect())).collect());
+    let again = { let (key, owned, f) = (key.to_string(), owned.clone(), f.clone()); move || {
+        let folders: Vec<(std::path::PathBuf, Vec<&str>)> = owned.iter().map(|(d, n)| (d.clone(), n.iter().map(String::as_str).collect())).collect();
+        let refs: Vec<(std::path::PathBuf, &[&str])> = folders.iter().map(|(d, n)| (d.clone(), n.as_slice())).collect();
+        watch(&key, &refs, ms, make, f.clone());
+    } };
+    let again: Rc<dyn Fn()> = Rc::new(again);
     let mut monitors = Vec::new();
     for (dir, names) in folders {
-        let _ = std::fs::create_dir_all(dir);
+        if make { let _ = std::fs::create_dir_all(dir); }
+        if !dir.is_dir() {
+            // Waited for at the nearest folder that is there, by the one name on the way to it.
+            let Some((at, name)) = dir.ancestors().skip(1).find(|a| a.is_dir()).and_then(|a| Some((a.to_path_buf(), dir.strip_prefix(a).ok()?.components().next()?.as_os_str().to_os_string()))) else { continue };
+            let Ok(m) = gio::File::for_path(&at).monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, None::<&gio::Cancellable>) else { continue };
+            let (again, run) = (again.clone(), run.clone());
+            m.connect_changed(move |_, file, other, _| {
+                let named = |x: Option<&gio::File>| x.and_then(|x| x.basename()).is_some_and(|b| b.as_os_str() == name);
+                if named(Some(file)) || named(other) {
+                    // Made again outside this call: the monitor running it is replaced.
+                    let again = again.clone();
+                    glib::idle_add_local_once(move || again());
+                    run();
+                }
+            });
+            monitors.push(m);
+            continue;
+        }
         let Ok(m) = gio::File::for_path(dir).monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, None::<&gio::Cancellable>) else { continue };
-        let (names, f) = (names.iter().map(|n| n.to_string()).collect::<Vec<_>>(), f.clone());
+        // A name given as "+name" is news only when written into (a database's log, which its readers open and close
+        // for writing too, without writing): nothing else of it.
+        let written: Vec<String> = names.iter().filter_map(|n| n.strip_prefix('+')).map(String::from).collect();
+        if !written.is_empty() { m.set_rate_limit(100); }
+        let (names, f) = (names.iter().filter(|n| !n.starts_with('+')).map(|n| n.to_string()).collect::<Vec<_>>(), run.clone());
+        // The folder itself removed or replaced: watched again (waited for, if it is gone).
+        let (gone_again, dir2) = (again.clone(), dir.clone());
         m.connect_changed(move |_, file, other, event| {
             use gio::FileMonitorEvent as E;
-            // A file is read once written (ChangesDoneHint), not as it is made and still empty; a folder made is news
-            // at once (a new theme's).
-            let made_folder = event == E::Created && file.query_file_type(gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS, None::<&gio::Cancellable>) == gio::FileType::Directory;
+            if matches!(event, E::Deleted | E::MovedOut | E::Unmounted) && file.path().as_deref() == Some(dir2.as_path()) {
+                let again = gone_again.clone();
+                glib::idle_add_local_once(move || again());
+                f();
+                return;
+            }
+            if !written.is_empty() {
+                if event == E::Changed && file.basename().is_some_and(|b| written.iter().any(|n| b.as_os_str() == n.as_str())) { f(); }
+                return;
+            }
+            // A file is read once written (ChangesDoneHint), not as it is made and still empty; a folder or a link made
+            // is news at once (a new theme's; a project opening makes a link in cache/open).
+            let made_folder = event == E::Created && matches!(file.query_file_type(gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS, None::<&gio::Cancellable>), gio::FileType::Directory | gio::FileType::SymbolicLink);
             if !made_folder && !matches!(event, E::ChangesDoneHint | E::Deleted | E::MovedIn | E::MovedOut | E::Renamed) { return; }
             let named = |x: Option<&gio::File>| x.and_then(|x| x.basename()).is_some_and(|b| names.is_empty() || names.iter().any(|n| b.as_os_str() == n.as_str()));
             if named(Some(file)) || named(other) { f(); }
@@ -77,6 +127,149 @@ pub fn on_change(key: &str, folders: &[(std::path::PathBuf, &[&str])], f: Rc<dyn
         monitors.push(m);
     }
     WATCHES.with(|w| { w.borrow_mut().insert(key.to_string(), monitors); });
+}
+
+/// The folders a panel's lists are made from: the add-ons, where projects open, and each root (the host's and each open
+/// project's) with its own files, its cache, the agents' states, the session records, the asks, the usage and the
+/// update. Changes anywhere there are few and small; a panel reads its lists again, and draws only what changed.
+pub fn data_folders(d: &Data) -> Vec<(std::path::PathBuf, &'static [&'static str])> {
+    let mut f: Vec<(std::path::PathBuf, &'static [&'static str])> = vec![(d.root.join("addons/themes"), &[]),
+        (d.root.join("addons/map-styles"), &[]), (d.root.join("addons/languages"), &[]), (d.root.join("addons/agents"), &[]),
+        (d.root.join("addons"), &["themes-default-settings.json", "addon-trust.json"]), (d.cache().join("open"), &[]),
+        // Briefsafe projects' names and places.
+        (d.root.join("projects"), &[])];
+    for r in wb_core::roots::all_of(d) {
+        // Each root's own files (maps, names, focus, settings), and in its cache only the files read there: the status
+        // message, the running program, the release found, the browser chosen. Not the add-on agents' heartbeats
+        // (cache/alive, written every two seconds): a session's start shows in its tab and state, its end by the time
+        // its heartbeat runs out.
+        f.push((r.root.clone(), &[]));
+        f.push((r.cache(), &["status.json", "instance.json", "latest-release.json", "chosen-browser"]));
+        for p in [r.cache().join("state"), r.root.join("sessions"), r.cache().join("ask"), r.cache().join("panels"),
+                  r.cache().join("update"), r.root.join("files"), r.cache().join("term"), r.cache().join("subagents"), r.root.join("node-files"),
+                  r.root.join("forks"), r.cache().join("schedules"), r.root.join("answer-log"), r.root.join("answers")] { f.push((p, &[])); }
+        // The memory: only a write into its database's log is a change (reading it opens and closes files there).
+        f.push((r.root.join("memory"), &["+memory.db-wal"]));
+        f.extend(wb_core::paths::list_dir(&r.cache().join("subagents")).into_iter().filter(|p| p.is_dir()).map(|p| (p, &[][..])));
+    }
+    // Each theme's, language's and agent's own folder: what is in them is read (a theme's settings, a language's
+    // messages, an agent's description).
+    for kind in ["themes", "languages", "agents"] {
+        f.extend(paths::list_dir(&d.root.join("addons").join(kind)).into_iter().filter(|p| p.is_dir()).map(|p| (p, &[][..])));
+    }
+    f
+}
+
+/// `f` once, `ms` after the first of the calls that come meanwhile: never twice in waiting.
+pub fn once_soon(ms: u64, f: Rc<dyn Fn()>) -> Rc<dyn Fn()> {
+    let due = Rc::new(std::cell::Cell::new(false));
+    Rc::new(move || {
+        if due.replace(true) { return; }
+        let (due, f) = (due.clone(), f.clone());
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || { due.set(false); f(); });
+    })
+}
+
+thread_local! {
+    /// The asks whose end is already waited for (`follow_asks`), and what to call when one ends.
+    static ASKS_WAITED: RefCell<std::collections::HashSet<String>> = RefCell::default();
+    static ASK_ENDED: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+/// An ask's card goes when its hook's process ends (a tab closed, the agent stopped) or its time runs out, though no
+/// file changes then: `f` is called at each. The process's end is told by the system (a pidfd), the time by a timer set
+/// once; a project's hook runs where its process cannot be seen here, so its time alone.
+pub fn follow_asks(d: &Data, f: &Rc<dyn Fn()>) {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    for a in wb_core::ask::pending_all(d) {
+        let Some(id) = a["id"].as_str().map(String::from) else { continue };
+        // A question held back for its answer by prompt has no process waiting, nor a time.
+        if a["via"] == "prompt" || !ASKS_WAITED.with(|w| w.borrow_mut().insert(id)) { continue; }
+        if let Some(at) = a["at"].as_i64() {
+            let left = (at + wb_core::ask::WAIT_MS + 10_000 - wb_core::clock::now_ms()).max(0) as u64 + 100;
+            let f = f.clone();
+            glib::timeout_add_local_once(Duration::from_millis(left), move || f());
+        }
+        // A project's hook may run in a container: its number means nothing here, its time alone ends it.
+        if wb_core::ask::root_of(d, a["id"].as_str().unwrap_or("")).is_some_and(|r| r != d.root) { continue; }
+        let Some(pid) = a["pid"].as_i64().filter(|p| std::path::Path::new(&format!("/proc/{p}")).exists()) else { continue };
+        // Safety: pidfd_open on a process number; the descriptor it gives is ours alone.
+        let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0) };
+        if raw < 0 { continue; }
+        // Safety: a descriptor just made, owned here.
+        let fd = unsafe { OwnedFd::from_raw_fd(raw as i32) };
+        ASK_ENDED.with(|e| *e.borrow_mut() = Some(f.clone()));
+        // Waited for off this thread, asleep in poll until the process ends (no clock), then told here.
+        std::thread::spawn(move || {
+            let mut p = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            // Safety: one pollfd of our own; -1 waits without a time.
+            while unsafe { libc::poll(&mut p, 1, -1) } < 0 {}
+            glib::MainContext::default().invoke(|| { if let Some(f) = ASK_ENDED.with(|e| e.borrow().clone()) { f(); } });
+        });
+    }
+}
+
+/// `f`, and after it the asks it shows waited for (`follow_asks`), calling this again when one ends.
+pub fn with_asks(d: &Data, f: Rc<dyn Fn()>) -> Rc<dyn Fn()> {
+    let me: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::default();
+    let (me2, d) = (me.clone(), d.clone());
+    let g: Rc<dyn Fn()> = Rc::new(move || {
+        f();
+        if let Some(g) = me2.borrow().clone() { follow_asks(&d, &g); }
+    });
+    *me.borrow_mut() = Some(g.clone());
+    g
+}
+
+/// A look again at a time: what to call, and the one timer waiting for it.
+pub type Wake = Rc<RefCell<(Option<Rc<dyn Fn()>>, Option<glib::SourceId>)>>;
+
+/// Calls the wake's function `after` from now, in place of a call already waiting: one timer, never a pile of them.
+pub fn wake_at(w: &Wake, after: Duration) {
+    let mut b = w.borrow_mut();
+    let Some(f) = b.0.clone() else { return };
+    if let Some(old) = b.1.take() { old.remove(); }
+    let w2 = w.clone();
+    b.1 = Some(glib::timeout_add_local_once(after, move || { w2.borrow_mut().1 = None; f(); }));
+}
+
+thread_local! {
+    /// What each panel of this process draws again when Claude Code's list of running sessions changes.
+    static ON_AGENTS: RefCell<Vec<Rc<dyn Fn()>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Claude Code's running sessions looked at off this thread (`watch_agents`), and the panels told when they change.
+pub fn follow_agents() {
+    wb_core::sessions::watch_agents(|| { glib::MainContext::default().invoke(|| ON_AGENTS.with(|o| for f in o.borrow().iter() { f() })); });
+}
+
+/// Runs `f` now and whenever the data a panel shows changes (`data_folders` and the panel's own `extra`, asked again
+/// each time), as the system tells; watched again when projects open or close or a watched folder appears or goes.
+pub type Extra = fn(&Data) -> Vec<(std::path::PathBuf, &'static [&'static str])>;
+/// Changes within `ms` of the first are taken as one: 250 ms, or less for what the person waits on.
+pub fn follow_data(key: &str, d: &Data, ms: u64, extra: Extra, f: Rc<dyn Fn()>) {
+    // Watched first, then read: a change while it reads is not missed. Watched again after: the first read may name
+    // more to watch (the files panel's files).
+    ON_AGENTS.with(|o| o.borrow_mut().push(once_soon(ms, f.clone())));
+    arm_data(key.to_string(), d.clone(), extra, ms, f.clone());
+    f();
+    arm_data(key.to_string(), d.clone(), extra, ms, f);
+}
+
+fn arm_data(key: String, d: Data, extra: Extra, ms: u64, f: Rc<dyn Fn()>) {
+    let all = move |d: &Data| { let mut v = data_folders(d); v.extend(extra(d)); v };
+    let seen_of = |fs: &[(std::path::PathBuf, &[&str])]| fs.iter().map(|(p, _)| (p.clone(), p.is_dir())).collect::<Vec<_>>();
+    let folders = all(&d);
+    let seen = seen_of(&folders);
+    let (k2, d2) = (key.clone(), d.clone());
+    // The folders compared after `f` ran: what it drew may name new ones (the files panel's). Folders not there are not
+    // made (a project closing meanwhile would find one in its way): a parent is watched.
+    let run = once_soon(ms, Rc::new(move || {
+        f();
+        // New folders watched, then read once more: what was written in them before the watch is not missed.
+        if seen_of(&all(&d2)) != seen { arm_data(k2.clone(), d2.clone(), extra, ms, f.clone()); f(); }
+    }));
+    watch(&key, &folders, 0, false, run);
 }
 
 /// The files a panel's look comes from: the file naming the theme in force, the panels' zoom, the default theme's
@@ -263,12 +456,6 @@ pub fn ago(ms: i64) -> String {
 }
 
 pub fn cut(t: &str, n: usize) -> String { t.chars().take(n).collect() }
-
-/// Runs `f` on a timer with no way to stop it: panels live as long as their window.
-pub fn every(ms: u64, mut f: impl FnMut() + 'static) {
-    f();
-    glib::timeout_add_local(Duration::from_millis(ms), move || { f(); glib::ControlFlow::Continue });
-}
 
 /// WebKit's own right-click menu in the program's language: its Korean leaves Back, Forward and Stop in English.
 pub fn web_menu_in_language(web: &webkit6::WebView) {

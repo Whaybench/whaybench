@@ -6,7 +6,6 @@ use serde_json::{Value, json};
 use similar::{ChangeTag, TextDiff};
 use wb_core::{paths::Data, records, sessions, status, view};
 
-use crate::common::every;
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct Entry { pub read: u32, pub edit: u32, pub attached: u32, pub last: i64 }
@@ -160,6 +159,11 @@ fn menu(d: &Data, list: &gtk::ListBox, path: &str, x: f64, y: f64, redraw: Rc<dy
     pop.popup();
 }
 
+thread_local! {
+    /// The folders the listed files are in, as last drawn.
+    static SHOWN_IN: RefCell<Vec<std::path::PathBuf>> = const { RefCell::new(Vec::new()) };
+}
+
 fn draw(d: &Data, list: &gtk::ListBox, panel: &RefCell<Panel>, unit: i32, force: bool) {
     // No session in front: an empty list, not the one drawn before (a project's, closed since).
     let Some(session) = sessions::target(d) else {
@@ -195,6 +199,13 @@ fn draw(d: &Data, list: &gtk::ListBox, panel: &RefCell<Panel>, unit: i32, force:
         let e = last_ai.entry(s(t, "path").to_string()).or_insert(0);
         *e = (*e).max(t.get("at").and_then(Value::as_i64).unwrap_or(0));
     }
+    // Every listed path's folder: a file read or changed, and an attached pattern's (its matches come and go there).
+    let mut dirs: Vec<std::path::PathBuf> = touches.iter().filter_map(|t| Path::new(s(t, "path")).parent().map(Path::to_path_buf)).filter(|p| !p.as_os_str().is_empty()).collect();
+    // And where its attached patterns are matched: a first match made there shows.
+    dirs.extend(records::attach_folders(d, &session));
+    dirs.sort();
+    dirs.dedup();
+    SHOWN_IN.with(|s| *s.borrow_mut() = dirs);
     let runs = records::bash_runs(d, &session);
     let state: HashMap<String, &'static str> = last_ai.iter().filter_map(|(p, at)| file_state(p, *at, mtime_ms(p), swap_exists(p), &runs).map(|x| (p.clone(), x))).collect();
     let mut sorted_state: Vec<_> = state.iter().collect();
@@ -271,16 +282,20 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
     }
     list.add_controller(click);
     // A node pressed in the map filters; the panel does not come forward.
-    every(500, {
-        let (d, list, panel) = (d.clone(), list.clone(), panel.clone());
-        move || {
-            if let Some(v) = status::take(&d, "files") {
-                panel.borrow_mut().node = v.get("node").and_then(Value::as_str).map(String::from);
-                draw(&d, &list, &panel, unit, true);
-            }
+    // A node pressed in the map (a message to this panel), or the files touched: read when they change.
+    let d0 = d.clone();
+    // The folders of the files listed too: one changed or opened in Vim by hand shows so.
+    let f: Rc<dyn Fn()> = Rc::new(move || {
+        if let Some(v) = status::take(&d, "files") {
+            panel.borrow_mut().node = v.get("node").and_then(Value::as_str).map(String::from);
+            draw(&d, &list, &panel, unit, true);
+        } else {
+            draw(&d, &list, &panel, unit, false);
         }
     });
-    every(3000, move || draw(&d, &list, &panel, unit, false));
+    // Changes taken together for three seconds, as it read before; a node pressed in the map at once.
+    crate::common::on_change("files-message", &[(d0.cache().join("panels"), &["files.json"])], f.clone());
+    crate::common::follow_data("files", &d0, 3000, |_| SHOWN_IN.with(|s| s.borrow().iter().map(|p| (p.clone(), &[][..])).collect()), f);
 }
 
 #[cfg(test)]

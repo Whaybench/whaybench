@@ -575,6 +575,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
     let mut ticks = 0u32;
     let (handle, mut displays) = (event_loop.handle(), crate::project_display::Displays::default());
     let mut theme_watch = crate::watch::ThemeWatch::default();
+    let mut ask_watch = crate::askwatch::AskWatch::default();
     let asked_data = data.clone();
     event_loop.handle().insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, state| {
         crate::start::reap_apps();
@@ -623,6 +624,7 @@ pub fn listen(event_loop: &EventLoop<App>, data: &Data) -> Result<(), Box<dyn st
         if ticks.is_multiple_of(10) { displays.sync(&handle, &asked_data); }
         // The theme's files, watched by the event loop (read when changed, never looked for).
         theme_watch.sync(&handle, state);
+        ask_watch.sync(&handle, state);
         // A project's programs leave requests in its own root; only those that touch nothing outside are taken.
         for (pid, root) in wb_core::roots::Roots::new(asked_data.clone()).projects() {
             for bytes in take_files(&root.ctl()) {

@@ -15,11 +15,68 @@ fn dir(data: &Path) -> PathBuf { data.join("cache").join("ask") }
 pub(crate) fn request_file(data: &Path, id: &str) -> PathBuf { dir(data).join(format!("{id}.json")) }
 fn answer_file(data: &Path, id: &str) -> PathBuf { dir(data).join(format!("{id}.answer.json")) }
 fn panel_file(data: &Path) -> PathBuf { dir(data).join("panel") }
+/// Written by the answer panel once it has read an ask: what shows it is not stuck.
+fn seen_file(data: &Path, id: &str) -> PathBuf { dir(data).join(format!("{id}.seen")) }
+/// How long an ask waits for the panel to read it before the panel is taken for stuck.
+const SEEN_MS: i64 = 4000;
 
-/// The answer panel says it is open, each second; without it an ask goes to the terminal at once.
-pub fn panel_alive(data: &Path) { let _ = crate::paths::write_atomic(&panel_file(data), now_ms().to_string()); }
+/// The answer panel says it is open by holding a lock (flock) on a file of each root while it runs: no writing on a
+/// clock, and gone with the panel however it ends. A project's hook may run in its container, in its own process space,
+/// where the lock still shows. A vault's lock is beside it, not in it: a file held open there would keep the vault
+/// from closing. Without a live answer panel an ask goes to the terminal at once.
+fn beside(root: &Path) -> PathBuf { root.with_extension("answer-panel") }
+
+/// Takes the locks for the host and each open project, and lets go of those of projects that closed.
+pub fn panel_alive(host: &crate::paths::Data) {
+    use std::{collections::HashMap, sync::Mutex};
+    static HELD: Mutex<Option<HashMap<PathBuf, HashMap<PathBuf, fs::File>>>> = Mutex::new(None);
+    // Where its folder is made: the host's, a vault's runtime folder, an open project's data where it rests (never
+    // through the link of its open place, which may go meanwhile and leave a real folder in the way of the next open).
+    let mut want: Vec<(PathBuf, Option<PathBuf>)> = vec![(panel_file(&host.root), Some(dir(&host.root)))];
+    for st in crate::roots::stubs(host).into_iter().filter(|s| s.open()) {
+        if st.vault {
+            // Seen from the host, and from the container, where the folder that holds the vault is bound over cache/open.
+            want.push((beside(&st.open_at), None));
+            want.push((beside(&crate::vault::mountpoint(&st)), None));
+        } else {
+            want.push((panel_file(&st.open_at), Some(dir(&st.stored().root))));
+        }
+    }
+    let mark = std::process::id().to_string();
+    let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
+    let held = held.get_or_insert_with(HashMap::new).entry(host.root.clone()).or_default();
+    held.retain(|p, _| want.iter().any(|(w, _)| w == p));
+    for (p, make) in want {
+        if held.contains_key(&p) { continue; }
+        if let Some(dir) = make { let _ = fs::create_dir_all(dir); }
+        let Ok(f) = fs::OpenOptions::new().create(true).truncate(false).write(true).open(&p) else { continue };
+        use std::os::fd::AsRawFd;
+        // Safety: flock on a descriptor kept open here; the lock goes with it.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            // Its process number in it: a hook that finds the panel stuck ends it, and Whaybench starts it again.
+            use std::io::Write;
+            let mut w = &f;
+            let _ = f.set_len(0).and_then(|_| w.write_all(mark.as_bytes()));
+            held.insert(p, f);
+        }
+    }
+}
+
+/// A panel of before the lock (it writes the time each second), running until Whaybench starts again.
+fn old_panel(data: &Path) -> bool {
+    let then: Option<i64> = fs::read_to_string(panel_file(data)).ok().and_then(|t| t.trim().parse().ok());
+    then.is_some_and(|t| t > 1_000_000_000_000 && (now_ms() - t).abs() < 5000)
+}
+
+/// Open while some answer panel holds the lock of this root (in its data, or beside it for a vault); or, from a panel
+/// of before the lock that runs until Whaybench starts again, while the time it writes each second is new.
 fn panel_open(data: &Path) -> bool {
-    fs::read_to_string(panel_file(data)).ok().and_then(|t| t.trim().parse::<i64>().ok()).is_some_and(|t| now_ms() - t < 5000)
+    use std::os::fd::AsRawFd;
+    if old_panel(data) { return true; }
+    [panel_file(data), beside(data)].iter().any(|p| fs::File::open(p).is_ok_and(|f| {
+        // Safety: flock on a descriptor owned here; a shared lock taken is let go when it closes.
+        unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK) }
+    }))
 }
 
 /// An ask id: a session id with its suffix, so a session id at its own limit still fits.
@@ -92,6 +149,64 @@ pub fn clear(data: &Path, id: &str) {
     // In a project, the entries themselves: never what a link left there points to.
     let _ = crate::paths::remove_file(&request_file(data, id));
     let _ = crate::paths::remove_file(&answer_file(data, id));
+    let _ = crate::paths::remove_file(&seen_file(data, id));
+    let _ = crate::paths::remove_file(&ping_file(data, id));
+}
+
+/// The answer panel says it has read every ask waiting in its roots, shown or not (behind the one shown, or of a
+/// session it does not list): it runs. It answers each ask's last ping (`<id>.ping`) with the same word.
+pub fn mark_seen_all(d: &crate::paths::Data) {
+    for r in crate::roots::all_of(d) {
+        for a in pending(&r.root) {
+            let Some(id) = a["id"].as_str().and_then(|i| valid_id(i).ok()) else { continue };
+            let ping = fs::read_to_string(ping_file(&r.root, id)).unwrap_or_default();
+            if fs::read_to_string(seen_file(&r.root, id)).ok().as_deref() != Some(ping.as_str()) {
+                let _ = crate::paths::write_atomic(&seen_file(&r.root, id), ping);
+                // Taken away meanwhile (answered, cleared): its mark goes too, not left behind.
+                if !request_file(&r.root, id).exists() { let _ = crate::paths::remove_file(&seen_file(&r.root, id)); }
+            }
+        }
+    }
+}
+
+/// Asked again how often while an ask waits: a panel stuck after it showed the card is found within this and SEEN_MS.
+const PING_MS: i64 = 10_000;
+fn ping_file(data: &Path, id: &str) -> PathBuf { dir(data).join(format!("{id}.ping")) }
+
+/// Whether the panel has answered `word` (the ask's last ping, or "" for the ask itself).
+fn seen(data: &Path, id: &str, word: &str) -> bool { fs::read_to_string(seen_file(data, id)).is_ok_and(|t| t == word) }
+
+/// The panel did not read an ask in time: it holds its lock but does not run. Said in this root's ask folder, the
+/// one place every hook can write and Whaybench sees (a project's hook may run in a container that sees no process of
+/// the host): `stuck` holds the number of the panel holding the lock. Whaybench, which started that panel, ends it and
+/// starts it again the way it was started; the ask goes to the terminal.
+fn stuck(data: &Path) {
+    use std::os::fd::AsRawFd;
+    let held = [panel_file(data), beside(data)].into_iter().find(|p| fs::File::open(p).is_ok_and(|f| {
+        // Safety: flock on a descriptor owned here; a shared lock taken is let go when it closes.
+        unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) != 0 }
+    }));
+    let Some(pid) = held.and_then(|p| fs::read_to_string(p).ok()).and_then(|t| t.split_whitespace().next()?.parse::<u32>().ok()) else { return };
+    let _ = crate::paths::write_atomic(&dir(data).join("stuck"), pid.to_string());
+}
+
+/// The number of the answer panel a hook said is stuck in `root`, if one did: read by Whaybench.
+pub fn stuck_panel(root: &Path) -> Option<u32> { crate::paths::read_text(&dir(root).join("stuck")).ok()?.trim().parse().ok() }
+
+/// Waits for the panel to answer `word` for ask `id`, counted from now (after the ask is written: a slow write is not
+/// the panel's). True when it did, or the ask was answered or taken away meanwhile, or the panel is one of before the
+/// lock (it cannot answer).
+fn read_in_time(data: &Path, id: &str, word: &str) -> bool {
+    if old_panel(data) { return true; }
+    let at = now_ms();
+    while now_ms() - at < SEEN_MS {
+        if seen(data, id, word) || read_json(&answer_file(data, id), Value::Null).is_ok_and(|a| !a.is_null()) { return true; }
+        if !request_file(data, id).exists() { return true; }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if seen(data, id, word) { return true; }
+    stuck(data);
+    false
 }
 
 /// Which of a session's asks a moment takes away. Claude Code shows its own dialog beside the card and does not tell
@@ -145,11 +260,22 @@ pub fn wait(data: &Path, sid: &str, agent: &str, event: &Value) -> Result<Option
     let (id, at) = (new_id(sid), now_ms());
     // A subagent's ask (it shares the session id) is told apart, so the main turn's end leaves it.
     write_json(&request_file(data, &id), &json!({"id": id, "session": sid, "agent": agent, "subagent": event["agent_id"], "kind": kind, "tool": tool, "input": input, "at": at, "pid": std::process::id()}))?;
+    if !read_in_time(data, &id, "") { clear(data, &id); return Ok(None); }
+    // While it waits the panel is asked now and then whether it still runs; its lock gone for a moment (it is started
+    // again) is waited out.
+    let (mut pinged, mut pings, mut gone_since) = (now_ms(), 0u32, None::<i64>);
     let got = loop {
         if let Ok(a) = read_json(&answer_file(data, &id), Value::Null) && !a.is_null() { break Some(a); }
         // A new prompt took the ask away.
         if !request_file(data, &id).exists() { break None; }
-        if now_ms() - at > WAIT_MS || !panel_open(data) { break None; }
+        if now_ms() - at > WAIT_MS { break None; }
+        if panel_open(data) { gone_since = None; } else if now_ms() - *gone_since.get_or_insert(now_ms()) > 3000 { break None; }
+        if gone_since.is_none() && now_ms() - pinged > PING_MS {
+            pings += 1;
+            let _ = crate::paths::write_atomic(&ping_file(data, &id), pings.to_string());
+            if !read_in_time(data, &id, &pings.to_string()) { break None; }
+            pinged = now_ms();
+        }
         std::thread::sleep(Duration::from_millis(200));
     };
     clear(data, &id);
@@ -177,6 +303,7 @@ pub fn hold(data: &Path, sid: &str, agent: &str, event: &Value) -> Result<Option
     if !panel_open(data) { return Ok(None); }
     let id = new_id(sid);
     write_json(&request_file(data, &id), &json!({"id": id, "session": sid, "agent": agent, "kind": "question", "tool": event["tool_name"], "input": event["tool_input"], "at": now_ms(), "via": "prompt"}))?;
+    if !read_in_time(data, &id, "") { clear(data, &id); return Ok(None); }
     Ok(Some(i18n::ai("ask-shown").to_string()))
 }
 
@@ -188,6 +315,33 @@ pub fn reply_prompt(answers: &[(String, String)]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ask_a_stuck_panel_does_not_read_goes_to_the_terminal_soon() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = crate::paths::Data::new(dir.path().to_path_buf());
+        super::panel_alive(&d);
+        let event = serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "ls"}});
+        let t = std::time::Instant::now();
+        assert!(super::wait(dir.path(), "s1", "claude", &event).unwrap().is_none(), "the terminal asks");
+        assert!(t.elapsed() < std::time::Duration::from_secs(6), "within seconds, not ten minutes");
+        assert!(super::pending(dir.path()).is_empty(), "the ask is taken away");
+        assert_eq!(super::stuck_panel(dir.path()), Some(std::process::id()), "Whaybench is told which panel is stuck");
+    }
+
+    #[test]
+    fn the_answer_panel_is_open_only_while_it_holds_the_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!super::panel_open(dir.path()), "no file");
+        std::fs::create_dir_all(super::dir(dir.path())).unwrap();
+        std::fs::write(super::panel_file(dir.path()), "1795680000000").unwrap();
+        assert!(!super::panel_open(dir.path()), "a file nobody holds (the old form, a time long past)");
+        std::fs::write(super::panel_file(dir.path()), super::now_ms().to_string()).unwrap();
+        assert!(super::panel_open(dir.path()), "an old panel's time, just written");
+        std::fs::write(super::panel_file(dir.path()), "1795680000000").unwrap();
+        super::panel_alive(&crate::paths::Data::new(dir.path().to_path_buf()));
+        assert!(super::panel_open(dir.path()), "held");
+    }
+
     use super::*;
 
     #[test]
@@ -210,7 +364,15 @@ mod tests {
         let event = json!({"tool_name": "Bash", "tool_input": {"command": "ls"}});
         assert!(wait(&root, "s1", "claude", &event).unwrap().is_none(), "no panel: the terminal asks at once");
         assert!(hold(&root, "s2", "codex", &event).unwrap().is_none());
-        panel_alive(&root);
+        // The panel's part: it reads what waits.
+        let reader_root = root.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop2 = stop.clone();
+        let reader = std::thread::spawn(move || while !stop2.load(std::sync::atomic::Ordering::Relaxed) {
+            mark_seen_all(&crate::paths::Data::new(reader_root.clone()));
+            std::thread::sleep(Duration::from_millis(50));
+        });
+        panel_alive(&crate::paths::Data::new(root.clone()));
         let r2 = root.clone();
         let answerer = std::thread::spawn(move || loop {
             if let Some(r) = pending(&r2).first() { answer(&r2, r["id"].as_str().unwrap(), "allow", &json!({})).unwrap(); break; }
@@ -225,6 +387,8 @@ mod tests {
         clear_session(&root, "s2", Clear::TurnEnded);
         assert_eq!(pending(&root).len(), 1, "a turn's end leaves a held-back question");
         clear_session(&root, "s2", Clear::Prompt);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        reader.join().unwrap();
         assert!(pending(&root).is_empty());
         // Two asks of one session at once: each gets its own answer.
         let (a, b) = (root.clone(), root.clone());

@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use wb_core::{paths::Data, records, sessions, status};
 use webkit6::prelude::*;
 
-use crate::{common::{cut, every}, web::{self, Page, RawHtml}};
+use crate::{common::cut, web::{self, Page, RawHtml}};
 
 const KEEP: usize = 50;
 
@@ -380,9 +380,13 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         });
     }
     let card_of: RefCell<Option<String>> = RefCell::default();
-    every(1000, move || {
-        // Each root's hooks look for the panel in their own root.
-        for r in wb_core::roots::all_of(&d) { wb_core::ask::panel_alive(&r.root); }
+    // The asks waiting, in each root: read when they change, as the system tells.
+    let d0 = d.clone();
+    let f: Rc<dyn Fn()> = Rc::new(move || {
+        // Each root's hooks look for the panel by its lock, in their own root (beside it for a vault).
+        wb_core::ask::panel_alive(&d);
+        // Read: the hooks know the panel runs (one not read in a few seconds is taken for stuck).
+        wb_core::ask::mark_seen_all(&d);
         let asks = wb_core::ask::pending_all(&d);
         let id_of = |a: &Value| a["id"].as_str().unwrap_or("").to_string();
         // The card shown stays while its ask waits, so nothing typed in it is lost; then the followed
@@ -498,6 +502,10 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         // Drawn each time: the page holds the theme's colours, and the same page is not loaded again.
         draw(&panel.borrow(), &w, &d);
     });
+    // A question waiting is shown at once; the rest a moment later, taken together.
+    let f = crate::common::with_asks(&d0, f);
+    crate::common::on_change("answer-asks", &wb_core::roots::all_of(&d0).iter().map(|r| (r.cache().join("ask"), &[][..])).collect::<Vec<_>>(), f.clone());
+    crate::common::follow_data("answer", &d0, 250, |_| Vec::new(), f);
 }
 
 #[cfg(test)]
