@@ -198,7 +198,8 @@ pub struct App {
     pub data: Data,
     pub saved: SavedLayout,
     pub menu: Option<Window>,
-    theme_seen: std::time::Instant,
+    /// The theme's files changed (ThemeWatch): it is read again at the next frame.
+    pub theme_dirty: bool,
     pub window_size: (i32, i32),
     pub save_due: bool,
 
@@ -296,7 +297,7 @@ impl App {
             drag_from: None,
             undos: Vec::new(),
             browser_away: (false, now),
-            shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_seen: std::time::Instant::now(), window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
+            shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_dirty: true, window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
             compositor_state, xdg_shell_state, layer_shell_state, shm_state, dmabuf: None, gpu: None, seat_state, data_device_state, clip,
             popups: PopupManager::default(), seat, browsers: Default::default(), builtin_ime,
@@ -981,10 +982,10 @@ impl App {
         self.save_due = true;
     }
 
-    /// Four times a second, as the panels do: the theme on file may have changed, or its folder may be gone.
+    /// When its files changed (ThemeWatch): the theme on file may be another, or its folder may be gone.
     fn follow_theme(&mut self) {
-        if self.theme_seen.elapsed() < std::time::Duration::from_millis(250) { return; }
-        self.theme_seen = std::time::Instant::now();
+        if !self.theme_dirty { return; }
+        self.theme_dirty = false;
         let now = theme::load_active(&self.data);
         if now != self.theme {
             record::decide("screen", "theme", "the file changed", &[("theme", now.name.clone())]);

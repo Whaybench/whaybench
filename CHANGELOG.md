@@ -16,6 +16,8 @@ names another step.
 ### Changed
 - An add-on from elsewhere (an agent, a map style's instructions) is confirmed once, before its first use: one that
   changes afterwards is not asked about again.
+- Whaybench and the panels read the theme, the panels' zoom and what the view follows when the system says a file
+  changed (inotify), not by looking every quarter or half second.
 - Codex's Interrupt and SessionEnd hooks ask for 3 seconds, the most Codex gives them: at 10 it warned at each start.
 
 ## [0.9.7] - 2026-11-25

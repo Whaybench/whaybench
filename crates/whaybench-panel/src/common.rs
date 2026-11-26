@@ -1,7 +1,7 @@
 //! What every panel shares: the data directory, the theme as a style sheet, the program's own commands.
 use std::{cell::RefCell, path::PathBuf, process::{Command, Stdio}, rc::Rc, sync::OnceLock, time::Duration};
 
-use gtk::{gdk, glib, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use webkit6::prelude::WebViewExt;
 use serde_json::{Value, json};
 use wb_core::{paths::{self, Data}, theme::{self, Colour, Theme}};
@@ -51,17 +51,49 @@ pub fn set_up_web(web: &webkit6::WebView, d: &Data) {
     follow_zoom(web, d);
 }
 
-/// A web view in the panel follows the panel's zoom, until it is gone.
+thread_local! {
+    /// The folders watched for this panel, by what they are watched for: a new watch of the same key replaces the old.
+    static WATCHES: RefCell<std::collections::HashMap<String, Vec<gio::FileMonitor>>> = RefCell::default();
+}
+
+/// Calls `f` when a file in one of `folders` is written, made, removed or moved there, as the system tells (inotify):
+/// only the names given, or any with none. Kept under `key`; a new call with the same key replaces the watch (a panel
+/// that now follows another session watches that one's folder). Nothing is looked for on a clock.
+pub fn on_change(key: &str, folders: &[(std::path::PathBuf, &[&str])], f: Rc<dyn Fn()>) {
+    let mut monitors = Vec::new();
+    for (dir, names) in folders {
+        let _ = std::fs::create_dir_all(dir);
+        let Ok(m) = gio::File::for_path(dir).monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, None::<&gio::Cancellable>) else { continue };
+        let (names, f) = (names.iter().map(|n| n.to_string()).collect::<Vec<_>>(), f.clone());
+        m.connect_changed(move |_, file, other, event| {
+            use gio::FileMonitorEvent as E;
+            if !matches!(event, E::ChangesDoneHint | E::Created | E::Deleted | E::MovedIn | E::MovedOut | E::Renamed) { return; }
+            let named = |x: Option<&gio::File>| x.and_then(|x| x.basename()).is_some_and(|b| names.is_empty() || names.iter().any(|n| b.as_os_str() == n.as_str()));
+            if named(Some(file)) || named(other) { f(); }
+        });
+        monitors.push(m);
+    }
+    WATCHES.with(|w| { w.borrow_mut().insert(key.to_string(), monitors); });
+}
+
+/// The files a panel's look comes from: the file naming the theme in force, the panels' zoom, the default theme's
+/// settings, and the theme's own folder (theme.json, settings.json).
+pub fn theme_files(d: &Data, theme: &str) -> Vec<(std::path::PathBuf, &'static [&'static str])> {
+    vec![(d.root.clone(), &["theme.json", "panel-zoom.json"]), (d.root.join("addons"), &["themes-default-settings.json"]),
+         (d.root.join("addons/themes").join(theme), &[])]
+}
+
+/// A web view in the panel follows the panel's zoom, until it is gone: set again when the zoom file changes.
 pub fn follow_zoom(web: &webkit6::WebView, d: &Data) {
-    let (weak, d) = (web.downgrade(), d.clone());
+    let (weak, root, d) = (web.downgrade(), d.root.clone(), d.clone());
+    let key = format!("zoom {:p}", web.as_ptr());
     let apply = move || {
-        let Some(web) = weak.upgrade() else { return glib::ControlFlow::Break };
+        let Some(web) = weak.upgrade() else { return };
         let z = zoom(&d);
         if (web.zoom_level() - z).abs() > 0.001 { web.set_zoom_level(z); }
-        glib::ControlFlow::Continue
     };
     apply();
-    glib::timeout_add_local(Duration::from_millis(250), apply);
+    on_change(&key, &[(root, &["panel-zoom.json"])], Rc::new(apply));
 }
 
 pub fn data() -> Data {
@@ -130,7 +162,7 @@ modelbutton {{ color: {text}; }} modelbutton:hover {{ background: alpha({accent}
 ")
 }
 
-/// Keeps the panel in the chosen theme; a change takes effect within two seconds.
+/// Keeps the panel in the chosen theme: a change to its files takes effect as soon as the system tells of it.
 pub fn follow_theme(d: &Data) {
     let provider = gtk::CssProvider::new();
     if let Some(display) = gdk::Display::default() {
@@ -138,8 +170,16 @@ pub fn follow_theme(d: &Data) {
     }
     let shown: Rc<RefCell<String>> = Rc::default();
     let d = d.clone();
+    // The theme's own folder is watched as well: when another theme comes in force, its folder instead.
+    let watching: Rc<RefCell<String>> = Rc::default();
+    let again: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::default();
+    let again2 = again.clone();
     let apply = move || {
         let mut t = theme::load_active(&d);
+        if *watching.borrow() != t.name {
+            *watching.borrow_mut() = t.name.clone();
+            if let Some(f) = again2.borrow().clone() { on_change("theme", &theme_files(&d, &t.name), f); }
+        }
         t.font_size *= zoom(&d);
         // GTK's own widgets, a font chooser for one, start from its light or dark look: the one that fits the theme.
         let dark = 0.2126 * t.panel[0] + 0.7152 * t.panel[1] + 0.0722 * t.panel[2] < 0.5;
@@ -174,12 +214,11 @@ pub fn follow_theme(d: &Data) {
             provider.load_from_string(&css);
             *shown.borrow_mut() = css;
         }
-        glib::ControlFlow::Continue
     };
-    let first = apply.clone();
-    first();
-    // Often enough that the panels change with the frame the compositor draws, which looks just as often.
-    glib::timeout_add_local(Duration::from_millis(250), apply);
+    let apply: Rc<dyn Fn()> = Rc::new(apply);
+    *again.borrow_mut() = Some(apply.clone());
+    // Read when the theme's files change (on_change), not on a clock.
+    apply();
 }
 
 fn sibling(name: &str) -> PathBuf {

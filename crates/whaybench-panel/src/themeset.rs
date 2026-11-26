@@ -3,7 +3,7 @@
 //! settings.json and the whole window follows within two seconds.
 use std::{cell::RefCell, rc::Rc};
 
-use gtk::{gdk, glib, pango, prelude::*};
+use gtk::{gdk, pango, prelude::*};
 use serde_json::{Value, json};
 use wb_core::{paths::Data, status, theme::{self, Kind}};
 
@@ -164,6 +164,6 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         ok.connect_clicked(move |_| s2());
         entry.connect_activate(move |_| save());
     }
-    // A theme chosen elsewhere, or a new one: the list and the keys follow.
-    glib::timeout_add_local(std::time::Duration::from_secs(1), move || { refresh(false); glib::ControlFlow::Continue });
+    // A theme chosen elsewhere, or a new one: the list and the keys follow, when the system tells of the change.
+    crate::common::on_change("themeset", &[(d.root.clone(), &["theme.json"]), (d.root.join("addons/themes"), &[])], Rc::new(move || refresh(false)));
 }

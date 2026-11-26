@@ -15,6 +15,7 @@ mod project_display;
 mod clipboard;
 mod start;
 mod state;
+mod watch;
 
 use std::path::PathBuf;
 

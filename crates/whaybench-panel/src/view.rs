@@ -45,6 +45,8 @@ struct V {
     style: String,
     /// When each picture file was last taken, to see a new one.
     seen: HashMap<String, u128>,
+    /// The session whose picture and requests are watched now (watch_session).
+    watched: Option<Option<String>>,
     web: webkit6::WebView,
     place: gtk::Label,
     tie: gtk::Button,
@@ -498,6 +500,12 @@ fn tick(s: &Shared) {
         front = true;
     }
     if front { status::front_app(&d, &view::app_of(&name)); }
+    // Following another session now: its picture and requests are what to watch.
+    let followed = v.followed.clone();
+    let anew = v.watched.as_ref() != Some(&followed);
+    if anew { v.watched = Some(followed.clone()); }
+    drop(v);
+    if anew { watch_session(s, followed.as_deref()); }
 }
 
 /// The page held with the middle (wheel) button and dragged moves under the pointer, as a hand moves paper: WebKit on
@@ -574,7 +582,7 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
     win.set_child(Some(&body));
 
     let link = view::views(&d).into_iter().find(|(n, _)| *n == name).map(|(_, l)| l).unwrap_or_default();
-    let s: Shared = Rc::new(RefCell::new(V { d: d.clone(), name: name.clone(), link, followed: None, of_project: false, own: Default::default(), hist: History::default(), page: None, style: String::new(), seen: HashMap::new(), web, place, tie: tie.clone(), back: back.clone(), forward: forward.clone(), drop_it: drop_it.clone(), win: win.clone() }));
+    let s: Shared = Rc::new(RefCell::new(V { d: d.clone(), name: name.clone(), link, followed: None, of_project: false, own: Default::default(), hist: History::default(), page: None, style: String::new(), seen: HashMap::new(), watched: None, web, place, tie: tie.clone(), back: back.clone(), forward: forward.clone(), drop_it: drop_it.clone(), win: win.clone() }));
     {
         // A project's page goes to no file outside the project: a link, a refresh, a frame (spec 3.22). The panel's
         // own loads are checked before they are made (it holds its state then).
@@ -617,7 +625,33 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data, name: String) {
             glib::Propagation::Proceed
         });
     }
-    glib::timeout_add_local(std::time::Duration::from_millis(500), move || { tick(&s); glib::ControlFlow::Continue });
+    // Looked at when something it shows or follows changes, as the system tells, not on a clock.
+    watch_view(&s);
+    tick(&s);
+}
+
+/// The files the view follows: its own requests, the conversation in front and the latest one, the session records
+/// (a move), projects opening and closing, the theme its own pages are drawn in; and the followed session's picture
+/// and requests (watched anew when it follows another, `watch_session`).
+fn watch_view(s: &Shared) {
+    let (d, name) = { let v = s.borrow(); (v.d.clone(), v.name.clone()) };
+    let theme = wb_core::theme::load_active(&d).name;
+    let mut folders = vec![(d.root.join("view/requests").join(view::for_view(&name)), &[][..]),
+        (d.root.clone(), &["focus.json", "latest.json", "theme.json", "panel-zoom.json"][..]),
+        (wb_core::sessions::sessions_dir(&d), &[][..]), (d.cache().join("open"), &[][..])];
+    folders.extend(crate::common::theme_files(&d, &theme).into_iter().skip(1));
+    let s2 = s.clone();
+    crate::common::on_change(&format!("view {name}"), &folders, Rc::new(move || tick(&s2)));
+}
+
+fn watch_session(s: &Shared, session: Option<&str>) {
+    let (d, name) = { let v = s.borrow(); (v.d.clone(), v.name.clone()) };
+    let folders: Vec<(std::path::PathBuf, &[&str])> = session.map(|id| {
+        let root = wb_core::roots::for_session(&d, id).root;
+        vec![(root.join("show").join(id), &[][..]), (root.join("view/requests").join(view::for_session(id)), &[][..])]
+    }).unwrap_or_default();
+    let s2 = s.clone();
+    crate::common::on_change(&format!("view session {name}"), &folders, Rc::new(move || tick(&s2)));
 }
 
 #[cfg(test)]
