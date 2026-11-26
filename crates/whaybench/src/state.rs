@@ -200,6 +200,8 @@ pub struct App {
     pub menu: Option<Window>,
     /// The theme's files changed (ThemeWatch): it is read again at the next frame.
     pub theme_dirty: bool,
+    /// The folder of the theme in force was made anew: ThemeWatch watches the new one.
+    pub theme_folder_new: bool,
     pub window_size: (i32, i32),
     pub save_due: bool,
 
@@ -297,7 +299,7 @@ impl App {
             drag_from: None,
             undos: Vec::new(),
             browser_away: (false, now),
-            shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_dirty: true, window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
+            shots: Vec::new(), end_reason: String::new(), data, saved, menu: None, theme_dirty: true, theme_folder_new: false, window_size: (FIRST_WINDOW.0 as i32, FIRST_WINDOW.1 as i32), save_due: false,
             start_time: now, display_handle: dh, space: Space::default(), loop_signal, socket_name,
             compositor_state, xdg_shell_state, layer_shell_state, shm_state, dmabuf: None, gpu: None, seat_state, data_device_state, clip,
             popups: PopupManager::default(), seat, browsers: Default::default(), builtin_ime,

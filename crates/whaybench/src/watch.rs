@@ -19,7 +19,7 @@ impl Watch {
         if fd < 0 { return None; }
         // Safety: a descriptor just made, ours alone.
         let w = Watch { fd: unsafe { <std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(fd) } };
-        if unsafe { libc::inotify_add_watch(fd, path.as_ptr(), libc::IN_CLOSE_WRITE | libc::IN_MOVED_TO | libc::IN_DELETE) } < 0 {
+        if unsafe { libc::inotify_add_watch(fd, path.as_ptr(), libc::IN_CLOSE_WRITE | libc::IN_MOVED_TO | libc::IN_CREATE | libc::IN_DELETE | libc::IN_MOVED_FROM) } < 0 {
             record::warn("screen", "folder not watched", &std::io::Error::last_os_error().to_string(), &[("folder", dir.display().to_string())]);
             return None;
         }
@@ -53,7 +53,8 @@ pub struct ThemeWatch(Option<(String, Vec<RegistrationToken>)>);
 
 impl ThemeWatch {
     pub fn sync(&mut self, handle: &LoopHandle<'_, crate::App>, state: &mut crate::App) {
-        if self.0.as_ref().is_some_and(|(n, _)| *n == state.theme.name) { return; }
+        // Again for another theme, or when its folder was made anew (a watch holds the folder, not its name).
+        if self.0.as_ref().is_some_and(|(n, _)| *n == state.theme.name) && !std::mem::take(&mut state.theme_folder_new) { return; }
         for token in self.0.take().map(|(_, t)| t).unwrap_or_default() { handle.remove(token); }
         let root = state.data.root.clone();
         // (folder, the names that matter there; none: any)
@@ -63,8 +64,17 @@ impl ThemeWatch {
             (root.join("addons/themes").join(&state.theme.name), None),
         ];
         let mut tokens = Vec::new();
+        // The folder holding the themes: the one in force made, removed or put back under its name.
+        let name = state.theme.name.clone();
+        if let Some(watch) = Watch::new(&root.join("addons/themes")) {
+            let made = handle.insert_source(Generic::new(watch, Interest::READ, Mode::Level), move |_, w, state: &mut crate::App| {
+                if w.names().contains(&name) { state.theme_folder_new = true; state.theme_dirty = true; state.redraw = true; }
+                Ok(PostAction::Continue)
+            });
+            if let Ok(t) = made { tokens.push(t); }
+        }
         for (dir, only) in folders {
-            if !dir.is_dir() { continue; }
+            if !dir.is_dir() || dir == root.join("addons/themes").join(wb_core::theme::DEFAULT) { continue; }
             let Some(watch) = Watch::new(&dir) else { continue };
             let made = handle.insert_source(Generic::new(watch, Interest::READ, Mode::Level), move |_, w, state: &mut crate::App| {
                 if w.names().iter().any(|n| only.is_none_or(|o| o.contains(&n.as_str()))) { state.theme_dirty = true; state.redraw = true; }
@@ -75,5 +85,22 @@ impl ThemeWatch {
         self.0 = Some((state.theme.name.clone(), tokens));
         // What changed before the watch was there is read once now.
         state.theme_dirty = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_theme_folder_watch_hears_settings_reset_and_a_folder_made_anew() {
+        let dir = std::env::temp_dir().join(format!("wb-theme-watch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("settings.json"), "{}").unwrap();
+        let w = super::Watch::new(&dir).unwrap();
+        let _ = w.names();
+        std::fs::remove_file(dir.join("settings.json")).unwrap();
+        assert!(w.names().contains(&"settings.json".to_string()), "a reset removes the settings: heard");
+        std::fs::create_dir(dir.join("a-theme")).unwrap();
+        assert!(w.names().contains(&"a-theme".to_string()), "a theme folder made anew: heard");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
