@@ -7,15 +7,9 @@ names another step.
 
 ## [Unreleased]
 
-## [0.9.8] - 2026-11-26
-
-### Added
-- The view panel scrolls by holding the middle (wheel) button and dragging: the page, or the box under the pointer that
-  scrolls that way, inside a frame of the page too (the PDF viewer).
+## [0.9.9] - 2026-11-27
 
 ### Changed
-- An add-on from elsewhere (an agent, a map style's instructions) is confirmed once, before its first use: one that
-  changes afterwards is not asked about again.
 - Whaybench and the panels read the theme, the panels' zoom and what the view follows when the system says a file
   changed (inotify), not by looking every quarter or half second.
 - The other panels (menu bar, status line, map, sessions, files, answers, input, projects, notifications) read their
@@ -26,6 +20,16 @@ names another step.
   an ask within four seconds (or a ping every ten while one waits) is taken for stuck: the ask goes to the terminal at
   once, not after ten minutes, and Whaybench ends that panel and starts it again where it was, for a project's
   conversation in its container too. Panels opened again from the menu are restarted after a crash as well.
+
+## [0.9.8] - 2026-11-26
+
+### Added
+- The view panel scrolls by holding the middle (wheel) button and dragging: the page, or the box under the pointer that
+  scrolls that way, inside a frame of the page too (the PDF viewer).
+
+### Changed
+- An add-on from elsewhere (an agent, a map style's instructions) is confirmed once, before its first use: one that
+  changes afterwards is not asked about again.
 - Codex's Interrupt and SessionEnd hooks ask for 3 seconds, the most Codex gives them: at 10 it warned at each start.
 
 ## [0.9.7] - 2026-11-25
