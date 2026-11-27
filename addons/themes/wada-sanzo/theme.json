@@ -353,13 +353,6 @@
           }
         }
       ]
-    },
-    {
-      "key": "frame.shadow_size",
-      "name": "Shadow",
-      "min": 0,
-      "max": 64,
-      "unit": "px"
     }
   ]
 }

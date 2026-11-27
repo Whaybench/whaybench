@@ -107,8 +107,11 @@ fn saved_cards(d: &Data, n: usize) -> Option<Vec<Vec<String>>> {
 fn drop_cards(d: &Data, cols: &[gtk::Box]) {
     for col in cols {
         let target = gtk::DropTarget::new(gtk::Frame::static_type(), gdk::DragAction::MOVE);
-        let (d, here, all) = (d.clone(), col.clone(), cols.to_vec());
+        // Weak: each column holds its drop target, which would otherwise hold every column, and none would be freed
+        // when the cards are made anew.
+        let (d, here, all) = (d.clone(), col.downgrade(), cols.iter().map(|c| c.downgrade()).collect::<Vec<_>>());
         target.connect_drop(move |_, value, _, y| {
+            let (Some(here), Some(all)) = (here.upgrade(), all.iter().map(|c| c.upgrade()).collect::<Option<Vec<gtk::Box>>>()) else { return false };
             let Ok(card) = value.get::<gtk::Frame>() else { return false };
             let card: gtk::Widget = card.upcast();
             let Some(from) = card.parent().and_downcast::<gtk::Box>().filter(|p| all.contains(p)) else { return false };

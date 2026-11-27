@@ -171,9 +171,11 @@ among values the theme lists.
 | `min`, `max` | numbers | The range it can be set in |
 | `unit` | text | Shown after the name, up to 8 characters, such as `%` or `px` |
 | `group` | text | Settings next to each other with the same `group` are shown on one row (a new row when the rest of the row is too short): a picture and its strength, side by side |
-| `choices` | list | Instead of `min` and `max`: what can be chosen, each `{ "name": English name, "value": any value }`. The value is put at `key` whole: a text, a number, an object (with `null` for a part to take away), or `null`. `key` can then also be `palette`: a colour combination, the colours of every name |
+| `choices` | list | Instead of `min` and `max`: what can be chosen, each `{ "name": English name, "value": any value }`. The value goes at `key` and lies over the theme's own value there as `settings.json` does: a text, a number or `null` in its place, an object key by key, so an object choice names every key the theme's own value has (`null` for a part to take away). `key` can then also be `palette`: a colour combination, the colours of every name |
 
-The choice in force is the one whose value is there now; after a colour changed by hand, none is.
+The choice in force is the one whose value is there now. A colour changed in the common settings (a `base` or
+`frame` key) lies over the colour combination chosen: the combination still shows as chosen, and Clear changes
+takes the colour back.
 A language add-on can name a setting `theme-<theme id>-<key>` and a choice `theme-<theme id>-<key>-<choice name>`,
 `.` and spaces as `-`, lowercase: `theme-night-frame-shadow-size`, `theme-night-palette-day`.
 

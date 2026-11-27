@@ -724,5 +724,4 @@ theme-wada-sanzo-palette-155-jasper-red = 155 · 재스퍼 빨강
 theme-wada-sanzo-palette-265-old-rose = 265 · 올드 로즈
 theme-wada-sanzo-palette-289-lemon-yellow = 289 · 레몬 노랑
 theme-wada-sanzo-palette-341-cossack-green = 341 · 코사크 초록
-theme-wada-sanzo-frame-shadow-size = 그림자
 doc-change-proposal = 변경 제안
