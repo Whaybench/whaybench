@@ -133,7 +133,8 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
         // again when its settings change.
         let switch: Rc<RefCell<String>> = Default::default();
         let keys_changed = Rc::new(Cell::new(true));
-        let line: Rc<RefCell<(Option<String>, Option<(String, String)>)>> = Default::default();
+        // The conversation whose name was last asked (with when its map and record last changed), and the answer.
+        let line: Rc<RefCell<(Option<(String, Vec<Option<std::time::SystemTime>>)>, Option<(String, String)>)>> = Default::default();
         // Who it goes to and what it is called: looked at when the conversations, the tabs, the projects or the input
         // method's settings change, as the system tells; "sent" stays its moment and goes by a timer of its own.
         let d0 = d.clone();
@@ -151,18 +152,28 @@ pub fn build(win: &gtk::ApplicationWindow, d: Data) {
             // Just sent: "sent" for its moment, and the name asked again after (the first prompt may give one).
             if now - sent_at.get() < 1_500_000 { line.borrow_mut().0 = None; hint.set_text(wb_core::i18n::t("sent")); return; }
             let to = target();
-            // A conversation's name can take Claude Code's answer (a process): asked off this thread, once for each
-            // conversation the field is empty for, and the line written again when it comes.
-            let want = match &to { Some(To::Session(s)) if view.buffer().char_count() == 0 => Some(s.clone()), _ => None };
+            // A conversation's name can take Claude Code's answer (a process): asked off this thread, for the
+            // conversation the field is empty for, again when its map or record changes (a name given late in the
+            // turn), and the line written again when it comes.
+            let want = match &to {
+                Some(To::Session(s)) if view.buffer().char_count() == 0 => {
+                    let root = wb_core::roots::for_session(&d, s).root;
+                    let when = |f: std::path::PathBuf| std::fs::metadata(f).and_then(|m| m.modified()).ok();
+                    Some((s.clone(), vec![when(root.join(format!("{s}.json"))), when(root.join("sessions").join(format!("{s}.json")))]))
+                }
+                _ => None,
+            };
             if want.is_none() { line.borrow_mut().0 = None; }
-            if let Some(s) = want.clone().filter(|w| line.borrow().0.as_ref() != Some(w)) {
-                line.borrow_mut().0 = Some(s.clone());
+            if let Some(w) = want.filter(|w| line.borrow().0.as_ref() != Some(w)) {
+                let (s, asked) = (w.0.clone(), w.clone());
+                line.borrow_mut().0 = Some(w);
                 let (root, line2) = (d.root.clone(), line.clone());
                 glib::spawn_future_local(async move {
                     let s2 = s.clone();
                     if let Ok(text) = gtk::gio::spawn_blocking(move || wb_core::agents::session_line(&root, &s2)).await {
-                        // Only the one still wanted: an earlier conversation's answer coming last does not take its place.
-                        if line2.borrow().0.as_ref() == Some(&s) { line2.borrow_mut().1 = Some((s, text)); refresh_soon(0); }
+                        // Only the latest ask: an earlier one's answer (another conversation's, or this one's before its
+                        // map changed) coming last does not take its place; the name shown stays until then.
+                        if line2.borrow().0.as_ref() == Some(&asked) { line2.borrow_mut().1 = Some((s, text)); refresh_soon(0); }
                     }
                 });
             }

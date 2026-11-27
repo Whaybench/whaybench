@@ -32,7 +32,7 @@ fn node_schema(required: &[&str]) -> Value {
 
 /// The tool as an MCP client lists it. `inherit` is left out: only Whaybench's own callers use it.
 pub fn definition() -> Value {
-    json!({"name": NAME, "description": crate::i18n::ai("map-tool-description"), "inputSchema": {"type": "object", "properties": {
+    json!({"name": NAME, "description": crate::i18n::ai("map-tool-description"), "inputSchema": {"type": "object", "additionalProperties": false, "properties": {
         "nodes": {"type": "array", "items": {"type": "object", "required": ["id", "label"]}, "description": "the whole map: nodes with the same fields as in upsert"},
         "upsert": {"type": "array", "items": node_schema(&["id"])},
         "remove": {"type": "array", "items": {"type": "string"}},
@@ -45,6 +45,11 @@ pub fn definition() -> Value {
 /// One call: take over another session's map, apply the change, and answer with the map as text or a short line.
 /// An Err is a refused call, told back to the agent so it sends the change again, fixed.
 pub fn call(data: &Path, sid: &str, input: &Value) -> Result<String> {
+    // A field the tool does not have (a node's `label` sent outside `upsert`) is refused, not taken as no change.
+    const FIELDS: [&str; 7] = ["nodes", "upsert", "remove", "current", "title", "show", "inherit"];
+    if let Some(k) = input.as_object().into_iter().flatten().map(|(k, _)| k).find(|k| !FIELDS.contains(&k.as_str())) {
+        return Err(format!("Map not updated: no field `{k}` (a node's fields go in `upsert`). Send the change again, fixed.").into());
+    }
     if let Some(from) = input.get("inherit").and_then(Value::as_str).filter(|s| !s.is_empty()) {
         let source = map::view(data, map::safe_id(from)?)?;
         if source.get("nodes").is_none() { return Ok(format!("No map found for {from}.")); }
@@ -373,6 +378,7 @@ mod tests {
         assert_eq!(call(dir.path(), "s", &up).unwrap(), "◇ Topic [t]\n├ ● Which? [q]\n└ ✕ Old [x]");
         assert!(call(dir.path(), "s", &json!({"upsert": [{"id": "q", "state": "done"}]})).unwrap().starts_with("Map updated."));
         assert!(call(dir.path(), "s", &json!({"upsert": [{"id": "z", "parent": "nowhere", "label": "z"}]})).unwrap_err().to_string().starts_with("Map not updated"));
+        assert!(call(dir.path(), "s", &json!({"label": "z", "kind": "fact"})).unwrap_err().to_string().starts_with("Map not updated: no field"), "a node's field outside upsert");
         assert!(definition()["description"].as_str().unwrap().starts_with("Updates the conversation map"));
         call(dir.path(), "s2", &json!({"inherit": "s"})).unwrap();
         assert_eq!(map::command(dir.path(), "s2", None).unwrap()["nodes"].as_array().unwrap().len(), 3, "taken over");

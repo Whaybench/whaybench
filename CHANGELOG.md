@@ -7,6 +7,12 @@ names another step.
 
 ## [Unreleased]
 
+### Fixed
+- The line under the input field shows a conversation's new name as soon as its map or record changes, not only when
+  the field is first pointed at it or a prompt was just sent: a name the agent gives late in its first turn shows.
+- The conversation map tool refuses a call with a field it does not have (a node's `label` sent outside `upsert`)
+  instead of answering that the map was updated.
+
 ## [0.9.9] - 2026-11-27
 
 ### Changed
