@@ -11,10 +11,11 @@ A theme is an add-on: one folder, one theme. Delete the folder and the theme and
 - The default data folder is `~/.local/share/whaybench`.
 - `<theme id>` is the folder name: lowercase letters, digits and `-`. `default` is the name of the theme in the program and cannot be used.
 - A folder appears under `Settings → Theme`. Changes to the file show within 2 seconds.
-- If the theme in use is deleted, the program goes back to the default.
+- Before a theme is chosen, and when the theme in use is deleted, Light is in force; without it, the default the
+  program holds. The default is not in the list while any theme folder is there.
 - `name` is in English. A language add-on can translate it with the key `theme-<theme id>`.
 
-The quickest way is to copy `black/theme.json` and change it.
+The quickest way is to copy `flat/theme.json` and change it.
 
 ## File format
 

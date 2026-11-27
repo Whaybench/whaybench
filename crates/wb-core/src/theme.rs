@@ -13,6 +13,8 @@ mod declared;
 pub use declared::*;
 
 pub const DEFAULT: &str = "default";
+/// The theme in force before one is chosen, or when the chosen one's folder is gone (an add-on: then the default).
+pub const FIRST: &str = "light";
 const DEFAULT_TEXT: &str = include_str!("../../../config/themes/default.json");
 
 pub type Colour = [f32; 4];
@@ -408,7 +410,8 @@ pub fn list(data: &Data) -> Vec<(String, String)> {
         Some((id, name))
     }).collect();
     found.sort();
-    found.insert(0, (DEFAULT.to_string(), crate::i18n::t("default").to_string()));
+    // The default is not offered: Light's first colours are the same. Only when there is no theme folder at all.
+    if found.is_empty() { found.push((DEFAULT.to_string(), crate::i18n::t("default").to_string())); }
     found
 }
 
@@ -419,9 +422,9 @@ pub fn load_active(data: &Data) -> Theme {
     let chosen = fs::read_to_string(active_file(data)).ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v.get("active").and_then(Value::as_str).map(String::from))
-        .unwrap_or_else(|| DEFAULT.to_string());
-    // Its folder may be gone: then the default, which is always there.
-    Theme::load(data, &chosen).or_else(|| Theme::load(data, DEFAULT)).expect("the default theme is part of the program")
+        .unwrap_or_else(|| FIRST.to_string());
+    // Its folder may be gone: then the first theme, else the default, which is always there.
+    Theme::load(data, &chosen).or_else(|| Theme::load(data, FIRST)).or_else(|| Theme::load(data, DEFAULT)).expect("the default theme is part of the program")
 }
 
 pub fn save_active(data: &Data, name: &str) -> std::io::Result<()> {
@@ -455,17 +458,18 @@ mod tests {
         Data::new(dir)
     }
     #[test]
-    fn the_default_is_in_the_program_and_black_is_an_add_on() {
+    fn the_default_is_in_the_program_and_dark_is_an_add_on() {
         let d = scratch("seed");
         assert!(Theme::load(&d, DEFAULT).is_some_and(|t| t.gap > 0.0 && t.radius > 0.0 && t.border_width > 0.0));
-        assert!(Theme::load(&d, "black").is_none(), "nothing but the default before it is put there");
+        assert!(Theme::load(&d, "dark").is_none(), "nothing but the default before it is put there");
         crate::addons::install_bundled(&d);
-        let black = Theme::load(&d, "black").unwrap();
-        assert_ne!(black.surface_top, Theme::load(&d, DEFAULT).unwrap().surface_top);
-        assert_eq!(black.border_width, 2.0);
+        let dark = Theme::load(&d, "dark").unwrap();
+        assert_ne!(dark.surface_top, Theme::load(&d, DEFAULT).unwrap().surface_top);
+        assert_eq!(dark.border_width, 1.0);
         let ids: Vec<String> = list(&d).into_iter().map(|x| x.0).collect();
-        assert_eq!(ids, vec![DEFAULT, "black", "catppuccin-mocha", "flat", "fluent", "gruvbox-dark", "solarized-light", "wada-sanzo"]);
-        assert_eq!(list(&d)[1].1, "Black", "the name in the theme file");
+        assert_eq!(ids, vec!["dark", "flat", "light", "wada-sanzo"], "the default is not offered");
+        assert_eq!(list(&d)[0].1, "Dark", "the name in the theme file");
+        assert_eq!(load_active(&d).name, FIRST, "before a theme is chosen");
     }
     #[test]
     fn a_change_lies_over_the_theme_and_a_new_theme_keeps_it() {
@@ -490,15 +494,15 @@ mod tests {
     fn deleting_the_folder_removes_the_theme_and_it_stays_deleted() {
         let d = scratch("gone");
         crate::addons::install_bundled(&d);
-        save_active(&d, "black").unwrap();
-        fs::write(folder(&d, "black").join("settings.json"), r#"{"frame":{"gap":40}}"#).unwrap();
-        assert_eq!(load_active(&d).name, "black");
+        save_active(&d, "dark").unwrap();
+        fs::write(folder(&d, "dark").join("settings.json"), r#"{"frame":{"gap":40}}"#).unwrap();
+        assert_eq!(load_active(&d).name, "dark");
         assert_eq!(load_active(&d).gap, 40.0, "its settings lie over it");
-        fs::remove_dir_all(folder(&d, "black")).unwrap();
-        assert_eq!(load_active(&d).name, DEFAULT, "back to the default");
-        assert!(!list(&d).iter().any(|x| x.0 == "black"));
+        fs::remove_dir_all(folder(&d, "dark")).unwrap();
+        assert_eq!(load_active(&d).name, FIRST, "back to the first theme");
+        assert!(!list(&d).iter().any(|x| x.0 == "dark"));
         crate::addons::install_bundled(&d);
-        assert!(!folder(&d, "black").exists(), "a deleted one does not come back at the next start");
+        assert!(!folder(&d, "dark").exists(), "a deleted one does not come back at the next start");
     }
     #[test]
     fn someone_elses_theme_is_found_and_bad_ones_are_not() {
@@ -508,10 +512,13 @@ mod tests {
         put("broken", "{ not json");
         fs::create_dir_all(folder(&d, "empty")).unwrap();
         let ids: Vec<String> = list(&d).into_iter().map(|x| x.0).collect();
-        assert_eq!(ids, vec![DEFAULT, "sea"], "a name that is its folder's when it has none; unreadable ones are left out");
+        assert_eq!(ids, vec!["sea"], "a name that is its folder's when it has none; unreadable ones are left out");
         assert_eq!(Theme::load(&d, "sea").unwrap().panel, parse_hex("#001122").unwrap());
         assert!(Theme::load(&d, "broken").is_none());
         assert!(Theme::load(&d, "../sea").is_none(), "an id stays inside the folder");
+        fs::remove_dir_all(folder(&d, "sea")).unwrap();
+        assert_eq!(list(&d).into_iter().map(|x| x.0).collect::<Vec<_>>(), vec![DEFAULT], "with no theme at all, the default");
+        assert_eq!(load_active(&d).name, DEFAULT);
     }
     #[test]
     fn the_guide_names_every_key_the_program_reads() {

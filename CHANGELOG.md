@@ -7,6 +7,17 @@ names another step.
 
 ## [Unreleased]
 
+### Added
+- Light and Dark: two themes of one shape that uses every depth setting (shadow fall, raised panels behind,
+  border light and shade, title bar gloss, surface light and vignette), each with four well-known colour
+  combinations to choose from: Catppuccin Latte, Solarized Light, Gruvbox Light, Rosé Pine Dawn; Dracula, Catppuccin
+  Mocha, Gruvbox Dark, Nord. They take the place of Black, Catppuccin Mocha, Gruvbox Dark, Solarized Light and Fluent.
+
+### Changed
+- Flat has Fluent's colours and a thinner title bar.
+- The theme list no longer offers the default (Light's first colours are the same); Light is in force before a
+  theme is chosen and when the chosen one is deleted.
+
 ## [0.9.11] - 2026-11-28
 
 ### Added

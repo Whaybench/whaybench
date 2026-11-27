@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::{log as record, paths::Data};
 
 /// The add-ons the program brings: where, file, content.
-const BUNDLED: [(&str, &str, &str); 21] = [
+const BUNDLED: [(&str, &str, &str); 18] = [
     ("languages/ko", "messages.ftl", include_str!("../../../addons/languages/ko/messages.ftl")),
     ("languages/ko", "language.json", include_str!("../../../addons/languages/ko/language.json")),
     ("map-styles/ibis", "style.json", include_str!("../../../addons/map-styles/ibis/style.json")),
@@ -15,12 +15,9 @@ const BUNDLED: [(&str, &str, &str); 21] = [
     ("map-styles/timeline", "style.json", include_str!("../../../addons/map-styles/timeline/style.json")),
     ("map-styles/focus", "style.json", include_str!("../../../addons/map-styles/focus/style.json")),
     ("map-styles/kanban", "style.json", include_str!("../../../addons/map-styles/kanban/style.json")),
-    ("themes/black", "theme.json", include_str!("../../../addons/themes/black/theme.json")),
     ("themes/flat", "theme.json", include_str!("../../../addons/themes/flat/theme.json")),
-    ("themes/fluent", "theme.json", include_str!("../../../addons/themes/fluent/theme.json")),
-    ("themes/catppuccin-mocha", "theme.json", include_str!("../../../addons/themes/catppuccin-mocha/theme.json")),
-    ("themes/gruvbox-dark", "theme.json", include_str!("../../../addons/themes/gruvbox-dark/theme.json")),
-    ("themes/solarized-light", "theme.json", include_str!("../../../addons/themes/solarized-light/theme.json")),
+    ("themes/light", "theme.json", include_str!("../../../addons/themes/light/theme.json")),
+    ("themes/dark", "theme.json", include_str!("../../../addons/themes/dark/theme.json")),
     ("themes/wada-sanzo", "theme.json", include_str!("../../../addons/themes/wada-sanzo/theme.json")),
     ("project-docs/wbs", "WBS.md", include_str!("../../../addons/project-docs/wbs/WBS.md")),
     ("project-docs/change-proposal", "Change proposal.md", include_str!("../../../addons/project-docs/change-proposal/Change proposal.md")),
@@ -97,17 +94,17 @@ mod tests {
         install_bundled(&d);
         assert!(!dir.join("addons/project-docs/wbs").exists());
         // An older version is replaced; what the program wrote beside it stays.
-        fs::write(dir.join("addons/themes/black/theme.json"), "old").unwrap();
-        fs::write(dir.join("addons/themes/black/settings.json"), "{}").unwrap();
+        fs::write(dir.join("addons/themes/dark/theme.json"), "old").unwrap();
+        fs::write(dir.join("addons/themes/dark/settings.json"), "{}").unwrap();
         install_bundled(&d);
-        assert_ne!(fs::read_to_string(dir.join("addons/themes/black/theme.json")).unwrap(), "old");
-        assert!(dir.join("addons/themes/black/settings.json").exists());
+        assert_ne!(fs::read_to_string(dir.join("addons/themes/dark/theme.json")).unwrap(), "old");
+        assert!(dir.join("addons/themes/dark/settings.json").exists());
         // A file a newer version no longer brings goes; the person's own beside it stays.
         fs::write(dir.join("addons/agents/codex/.bundled.json"), r#"["agent.json","mcp.toml"]"#).unwrap();
         fs::write(dir.join("addons/agents/codex/mcp.toml"), "old").unwrap();
         install_bundled(&d);
         assert!(!dir.join("addons/agents/codex/mcp.toml").exists());
-        assert!(dir.join("addons/agents/codex/agent.json").exists() && dir.join("addons/themes/black/settings.json").exists());
+        assert!(dir.join("addons/agents/codex/agent.json").exists() && dir.join("addons/themes/dark/settings.json").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }
