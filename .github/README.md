@@ -4,7 +4,7 @@
 
 <p align="center"><b>Long conversations with your coding agent, without losing the thread.</b></p>
 
-<p align="center">Claude Code (and Codex CLI, experimental) in one workspace that remembers what was decided,<br>
+<p align="center">Claude Code and Codex CLI in one workspace that remembers what was decided,<br>
 which session did what, and everything the agent showed you.</p>
 
 <p align="center">
@@ -101,7 +101,7 @@ Press one button to save its state, and go back to it when something goes wrong.
 - [Get started: a first conversation in 15 minutes](/docs/getting-started.md)
 - [Documentation](/docs/README.md)
 - [About Whaybench: what it does, your data, FAQ](/README.md)
-- [Using Codex CLI (experimental)](/docs/guide/agents-and-add-ons.md)
+- [Using Codex CLI](/docs/guide/agents-and-add-ons.md)
 - [Report a bug or suggest an idea](https://github.com/Whaybench/whaybench/issues)
 - [Contributing](/AGENTS.md)
 

@@ -1,7 +1,7 @@
 <h1 align="center">Whaybench</h1>
 
 <p align="center"><b>Keep the thread of long conversations with your coding agent.</b><br>
-Claude Code (Codex CLI experimental) with its conversation map, sessions, answers and everything it shows,<br>
+Claude Code and Codex CLI with their conversation map, sessions, answers and everything they show,<br>
 side by side in one window.</p>
 
 <p align="center">
@@ -136,7 +136,7 @@ Themes, languages, map styles and document templates are folders. English and Ko
 
 ## Codex CLI
 
-Experimental. Open a Codex conversation from the menu (**Sessions → New conversation → Codex**) and trust its hooks once
+Open a Codex conversation from the menu (**Sessions → New conversation → Codex**) and trust its hooks once
 with `/hooks`. See [Agents and add-ons](docs/guide/agents-and-add-ons.md).
 
 ## Build from source
