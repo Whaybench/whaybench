@@ -159,7 +159,7 @@ project folder. If Whaybench cannot pause the running container, the save fails.
 
 Whaybench keeps the latest 30 snapshots and deletes older ones as you save. It needs no root for this. Where the
 file system is mounted with the btrfs option `user_subvol_rm_allowed` (the Windows setup sets it), a snapshot goes at
-once; without it, Whaybench empties it file by file, which takes longer.
+once; without it, Whaybench empties it file by file, which takes longer, so a save can take minutes.
 
 ## Restore a snapshot
 

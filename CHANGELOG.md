@@ -10,11 +10,15 @@ names another step.
 ### Added
 - `whaybench-project delete ID` deletes a closed Briefsafe project for good: its folder, its snapshots and its vault
   key. Without `--confirm CODE` it deletes nothing and says what would go, with the code to confirm with, so the agent
-  tells the person first. A delete stopped part way is finished by running it again; a folder that is a link is refused.
+  tells the person first. A delete stopped part way goes on when run again; a folder that is a link is refused.
 
 ### Changed
-- Old snapshots are deleted without root: at once with the btrfs mount option `user_subvol_rm_allowed`, else renamed off
-  the list, made writable and emptied file by file. Pruning runs after the project's container is unpaused.
+- Old snapshots are deleted without root: at once with the btrfs mount option `user_subvol_rm_allowed`, else made
+  writable (off the list at once) and emptied file by file. Pruning runs after the project's container is unpaused, and
+  the project panel waits up to 30 minutes for a save. Half-deleted snapshots are finished first, and at most three
+  are deleted a save.
+- `restore` refuses while something is mounted inside the project folder (a network share, a USB disk), as `delete`
+  does: deleting the old folder file by file would reach its files.
 
 ## [0.9.10] - 2026-11-27
 

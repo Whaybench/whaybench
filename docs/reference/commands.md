@@ -144,8 +144,8 @@ Use `--session ID` after the command to choose the session for a document workin
 | `move ID PARENT` / `move ID -` | Change a classic project’s parent or move it to the top level. |
 | `convert ID --folder DIR [--from SRC] [--encrypt]` | Move a standalone classic project to Briefsafe. Add `--encrypt` for encryption. |
 | `open ID [--recovery]` / `close ID` | Open a Briefsafe project with its container, or close it. `--recovery` waits for the recovery key on stdin: type it there, not on the command line. |
-| `snapshot ID` / `snapshots ID` | Save or list snapshots. Saving needs a Btrfs subvolume. |
-| `restore ID SNAPSHOT` | Restore the whole folder and save its current state first. Close the project before restoring. |
+| `snapshot ID` / `snapshots ID` | Save or list snapshots. Saving needs a Btrfs subvolume, and deleting old snapshots after it can take minutes. |
+| `restore ID SNAPSHOT` | Restore the whole folder and save its current state first. Close the project before restoring. Deleting old snapshots after it can take minutes. |
 | `forget ID` | Remove a closed Briefsafe project from the list. Its folder stays. |
 | `delete ID [--confirm CODE]` | Delete a closed Briefsafe project for good: its folder, snapshots and vault key. Without `--confirm` it deletes nothing, says what would go and gives the code to confirm with. It can take minutes. Run again, it finishes a delete that stopped part way. |
 | `map ID` / `map-put ID [FILE]` | Print the project map or update it from JSON. Omit `FILE` or use `-` for stdin. |

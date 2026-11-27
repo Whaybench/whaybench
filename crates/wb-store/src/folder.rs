@@ -14,6 +14,9 @@ use crate::{Res, now_ms};
 /// Snapshots kept per project; the oldest go first. Each is whole, not a step on another, so any can go.
 const SNAPSHOT_LIMIT: usize = 30;
 
+/// Old snapshots deleted at most in one save (file by file each can take minutes).
+const PRUNE_AT_ONCE: usize = 3;
+
 /// The inode of every btrfs subvolume's top directory.
 const SUBVOLUME_INODE: u64 = 256;
 
@@ -74,14 +77,31 @@ pub fn discard(dir: &Path, subvolume: bool) -> Res<()> {
     wipe(dir)
 }
 
-/// Removes a folder file by file, its read-only folders (Go's module cache) made writable first; links are not followed.
+/// Removes a folder file by file, its read-only folders made writable first; links are not followed.
 fn wipe(dir: &Path) -> Res<()> {
-    let _ = run("chmod", &["-R".as_ref(), "u+w".as_ref(), dir.as_os_str()]);
+    writable(dir);
     fs::remove_dir_all(dir).map_err(|e| e.to_string())
 }
 
-/// What is being deleted is first renamed to this ending: never listed or restored half emptied, finished by the next try.
-const DELETING: &str = ".deleting";
+/// Folders the owner cannot write, read or enter (Go's module cache, a test's mode 000) opened up, so what is in them
+/// can be deleted; only those are touched. One by one (`;`), so each is opened before find goes into it.
+fn writable(dir: &Path) {
+    let _ = run("find", &[dir.as_os_str(), "-type".as_ref(), "d".as_ref(), "!".as_ref(), "-perm".as_ref(), "-u=rwx".as_ref(), "-exec".as_ref(), "chmod".as_ref(), "u+rwx".as_ref(), "{}".as_ref(), ";".as_ref()]);
+}
+
+/// Empties a project folder or a snapshot but for its marker: stopped part way, what is left still says whose it is.
+fn empty_but_marker(dir: &Path) -> Res<()> {
+    writable(dir);
+    let data = dir.join(wb_core::roots::PROJECT_DATA);
+    let gone = |p: &Path| if fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()) { fs::remove_dir_all(p) } else { fs::remove_file(p) };
+    for e in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        if e.path() != data { gone(&e.path()).map_err(|x| format!("{}: {x}", e.path().display()))?; }
+    }
+    for e in fs::read_dir(&data).map_err(|e| e.to_string())?.flatten() {
+        if e.file_name() != wb_core::roots::MARKER { gone(&e.path()).map_err(|x| format!("{}: {x}", e.path().display()))?; }
+    }
+    Ok(())
+}
 
 /// The project a folder (or a snapshot of it) belongs to: its data root's marker (the id and when it was made).
 fn owner(dir: &Path) -> Option<serde_json::Value> {
@@ -116,16 +136,17 @@ pub fn last_snapshot(dir: &Path) -> Option<i64> {
 /// project (one left beside a folder of the same name by an earlier project is not this one's to restore or prune).
 pub fn snapshots(dir: &Path) -> Vec<String> {
     // A folder of no project has no snapshots of its own to tell apart.
-    owner(dir).map(|mine| snapshots_of(dir, &mine)).unwrap_or_default()
+    owner(dir).map(|mine| numbered(dir, &mine, true)).unwrap_or_default()
 }
 
-/// The snapshots beside a folder that are of the project `mine` (its id and made); only read-only ones are snapshots.
-fn snapshots_of(dir: &Path, mine: &serde_json::Value) -> Vec<String> {
+/// Subvolumes with a number for a name beside a folder, of the project `mine` (its id and made): read-only ones are
+/// its snapshots, writable ones snapshots whose delete stopped part way (made writable is where a delete begins).
+fn numbered(dir: &Path, mine: &serde_json::Value, ro: bool) -> Vec<String> {
     let at = snapshot_dir(dir);
     if !fs::symlink_metadata(&at).is_ok_and(|m| m.is_dir()) { return Vec::new(); }
     let mut names: Vec<String> = fs::read_dir(&at).into_iter().flatten().flatten()
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| n.parse::<u64>().is_ok() && is_subvolume(&at.join(n)) && read_only(&at.join(n)) && owner(&at.join(n)).as_ref() == Some(mine)).collect();
+        .filter(|n| n.parse::<u64>().is_ok() && is_subvolume(&at.join(n)) && read_only(&at.join(n)) == ro && owner(&at.join(n)).as_ref() == Some(mine)).collect();
     names.sort_by_key(|n| n.parse::<u64>().unwrap_or(0));
     names
 }
@@ -139,9 +160,27 @@ pub fn snapshot(dir: &Path) -> Res<Taken> {
     Ok(Taken { name, warning: prune_old(dir) })
 }
 
-/// Keeps no more than 30 snapshots: what could not be deleted, said. Apart from `take`, so a project's container is
-/// paused only for the snapshot itself (deleting file by file can take minutes).
+/// Keeps no more than 30 snapshots, deletes those left half deleted: what could not be deleted, said. Apart from
+/// `take`, so a project's container is paused only for the snapshot itself (deleting file by file can take minutes).
 pub fn prune_old(dir: &Path) -> Option<String> { prune(dir, SNAPSHOT_LIMIT).err() }
+
+/// Deletes this project's snapshots whose delete stopped part way.
+fn left_over(dir: &Path) -> Res<()> {
+    let Some(mine) = owner(dir) else { return Ok(()) };
+    for name in numbered(dir, &mine, false) { delete_snapshot(&snapshot_dir(dir).join(&name)).map_err(|e| format!("snapshot {name} is left half deleted: {e}"))?; }
+    drop_empty(dir);
+    Ok(())
+}
+
+/// A delete stopped after the marker went leaves an empty writable subvolume no one can be told by: only an empty one
+/// goes (a folder is removed only when empty), so nothing of anyone's is lost.
+fn drop_empty(dir: &Path) {
+    let at = snapshot_dir(dir);
+    for e in fs::read_dir(&at).into_iter().flatten().flatten() {
+        let p = e.path();
+        if e.file_name().to_str().is_some_and(|n| n.parse::<u64>().is_ok()) && is_subvolume(&p) && !read_only(&p) { let _ = fs::remove_dir(&p); }
+    }
+}
 
 pub fn take(dir: &Path) -> Res<String> {
     if !is_subvolume(dir) { return Err(format!("no snapshot: {} is not a btrfs subvolume", dir.display())); }
@@ -159,23 +198,17 @@ pub fn take(dir: &Path) -> Res<String> {
     Ok(name)
 }
 
-/// A read-only snapshot is made writable first (its owner may), then deleted: at once where the file system is mounted
-/// `user_subvol_rm_allowed`, else renamed off the list and emptied like a folder (Linux 4.18 on), which needs no root,
-/// only more time.
+/// Deletes a snapshot. Made writable first: that takes it off the list and out of restores at once (only read-only
+/// ones are snapshots), and it is never made read-only again, half emptied. Then at once where the file system is
+/// mounted `user_subvol_rm_allowed`, else emptied like a folder, its marker last (Linux 4.18 on: no root, only more
+/// time). Forced, as one received from another disk (`btrfs receive`) needs.
 fn delete_snapshot(path: &Path) -> Res<()> {
-    btrfs(&["property".as_ref(), "set".as_ref(), "-ts".as_ref(), path.as_os_str(), "ro".as_ref(), "false".as_ref()])?;
+    let ro_off = |force: &[&OsStr]| btrfs(&[&["property".as_ref(), "set".as_ref()], force, &["-ts".as_ref(), path.as_os_str(), "ro".as_ref(), "false".as_ref()]].concat());
+    // btrfs-progs before 5.14.2 has no -f: then without it.
+    ro_off(&["-f".as_ref()]).or_else(|_| ro_off(&[]))?;
     if btrfs(&["subvolume".as_ref(), "delete".as_ref(), path.as_os_str()]).is_ok() { return Ok(()); }
-    let aside = PathBuf::from(format!("{}{DELETING}", path.display()));
-    rename_new(path, &aside)?;
-    wipe(&aside)
-}
-
-/// Snapshots left half deleted (a try stopped or killed part way) are deleted now.
-fn sweep(dir: &Path) -> Res<()> {
-    for e in fs::read_dir(snapshot_dir(dir)).into_iter().flatten().flatten() {
-        if e.file_name().to_string_lossy().ends_with(DELETING) { wipe(&e.path()).map_err(|x| format!("{}: {x}", e.path().display()))?; }
-    }
-    Ok(())
+    empty_but_marker(path)?;
+    fs::remove_dir_all(path).map_err(|e| e.to_string())
 }
 
 /// The folder's size as `du -sh` says it (snapshots apart), for the person to weigh before a delete. `du` fails on
@@ -185,45 +218,65 @@ pub fn size(dir: &Path) -> String {
         .and_then(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().next().map(String::from)).unwrap_or_default()
 }
 
-/// Where a project folder rests while it is deleted (beside it, hidden).
-pub fn deleting_dir(dir: &Path) -> PathBuf {
-    let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    dir.with_file_name(format!(".{name}{DELETING}"))
+/// What is mounted inside a folder (a network share, a USB disk): emptying the folder file by file would go into it
+/// and delete what is not the project's. From `/proc/self/mounts`, read as bytes (a path need not be UTF-8), whose
+/// spaces and the like are octal (`\040`). Not read: an error, never taken for nothing mounted.
+pub fn mounts_inside(dir: &Path) -> Res<Vec<String>> {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let table = fs::read("/proc/self/mounts").map_err(|e| format!("cannot read what is mounted (/proc/self/mounts): {e}"))?;
+    Ok(table.split(|&b| b == b'\n').filter_map(|l| l.split(|&b| b == b' ').nth(1)).map(|m| PathBuf::from(OsStr::from_bytes(&unescape_octal(m))))
+        .filter(|m| m != &dir && m.starts_with(&dir)).map(|m| m.display().to_string()).collect())
 }
 
-/// Deletes a project folder and its snapshots for good (the person confirmed). The folder is moved aside first, so a
-/// try stopped part way is finished by `finish_delete` with the project's id and made.
+fn unescape_octal(b: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        let code = (b[i] == b'\\').then(|| b.get(i + 1..i + 4)).flatten().and_then(|d| std::str::from_utf8(d).ok()).and_then(|d| u8::from_str_radix(d, 8).ok());
+        if let Some(n) = code { out.push(n); i += 4; } else { out.push(b[i]); i += 1; }
+    }
+    out
+}
+
+/// Refused when something is mounted inside the folder.
+fn none_mounted(dir: &Path) -> Res<()> {
+    let mounted = mounts_inside(dir)?;
+    if mounted.is_empty() { Ok(()) } else { Err(format!("nothing changed: something is mounted inside {} ({}); unmount it first", dir.display(), mounted.join(", "))) }
+}
+
+/// Deletes a project's snapshots and empties its folder but for its marker (the person confirmed). Stopped part way,
+/// the same call goes on from there; `remove_rest` then takes the marker and the folder.
 pub fn delete_all(dir: &Path) -> Res<()> {
     // Deleting a link would leave the data where it points.
     if fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_symlink()) { return Err(format!("{} is a link: delete the folder it points to, not the link", dir.display())); }
+    none_mounted(dir)?;
     let mine = owner(dir).ok_or_else(|| format!("{} holds no project's data", dir.display()))?;
-    rename_new(dir, &deleting_dir(dir))?;
-    finish_delete(dir, &mine)
-}
-
-/// What a delete left: the project's snapshots (`mine`: its marker's id and made), those half deleted, the folder
-/// moved aside.
-pub fn finish_delete(dir: &Path, mine: &serde_json::Value) -> Res<()> {
-    for name in &snapshots_of(dir, mine) {
-        delete_snapshot(&snapshot_dir(dir).join(name)).map_err(|e| format!("snapshot {name} is left: {e}"))?;
+    for name in numbered(dir, &mine, false).into_iter().chain(numbered(dir, &mine, true)) {
+        delete_snapshot(&snapshot_dir(dir).join(&name)).map_err(|e| format!("snapshot {name} is left: {e}"))?;
     }
-    sweep(dir)?;
+    drop_empty(dir);
     // Only when empty: snapshots of an earlier project of the same folder name are not this one's.
     let _ = fs::remove_dir(snapshot_dir(dir));
-    let aside = deleting_dir(dir);
-    if fs::symlink_metadata(&aside).is_err() { return Ok(()); }
-    discard(&aside, is_subvolume(&aside)).map_err(|e| format!("{} is left half deleted: {e}", aside.display()))
+    empty_but_marker(dir)
 }
 
+/// The marker and the emptied folder, last.
+pub fn remove_rest(dir: &Path) -> Res<()> { discard(dir, is_subvolume(dir)) }
+
 /// Deletes the oldest snapshots past `limit`. Answers the names deleted; an error names those left.
+/// Those left half deleted first: while one cannot be deleted no other is begun (begun, a snapshot is off the list for
+/// good), so whatever stops it costs one snapshot, not one a save. At most 3 a time: a pile from before (more than 30)
+/// goes down over saves, not in one long one.
 fn prune(dir: &Path, limit: usize) -> Res<Vec<String>> {
-    sweep(dir)?;
+    left_over(dir)?;
     let all = snapshots(dir);
     let extra = &all[..all.len().saturating_sub(limit)];
+    let extra = &extra[..extra.len().min(PRUNE_AT_ONCE)];
     if extra.is_empty() { return Ok(Vec::new()); }
     let mut gone = Vec::new();
     for name in extra {
-        delete_snapshot(&snapshot_dir(dir).join(name)).map_err(|e| format!("snapshot {name} kept: {e}"))?;
+        delete_snapshot(&snapshot_dir(dir).join(name)).map_err(|e| format!("snapshot {name} is left half deleted: {e}"))?;
         gone.push(name.clone());
     }
     Ok(gone)
@@ -262,6 +315,8 @@ fn restore_keeping(dir: &Path, name: &str, limit: usize) -> Res<Restored> {
         return Err(format!("programs work in the project folder (process ids {using}): stop them, then restore from outside the folder"));
     }
     if let Some(inner) = nested_subvolume(dir)? { return Err(format!("a subvolume is inside the project folder ({inner}): a snapshot does not hold its contents, so it is not restored")); }
+    // The old folder is deleted after the swap: file by file it would go into what is mounted there.
+    none_mounted(dir)?;
     // Pruned only after: at the limit, the snapshot to go back to can be the oldest.
     let before = take(dir)?;
     let folder = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -310,6 +365,16 @@ mod tests {
     }
 
     #[test]
+    fn mounts_inside_a_folder_are_found() {
+        // /proc itself is a mount inside /, not / itself.
+        assert!(mounts_inside(Path::new("/")).unwrap().iter().any(|m| m == "/proc"));
+        assert!(!mounts_inside(Path::new("/proc")).unwrap().iter().any(|m| m == "/proc"), "the folder itself is not inside");
+        // A space as octal, and bytes that are not UTF-8 kept as they are.
+        assert_eq!(unescape_octal(b"/srv/a\\040b/\xff"), b"/srv/a b/\xff");
+        assert!(none_mounted(Path::new("/")).is_err() && none_mounted(Path::new("/proc/self/fd")).is_ok());
+    }
+
+    #[test]
     fn a_deleted_folder_goes_with_its_snapshots_only() {
         let root = place("delete");
         let dir = root.join("proj");
@@ -320,14 +385,21 @@ mod tests {
         fs::create_dir_all(dir.join("mod/x")).unwrap();
         fs::write(dir.join("mod/x/f"), "a").unwrap();
         run("chmod", &["-R".as_ref(), "a-w".as_ref(), dir.join("mod").as_os_str()]).unwrap();
+
         if subvolume {
             snapshot(&dir).unwrap();
             snapshot(&dir).unwrap();
             assert_eq!(snapshots(&dir).len(), 2);
-            // Pruned file by file where the mount option is not, read-only folder and all.
+            // Pruned file by file where the mount option is not, read-only folder and all; 3 at most a time.
+            for _ in 0..3 { snapshot(&dir).unwrap(); }
+            assert_eq!(snapshots(&dir).len(), 5);
+            assert_eq!(prune(&dir, 1).unwrap().len(), 3);
             assert_eq!(prune(&dir, 1).unwrap().len(), 1);
-            // Another project's leftover beside it stays.
-            fs::write(snapshot_dir(&dir).join("notes"), "keep").unwrap();
+            // Another project's snapshot beside it stays, read-only or writable (a subvolume made writable here).
+            let other = snapshot_dir(&dir).join("7");
+            btrfs(&["subvolume".as_ref(), "create".as_ref(), other.as_os_str()]).unwrap();
+            fs::create_dir_all(other.join(".whaybench")).unwrap();
+            fs::write(other.join(".whaybench/briefsafe.json"), r#"{"id":"t","made":"2"}"#).unwrap();
         }
         assert!(!size(&dir).is_empty());
         // A link is refused, the folder it points to untouched.
@@ -335,14 +407,39 @@ mod tests {
         std::os::unix::fs::symlink(&dir, &link).unwrap();
         assert!(delete_all(&link).is_err());
         assert!(dir.exists());
+        if subvolume {
+            // A delete stopped part way: one snapshot made writable (off the list) and half emptied.
+            let half = snapshot_dir(&dir).join(&snapshots(&dir)[0]);
+            btrfs(&["property".as_ref(), "set".as_ref(), "-ts".as_ref(), half.as_os_str(), "ro".as_ref(), "false".as_ref()]).unwrap();
+            run("chmod", &["-R".as_ref(), "u+w".as_ref(), half.join("mod").as_os_str()]).unwrap();
+            fs::remove_dir_all(half.join("mod")).unwrap();
+            assert!(snapshots(&dir).is_empty(), "never listed or restored half emptied");
+            assert_eq!(numbered(&dir, &owner(&dir).unwrap(), false).len(), 1);
+            // The next save deletes it.
+            snapshot(&dir).unwrap();
+            assert!(numbered(&dir, &owner(&dir).unwrap(), false).is_empty() && !half.exists());
+            // An empty one left by a delete stopped after its marker went: the delete takes it.
+            btrfs(&["subvolume".as_ref(), "create".as_ref(), snapshot_dir(&dir).join("8").as_os_str()]).unwrap();
+        }
+        // One the owner cannot even read or enter (no snapshot is taken of such a folder: find cannot look in it).
+        fs::create_dir_all(dir.join("shut/in")).unwrap();
+        fs::write(dir.join("shut/in/f"), "a").unwrap();
+        run("chmod", &["000".as_ref(), dir.join("shut").as_os_str()]).unwrap();
+        // Emptied but for the marker; a try stopped part way (something left) goes on, then the rest goes.
         delete_all(&dir).unwrap();
-        assert!(!dir.exists() && !deleting_dir(&dir).exists());
-        if subvolume { assert!(snapshot_dir(&dir).join("notes").exists()); }
-        // A delete stopped part way (the folder moved aside, a snapshot half deleted) is finished by the next one.
-        fs::create_dir_all(deleting_dir(&dir).join("a")).unwrap();
-        fs::create_dir_all(snapshot_dir(&dir).join(format!("5{DELETING}"))).unwrap();
-        finish_delete(&dir, &serde_json::json!({"id": "t", "made": "1"})).unwrap();
-        assert!(!deleting_dir(&dir).exists() && !snapshot_dir(&dir).join(format!("5{DELETING}")).exists());
+        assert!(owner(&dir).is_some() && fs::read_dir(&dir).unwrap().count() == 1 && fs::read_dir(dir.join(".whaybench")).unwrap().count() == 1);
+        fs::write(dir.join("left.txt"), "x").unwrap();
+        fs::write(dir.join(".whaybench/left"), "x").unwrap();
+        delete_all(&dir).unwrap();
+        assert!(fs::read_dir(&dir).unwrap().count() == 1 && fs::read_dir(dir.join(".whaybench")).unwrap().count() == 1);
+        let mine = owner(&dir).unwrap();
+        assert!(numbered(&dir, &mine, true).is_empty() && numbered(&dir, &mine, false).is_empty(), "no snapshot of it left");
+        remove_rest(&dir).unwrap();
+        assert!(!dir.exists());
+        if subvolume {
+            assert!(snapshot_dir(&dir).join("7/.whaybench/briefsafe.json").exists() && !snapshot_dir(&dir).join("8").exists());
+            discard(&snapshot_dir(&dir).join("7"), true).unwrap();
+        }
         fs::remove_dir_all(&root).unwrap();
     }
 

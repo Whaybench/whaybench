@@ -84,7 +84,8 @@ fn for_person(said: &str) -> String {
 pub(super) fn poll_job(p: &mut P) -> bool {
     if p.job.is_none() { next_close(p); }
     let Some(job) = p.job.as_mut() else { return false };
-    let limit = match job.kind.as_str() { "open" | "recover" => 600, "new" => 420, _ => 120 };
+    // A snapshot deletes old ones after it, file by file where the mount option is not: minutes on a big project.
+    let limit = match job.kind.as_str() { "open" | "recover" => 600, "new" => 420, "snapshot" => 1800, _ => 120 };
     let done = matches!(job.child.try_wait(), Ok(Some(_)));
     let late = !done && job.started.elapsed().as_secs() > limit;
     if !done && !late { return false; }

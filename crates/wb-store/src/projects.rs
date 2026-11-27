@@ -370,7 +370,8 @@ mod tests {
         wb_core::roots::remove_stub(&host.data, "mapped");
         assert!(host.create_in_folder("up", "Up", "", "", vec![], false, &format!("{folder}2"), None, false).is_err(), "the id is taken");
         assert!(host.create_in_folder("in", "In", "", "", vec![], false, &format!("{folder}/in"), None, false).is_err(), "not inside another");
-        // Snapshots of a test folder on btrfs are read-only: clean up the way the program prunes.
+        // Snapshots of a test folder on btrfs are read-only: made writable and deleted where the mount option allows;
+        // elsewhere what is left goes with the test data root below.
         let dir = Path::new(&folder);
         // Once each: a snapshot that cannot be deleted must not keep the test going round.
         for n in crate::folder::snapshots(dir) {

@@ -19,9 +19,12 @@ const HELP: &str = r#"Project store command. Only the AI writes projects, and on
                                                    make a project of the older kind a Briefsafe one: its records move
                                                    into the new folder's data; when the person asks
   whaybench-project open ID [--recovery] | close ID             let the host's programs see a Briefsafe project's data, or stop
-  whaybench-project snapshot ID | snapshots ID     take a snapshot of the project folder (30 kept) / list them
+  whaybench-project snapshot ID | snapshots ID     take a snapshot of the project folder (30 kept) / list them;
+                                                   deleting old ones can take minutes: give it a long time limit
   whaybench-project restore ID SNAPSHOT            put the folder back as it was; the state now is kept as a snapshot.
-                                                   Run it from outside the project folder, with nothing working in it
+                                                   Run it from outside the project folder, with nothing working in it.
+                                                   Deleting old snapshots after it can take minutes: give it a long
+                                                   time limit
   whaybench-project forget ID                      take a closed Briefsafe project off the list; its folder stays
   whaybench-project delete ID [--confirm CODE]     delete a closed Briefsafe project for good: its folder, snapshots,
                                                    vault key. Without --confirm it deletes nothing, says what would go
@@ -327,31 +330,43 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
         "delete" => {
             // For good, and only with the code the first run gives: that run shows what goes, for the person to agree.
             let code = opt(&mut rest, "--confirm");
+            // A delete stopped part way left the folder's marker: the same command goes on from there.
             let stub = stub_of(st, arg(&rest, 0)?)?;
-            // A delete stopped part way has moved the folder aside already: the next one finishes it.
-            let half = std::fs::symlink_metadata(&stub.folder).is_err() && std::fs::symlink_metadata(folder::deleting_dir(&stub.folder)).is_ok();
-            let stub = if half { stub } else { owned(st, &stub.id)? };
+            // Not deleted by itself: the folder may be on a disk not plugged in.
+            if std::fs::symlink_metadata(&stub.folder).is_err() { return Err(format!("{} is not there: if the folder is gone for good, take the project off the list with forget{}", stub.folder.display(), if stub.vault { format!(" and remove its vault key from the keyring ({})", wb_core::vault::key_name(&stub)) } else { String::new() })); }
+            if std::fs::symlink_metadata(&stub.folder).is_ok_and(|m| m.file_type().is_symlink()) { return Err(format!("{} is a link: delete the folder it points to, not the link", stub.folder.display())); }
+            let stub = owned(st, &stub.id)?;
+            // Said before the person is asked: emptying the folder would go into what is mounted there.
+            let mounted = folder::mounts_inside(&stub.folder)?;
+            if !mounted.is_empty() { return Err(format!("something is mounted inside {} ({}): unmount it first, then delete", stub.folder.display(), mounted.join(", "))); }
             let open = |s: &wb_core::roots::Stub| wb_core::container::running(s) || s.open() || (s.vault && wb_core::vault::mounted(s));
             if open(&stub) { return Err(format!("project {} is open: close it, then delete it", stub.id)); }
+            // A stub from before `made` was kept: its id.
+            let want = if stub.made.is_empty() { &stub.id } else { &stub.made };
             let Some(code) = code else {
-                let snaps = if half { 0 } else { folder::snapshots(&stub.folder).len() };
-                let size = folder::size(if half { folder::deleting_dir(&stub.folder) } else { stub.folder.clone() }.as_path());
+                let snaps = folder::snapshots(&stub.folder).len();
+                let size = folder::size(&stub.folder);
                 let shown = if size.is_empty() { String::new() } else { format!(" ({size})") };
-                out(json!({"deleted": false, "name": stub.name, "folder": stub.folder, "size": size, "snapshots": snaps, "encrypted": stub.vault, "confirm": stub.made,
-                    "tell the person": format!("Deleting project '{}' removes its folder {}{shown} with everything in it, {}{}. It cannot be undone. Ask them to look in the folder first for anything to keep and copy it elsewhere. Only when they then say yes, run: whaybench-project delete {} --confirm {} (it can take minutes: give it a long time limit).",
-                        stub.name, stub.folder.display(), if snaps == 1 { "its 1 snapshot".to_string() } else { format!("its {snaps} snapshots") }, if stub.vault { " and its vault key" } else { "" }, stub.id, stub.made)}));
+                out(json!({"deleted": false, "name": stub.name, "folder": stub.folder, "size": size, "snapshots": snaps, "encrypted": stub.vault, "confirm": want,
+                    "tell_the_person": format!("Deleting project '{}' removes its folder {}{shown} with everything in it, {}{}. It cannot be undone. Ask them to look in the folder first for anything to keep and copy it elsewhere. Only when they then say yes, run: whaybench-project delete {} --confirm {want} (it can take minutes: give it a long time limit).",
+                        stub.name, stub.folder.display(), if snaps == 1 { "its 1 snapshot".to_string() } else { format!("its {snaps} snapshots") }, if stub.vault { " and its vault key" } else { "" }, stub.id)}));
                 return Ok(0);
             };
-            if code != stub.made { return Err(format!("not the code for project {}: run delete {} without --confirm first, tell the person what it says, and confirm with the code it gives", stub.id, stub.id)); }
+            if &code != want { return Err(format!("not the code for project {}: run delete {} without --confirm first, tell the person what it says, and confirm with the code it gives", stub.id, stub.id)); }
             // The keyring open first: with the folder gone, a key left behind would only be found by hand.
             if stub.vault { keyring_open(&st.data)?; }
             // All of it under the project's lock (its lock files stay: another waiting on them must take the same one).
             let warning = wb_core::container::life(&stub, || {
                 if open(&stub) { return Err(format!("project {} is open: close it, then delete it", stub.id)); }
-                if half { folder::finish_delete(&stub.folder, &json!({"id": stub.id, "made": stub.made}))? } else { folder::delete_all(&stub.folder)? }
-                let warning = if stub.vault { wb_core::secret::delete(&wb_core::vault::key_name(&stub)).err().map(|e| format!("its vault key stays in the keyring ({}): {e}", wb_core::vault::key_name(&stub))) } else { None };
+                // Still this project's folder: another may have been put there while the keyring was asked.
+                if !stub.intact() { return Err(format!("nothing deleted: {} does not hold project {}'s data now", stub.folder.display(), stub.id)); }
+                folder::delete_all(&stub.folder)?;
+                let key = if stub.vault { wb_core::secret::delete(&wb_core::vault::key_name(&stub)).err().map(|e| format!("its vault key stays in the keyring ({}): {e}", wb_core::vault::key_name(&stub))) } else { None };
                 wb_core::roots::remove_stub(&st.data, &stub.id);
-                Ok(warning)
+                // Last, the marker that let a stopped delete go on: what stays is an empty folder, said.
+                let rest = folder::remove_rest(&stub.folder).err().map(|e| format!("{} is left, empty but for one file: {e}", stub.folder.display()));
+                let w: Vec<String> = [key, rest].into_iter().flatten().collect();
+                Ok((!w.is_empty()).then(|| w.join("; ")))
             })?;
             out(json!({"deleted": stub.id, "warning": warning}));
         }
