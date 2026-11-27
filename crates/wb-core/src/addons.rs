@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::{log as record, paths::Data};
 
 /// The add-ons the program brings: where, file, content.
-const BUNDLED: [(&str, &str, &str); 23] = [
+const BUNDLED: [(&str, &str, &str); 21] = [
     ("languages/ko", "messages.ftl", include_str!("../../../addons/languages/ko/messages.ftl")),
     ("languages/ko", "language.json", include_str!("../../../addons/languages/ko/language.json")),
     ("map-styles/ibis", "style.json", include_str!("../../../addons/map-styles/ibis/style.json")),
@@ -21,9 +21,7 @@ const BUNDLED: [(&str, &str, &str); 23] = [
     ("themes/catppuccin-mocha", "theme.json", include_str!("../../../addons/themes/catppuccin-mocha/theme.json")),
     ("themes/gruvbox-dark", "theme.json", include_str!("../../../addons/themes/gruvbox-dark/theme.json")),
     ("themes/solarized-light", "theme.json", include_str!("../../../addons/themes/solarized-light/theme.json")),
-    ("themes/wada-carmine", "theme.json", include_str!("../../../addons/themes/wada-carmine/theme.json")),
-    ("themes/wada-dream", "theme.json", include_str!("../../../addons/themes/wada-dream/theme.json")),
-    ("themes/wada-jasper", "theme.json", include_str!("../../../addons/themes/wada-jasper/theme.json")),
+    ("themes/wada-sanzo", "theme.json", include_str!("../../../addons/themes/wada-sanzo/theme.json")),
     ("project-docs/wbs", "WBS.md", include_str!("../../../addons/project-docs/wbs/WBS.md")),
     ("project-docs/change-proposal", "Change proposal.md", include_str!("../../../addons/project-docs/change-proposal/Change proposal.md")),
     ("agents/codex", "agent.json", include_str!("../../../addons/agents/codex/agent.json")),

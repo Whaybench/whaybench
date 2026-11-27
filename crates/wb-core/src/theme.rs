@@ -9,6 +9,9 @@ use std::{fs, path::{Path, PathBuf}};
 use serde_json::Value;
 use crate::{log as record, paths::Data};
 
+mod declared;
+pub use declared::*;
+
 pub const DEFAULT: &str = "default";
 const DEFAULT_TEXT: &str = include_str!("../../../config/themes/default.json");
 
@@ -126,42 +129,46 @@ pub struct Theme {
     /// Font of the conversation terminals and its size in points.
     pub terminal_font: String,
     pub terminal_size: f64,
+    /// The settings the theme offers for itself (`settings`), with their values in force.
+    pub declared: Vec<Declared>,
 }
 
 /// What the theme settings show for a key.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind { Colour, Number(f64, f64), Font, Joint }
 
-/// Every key the theme settings show, in groups: (group, part, key, kind). The format is in addons/themes/README.md.
+/// Every key the theme settings show, in groups: (group, part, key, kind), a group's colours after its other keys. The format
+/// is in addons/themes/README.md.
 pub const FIELDS: &[(&str, &str, &str, Kind)] = &[
     ("base", "base", "background", Kind::Colour), ("base", "base", "surface", Kind::Colour),
     ("base", "base", "accent", Kind::Colour), ("base", "base", "text", Kind::Colour),
     ("font", "base", "font_size", Kind::Number(6.0, 24.0)), ("font", "base", "font", Kind::Font),
     ("font", "base", "terminal_size", Kind::Number(6.0, 32.0)), ("font", "base", "terminal_font", Kind::Font),
-    ("font", "base", "title_size", Kind::Number(8.0, 32.0)), ("font", "base", "title_font", Kind::Font),
-    ("font", "base", "title_weight", Kind::Number(100.0, 900.0)), ("font", "base", "title_spacing", Kind::Number(0.0, 10.0)),
-    ("panel", "frame", "panel", Kind::Colour), ("panel", "frame", "radius", Kind::Number(0.0, 64.0)),
-    ("panel", "frame", "gap", Kind::Number(0.0, 64.0)), ("panel", "frame", "outer", Kind::Number(0.0, 64.0)),
-    ("panel", "frame", "pad", Kind::Number(0.0, 64.0)),
+    ("panel", "frame", "radius", Kind::Number(0.0, 64.0)), ("panel", "frame", "gap", Kind::Number(0.0, 64.0)),
+    ("panel", "frame", "outer", Kind::Number(0.0, 64.0)), ("panel", "frame", "pad", Kind::Number(0.0, 64.0)),
+    ("panel", "frame", "panel", Kind::Colour),
     ("opacity", "frame", "window_opacity", Kind::Number(0.0, 100.0)), ("opacity", "frame", "panel_opacity", Kind::Number(0.0, 100.0)),
     ("opacity", "frame", "back_opacity", Kind::Number(0.0, 100.0)), ("opacity", "frame", "glass_blur", Kind::Number(0.0, 64.0)),
-    ("depth", "frame", "shadow_size", Kind::Number(0.0, 64.0)), ("depth", "frame", "shadow", Kind::Colour),
-    ("depth", "frame", "shadow_drop", Kind::Number(0.0, 100.0)), ("depth", "frame", "back_lift", Kind::Number(0.0, 100.0)),
+    ("light", "frame", "shadow_size", Kind::Number(0.0, 64.0)), ("light", "frame", "shadow_drop", Kind::Number(0.0, 100.0)),
+    ("light", "frame", "back_lift", Kind::Number(0.0, 100.0)),
     ("light", "frame", "surface_light", Kind::Number(0.0, 100.0)), ("light", "frame", "panel_light", Kind::Number(0.0, 100.0)),
     ("light", "frame", "surface_vignette", Kind::Number(0.0, 100.0)), ("light", "frame", "panel_shade", Kind::Number(0.0, 100.0)),
-    ("bar", "frame", "front_top", Kind::Colour), ("bar", "frame", "front_bottom", Kind::Colour),
-    ("bar", "frame", "bar_top", Kind::Colour), ("bar", "frame", "bar_bottom", Kind::Colour),
+    ("light", "frame", "shadow", Kind::Colour),
+    ("bar", "base", "title_size", Kind::Number(8.0, 32.0)), ("bar", "base", "title_font", Kind::Font),
+    ("bar", "base", "title_weight", Kind::Number(100.0, 900.0)), ("bar", "base", "title_spacing", Kind::Number(0.0, 10.0)),
     ("bar", "frame", "bar_gloss", Kind::Number(0.0, 100.0)), ("bar", "frame", "bar_shine", Kind::Number(0.0, 100.0)),
-    ("bar", "frame", "bar_shade", Kind::Number(0.0, 100.0)), ("bar", "frame", "tab_front", Kind::Colour),
-    ("border", "frame", "border_width", Kind::Number(0.0, 64.0)), ("border", "frame", "front_border", Kind::Colour),
-    ("border", "frame", "border", Kind::Colour),
+    ("bar", "frame", "bar_shade", Kind::Number(0.0, 100.0)),
+    ("bar", "frame", "front_top", Kind::Colour), ("bar", "frame", "front_bottom", Kind::Colour),
+    ("bar", "frame", "bar_top", Kind::Colour), ("bar", "frame", "bar_bottom", Kind::Colour), ("bar", "frame", "tab_front", Kind::Colour),
+    ("border", "frame", "border_width", Kind::Number(0.0, 64.0)),
     ("border", "frame", "border_light", Kind::Number(0.0, 100.0)), ("border", "frame", "border_shade", Kind::Number(0.0, 100.0)),
+    ("border", "frame", "front_border", Kind::Colour), ("border", "frame", "border", Kind::Colour),
     ("surface", "frame", "surface_top", Kind::Colour), ("surface", "frame", "surface_bottom", Kind::Colour),
     ("joint", "frame", "joint_show", Kind::Joint), ("joint", "frame", "joint_width", Kind::Number(0.0, 64.0)),
     ("joint", "frame", "shared", Kind::Colour), ("joint", "frame", "wall", Kind::Colour), ("joint", "frame", "edge", Kind::Colour),
-    ("dock", "frame", "dock_dot", Kind::Colour), ("dock", "frame", "dock_dot_size", Kind::Number(4.0, 32.0)),
-    ("dock", "frame", "dock_ring", Kind::Colour), ("dock", "frame", "dock_ring_size", Kind::Number(16.0, 64.0)),
+    ("dock", "frame", "dock_dot_size", Kind::Number(4.0, 32.0)), ("dock", "frame", "dock_ring_size", Kind::Number(16.0, 64.0)),
     ("dock", "frame", "dock_refraction", Kind::Number(0.0, 100.0)),
+    ("dock", "frame", "dock_dot", Kind::Colour), ("dock", "frame", "dock_ring", Kind::Colour),
 ];
 
 fn parse_hex(text: &str) -> Option<Colour> {
@@ -268,6 +275,7 @@ impl Theme {
             title_spacing: size("title_spacing", 0.0..=10.0, 0.0),
             terminal_font: text_of("terminal_font", "monospace"),
             terminal_size: size("terminal_size", 6.0..=32.0, 12.0),
+            declared: Declared::parse(&v),
         })
     }
 
@@ -440,7 +448,7 @@ mod tests {
         assert!(contrast(soft, hex("#f4f6fa")) < contrast(hex("#4c4f69"), hex("#f4f6fa")), "still fainter than the front title");
         assert_eq!(soft_ink(hex("#777777"), hex("#ffffff"), hex("#888888")), hex("#777777"), "text below 4.5:1 is kept");
     }
-    fn scratch(tag: &str) -> Data {
+    pub(super) fn scratch(tag: &str) -> Data {
         let dir = std::env::temp_dir().join(format!("wb-theme-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
@@ -456,7 +464,7 @@ mod tests {
         assert_ne!(black.surface_top, Theme::load(&d, DEFAULT).unwrap().surface_top);
         assert_eq!(black.border_width, 2.0);
         let ids: Vec<String> = list(&d).into_iter().map(|x| x.0).collect();
-        assert_eq!(ids, vec![DEFAULT, "black", "catppuccin-mocha", "flat", "fluent", "gruvbox-dark", "solarized-light", "wada-carmine", "wada-dream", "wada-jasper"]);
+        assert_eq!(ids, vec![DEFAULT, "black", "catppuccin-mocha", "flat", "fluent", "gruvbox-dark", "solarized-light", "wada-sanzo"]);
         assert_eq!(list(&d)[1].1, "Black", "the name in the theme file");
     }
     #[test]

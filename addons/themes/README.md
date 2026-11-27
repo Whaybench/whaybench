@@ -41,6 +41,7 @@ A missing key takes the default in the tables below. Unknown keys are ignored. A
 | `palette` | name: colour | Colours to call by name below |
 | `base` | see below | The four base colours |
 | `frame` | see below | Colours and sizes of the frame |
+| `settings` | list | What the theme offers to set for itself, see below |
 
 A **colour** is a `palette` name, `#rrggbb`, or `#rrggbbaa` with transparency.
 
@@ -86,7 +87,7 @@ In screen pixels, from 0 to 64.
 | `dock_dot_size` | Diameter of the dot in the middle of a title bar that docks a panel | 10 |
 | `dock_ring_size` | Diameter of the five targets on each panel while one is docked | 48 |
 
-## `frame`: light and depth
+## `frame`: light and shadow
 
 In percent, from 0 to 100. At 0 (the default, but for `back_lift`) a theme stays flat.
 
@@ -146,6 +147,35 @@ In percent, from 0 to 100; 100 (the default) is opaque.
 | `edge` | The border about to be dragged | `#d20f39` |
 | `dock_dot` | The docking dot | `#e64553` |
 | `dock_ring` | The docking targets: soft circles, see-through toward their edge | `base.accent` at half |
+
+## `settings`: what the theme offers to set
+
+A theme can offer its own settings: they show under Settings → Theme while the theme is in force, before the common
+ones, and a change is kept in `settings.json` like any other. Each is a number the theme already has, or a choice
+among values the theme lists.
+
+```json
+"settings": [
+  { "key": "frame.shadow_size", "name": "Shadow", "min": 0, "max": 64, "unit": "px" },
+  { "key": "palette", "name": "Colour combination", "choices": [
+    { "name": "Night", "value": { "ink": "#e0def4", "line": "#eb6f92" } },
+    { "name": "Day", "value": { "ink": "#575279", "line": "#b4637a" } } ] }
+]
+```
+
+| Key | Value | Meaning |
+|---|---|---|
+| `key` | path | The number's place in this theme.json, under `base` or `frame`, such as `frame.shadow_size`; a key the theme does not have is not shown |
+| `name` | text | Its name in English |
+| `names` | language: text | Its name in other languages, by language code |
+| `min`, `max` | numbers | The range it can be set in |
+| `unit` | text | Shown after the name, up to 8 characters, such as `%` or `px` |
+| `group` | text | Settings next to each other with the same `group` are shown on one row (a new row when the rest of the row is too short): a picture and its strength, side by side |
+| `choices` | list | Instead of `min` and `max`: what can be chosen, each `{ "name": English name, "value": any value }`. The value is put at `key` whole: a text, a number, an object (with `null` for a part to take away), or `null`. `key` can then also be `palette`: a colour combination, the colours of every name |
+
+The choice in force is the one whose value is there now; after a colour changed by hand, none is.
+A language add-on can name a setting `theme-<theme id>-<key>` and a choice `theme-<theme id>-<key>-<choice name>`,
+`.` and spaces as `-`, lowercase: `theme-night-frame-shadow-size`, `theme-night-palette-day`.
 
 ## `settings.json`
 

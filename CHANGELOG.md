@@ -8,11 +8,18 @@ names another step.
 ## [Unreleased]
 
 ### Added
+- A theme can offer choices among its settings (`settings` in theme.json, `choices`), such as colour combinations
+  (`palette`); the theme's own settings show first under Settings → Theme.
+- Wada Sanzo: one theme with twelve colour combinations of Sanzo Wada's dictionary to choose from, in place of the
+  themes Wada Carmine, Wada Dream and Wada Jasper.
 - `whaybench-project delete ID` deletes a closed Briefsafe project for good: its folder, its snapshots and its vault
   key. Without `--confirm CODE` it deletes nothing and says what would go, with the code to confirm with, so the agent
   tells the person first. A delete stopped part way goes on when run again; a folder that is a link is refused.
 
 ### Changed
+- Theme settings: the title bar's font settings are in the Title bar group, light and shadow are one group, a group's
+  colours come after its other settings, and the groups are cards side by side with more room.
+- Theme settings: a card is moved by dragging its name to another place; where the cards are is kept.
 - Old snapshots are deleted without root: at once with the btrfs mount option `user_subvol_rm_allowed`, else made
   writable (off the list at once) and emptied file by file. Pruning runs after the project's container is unpaused, and
   the project panel waits up to 30 minutes for a save. Half-deleted snapshots are finished first, and at most three
