@@ -23,6 +23,10 @@ const HELP: &str = r#"Project store command. Only the AI writes projects, and on
   whaybench-project restore ID SNAPSHOT            put the folder back as it was; the state now is kept as a snapshot.
                                                    Run it from outside the project folder, with nothing working in it
   whaybench-project forget ID                      take a closed Briefsafe project off the list; its folder stays
+  whaybench-project delete ID [--confirm CODE]     delete a closed Briefsafe project for good: its folder, snapshots,
+                                                   vault key. Without --confirm it deletes nothing, says what would go
+                                                   and gives CODE: tell the person that, then --confirm CODE only after
+                                                   they say yes. It can take minutes: give it a long time limit
   whaybench-project move ID PARENT|-               put a project under another (- = top)
   whaybench-project for-cwd [DIR]                  project linked to a folder
   whaybench-project map ID                         the project map (JSON)
@@ -297,7 +301,11 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             // Its container held still meanwhile: one moment of every file, not files caught half written.
             let stub = owned(st, arg(&rest, 0)?)?;
             // In turn with open, close and restore: a restore must not lose the snapshot it goes back to.
-            let t = wb_core::container::life(&stub, || wb_core::container::paused(&stub, || folder::snapshot(&stub.folder)))?;
+            // Old ones deleted after the container runs again: file by file that can take minutes.
+            let t = wb_core::container::life(&stub, || {
+                let name = wb_core::container::paused(&stub, || folder::take(&stub.folder))?;
+                Ok(folder::Taken { name, warning: folder::prune_old(&stub.folder) })
+            })?;
             out(json!({"snapshot": t.name, "warning": t.warning}));
         }
         "snapshots" => { let dir = owned(st, arg(&rest, 0)?)?.folder; out(json!(folder::snapshots(&dir))); }
@@ -315,6 +323,37 @@ fn run(a: Vec<String>, st: &Store) -> Res<i32> {
             if wb_core::container::running(&stub) || stub.open() || (stub.vault && wb_core::vault::mounted(&stub)) { return Err(format!("project {} is open: close it, then forget it", stub.id)); }
             wb_core::roots::remove_stub(&st.data, &stub.id);
             out(json!({"forgotten": stub.id, "folder": stub.folder}));
+        }
+        "delete" => {
+            // For good, and only with the code the first run gives: that run shows what goes, for the person to agree.
+            let code = opt(&mut rest, "--confirm");
+            let stub = stub_of(st, arg(&rest, 0)?)?;
+            // A delete stopped part way has moved the folder aside already: the next one finishes it.
+            let half = std::fs::symlink_metadata(&stub.folder).is_err() && std::fs::symlink_metadata(folder::deleting_dir(&stub.folder)).is_ok();
+            let stub = if half { stub } else { owned(st, &stub.id)? };
+            let open = |s: &wb_core::roots::Stub| wb_core::container::running(s) || s.open() || (s.vault && wb_core::vault::mounted(s));
+            if open(&stub) { return Err(format!("project {} is open: close it, then delete it", stub.id)); }
+            let Some(code) = code else {
+                let snaps = if half { 0 } else { folder::snapshots(&stub.folder).len() };
+                let size = folder::size(if half { folder::deleting_dir(&stub.folder) } else { stub.folder.clone() }.as_path());
+                let shown = if size.is_empty() { String::new() } else { format!(" ({size})") };
+                out(json!({"deleted": false, "name": stub.name, "folder": stub.folder, "size": size, "snapshots": snaps, "encrypted": stub.vault, "confirm": stub.made,
+                    "tell the person": format!("Deleting project '{}' removes its folder {}{shown} with everything in it, {}{}. It cannot be undone. Ask them to look in the folder first for anything to keep and copy it elsewhere. Only when they then say yes, run: whaybench-project delete {} --confirm {} (it can take minutes: give it a long time limit).",
+                        stub.name, stub.folder.display(), if snaps == 1 { "its 1 snapshot".to_string() } else { format!("its {snaps} snapshots") }, if stub.vault { " and its vault key" } else { "" }, stub.id, stub.made)}));
+                return Ok(0);
+            };
+            if code != stub.made { return Err(format!("not the code for project {}: run delete {} without --confirm first, tell the person what it says, and confirm with the code it gives", stub.id, stub.id)); }
+            // The keyring open first: with the folder gone, a key left behind would only be found by hand.
+            if stub.vault { keyring_open(&st.data)?; }
+            // All of it under the project's lock (its lock files stay: another waiting on them must take the same one).
+            let warning = wb_core::container::life(&stub, || {
+                if open(&stub) { return Err(format!("project {} is open: close it, then delete it", stub.id)); }
+                if half { folder::finish_delete(&stub.folder, &json!({"id": stub.id, "made": stub.made}))? } else { folder::delete_all(&stub.folder)? }
+                let warning = if stub.vault { wb_core::secret::delete(&wb_core::vault::key_name(&stub)).err().map(|e| format!("its vault key stays in the keyring ({}): {e}", wb_core::vault::key_name(&stub))) } else { None };
+                wb_core::roots::remove_stub(&st.data, &stub.id);
+                Ok(warning)
+            })?;
+            out(json!({"deleted": stub.id, "warning": warning}));
         }
         "move" => { let to = arg(&rest, 1)?; out(st.move_project(arg(&rest, 0)?, if to == "-" { "" } else { to })?); }
         "for-cwd" => {

@@ -147,6 +147,7 @@ Use `--session ID` after the command to choose the session for a document workin
 | `snapshot ID` / `snapshots ID` | Save or list snapshots. Saving needs a Btrfs subvolume. |
 | `restore ID SNAPSHOT` | Restore the whole folder and save its current state first. Close the project before restoring. |
 | `forget ID` | Remove a closed Briefsafe project from the list. Its folder stays. |
+| `delete ID [--confirm CODE]` | Delete a closed Briefsafe project for good: its folder, snapshots and vault key. Without `--confirm` it deletes nothing, says what would go and gives the code to confirm with. It can take minutes. Run again, it finishes a delete that stopped part way. |
 | `map ID` / `map-put ID [FILE]` | Print the project map or update it from JSON. Omit `FILE` or use `-` for stdin. |
 | `show ID DOC` / `outline ID DOC` | Print the document or its headings with line numbers. |
 | `checkout ID DOC` | Print the working copy’s path. A second checkout replaces that copy. |

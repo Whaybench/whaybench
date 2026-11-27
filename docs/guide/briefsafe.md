@@ -157,21 +157,9 @@ Whaybench tries to save a first snapshot when it creates a project on a btrfs su
 click **Save state** to take another. The snapshot includes your work files and Whaybench data and lives beside the
 project folder. If Whaybench cannot pause the running container, the save fails.
 
-Whaybench tries to keep the latest 30 snapshots. To remove older ones, it needs the btrfs mount option
-`user_subvol_rm_allowed`. Without it, older snapshots stay and the save succeeds with a warning. The Windows setup sets
-it. On Linux, add it once to the end of the options on the file system's line in `/etc/fstab`, keeping a copy of the
-file:
-
-```text
-UUID=...  /home  btrfs  subvol=home,compress=zstd:1,user_subvol_rm_allowed  0 0
-```
-
-Then remount and check that `user_subvol_rm_allowed` is listed. The option lets users delete their own subvolumes.
-
-```sh
-sudo mount -o remount /home
-findmnt -no OPTIONS /home
-```
+Whaybench keeps the latest 30 snapshots and deletes older ones as you save. It needs no root for this. Where the
+file system is mounted with the btrfs option `user_subvol_rm_allowed` (the Windows setup sets it), a snapshot goes at
+once; without it, Whaybench empties it file by file, which takes longer.
 
 ## Restore a snapshot
 
@@ -200,13 +188,18 @@ different keyring.
 
 ## Remove a project
 
-Log out of it. Take it off the list, then delete its folder and the `.<folder-name>.snapshots` folder beside it, if
-there is one. Snapshots are btrfs subvolumes: delete each with `btrfs subvolume delete`. The vault's key stays in your
-keyring as **Whaybench project** and its name, until you remove it with your keyring app.
+Log out of it, then ask your AI to delete the project. It first says what goes: the project folder with everything
+in it, its snapshots and, for an encrypted project, the vault's key in your keyring. Deleting cannot be undone, so look
+in the folder for anything to keep and copy it elsewhere before you say yes.
 
 ```sh
-whaybench-project forget ID
+whaybench-project delete ID
+whaybench-project delete ID --confirm CODE
 ```
+
+The first command gives `CODE`. If a delete stops part way, run the second one again to finish it.
+
+To only take it off the list and keep its folder, use `whaybench-project forget ID`.
 
 ## Convert an older project
 
