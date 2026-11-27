@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-11-27
+
 ### Fixed
 - A conversation opened in a tab for other agents to talk in stays in the session list when its tab closes: what
   another conversation's agent types there is its question, shown with who sent it ("Codex 01a21a7e: ..."), long
