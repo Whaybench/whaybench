@@ -7,6 +7,8 @@ names another step.
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-11-28
+
 ### Added
 - A theme can offer choices among its settings (`settings` in theme.json, `choices`), such as colour combinations
   (`palette`); the theme's own settings show first under Settings → Theme.
