@@ -37,8 +37,21 @@ fn handle(data: &Path, a: &Agent, event: &Value) -> Result<Value> {
     if !EVENTS.contains(&name) { return Err("unsupported hook event".into()); }
     // The session list shows what the person asked: neither commands nor Whaybench's own requests.
     let prompt = if name == "UserPromptSubmit" { Some(text(event, "prompt")?) } else { None };
-    let shown = prompt.and_then(crate::prompt::asked).map(|p| p.chars().take(200).collect::<String>());
-    let tab = a.tab.map(safe_id).transpose()?;
+    // Another agent's message counts too: `ctl` types it only into a conversation an open tab shows, so one the person
+    // set up for agents to talk in stays listed, while one running in the background with no tab gets none. Not told
+    // by this hook's own tab: a conversation attached after /background may run without it. Its text is taken whole
+    // (it may begin with '['; the agent cannot send a command), after the conversation it came from, so the list does
+    // not show it as the person's.
+    let by_agent = |p: &str| crate::prompt::typed_by_agent(p).and_then(|(who, t)| {
+        let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!t.is_empty()).then(|| format!("{who}: {t}"))
+    });
+    // Looked for first in the text as shown: a long one comes wrapped as pasted text (the tab pastes what it types).
+    let shown = prompt.and_then(|p| by_agent(&crate::prompt::label(p)).or_else(|| crate::prompt::asked(p)))
+        .filter(|p| !p.is_empty()).map(|p| p.chars().take(200).collect::<String>());
+    // A tab is this agent's only when it is the one the tab runs: a `claude -p` an agent starts there inherits the tab's
+    // variable, and its record must not take the tab (the tab would show it, and messages would be named by it).
+    let tab = a.tab.map(safe_id).transpose()?.filter(|t| agent_runs_tab(data, t));
     let agent = (a.name != crate::agents::CLAUDE).then_some(a.name);
     // Only a start or a prompt is activity: the other events must not undo what a record says of the past, such as
     // the person having ended the session (the end comes after Whaybench marks it).
@@ -632,11 +645,13 @@ fn proc_stat(pid: u32) -> Option<(String, u32, u64)> {
     Some((text[open + 1..close].to_string(), rest.get(1)?.parse().ok()?, rest.get(19)?.parse().ok()?))
 }
 
+/// What stands between an agent and what it runs, or a program and the agent that ran it.
+const SHELLS: [&str; 6] = ["sh", "bash", "dash", "zsh", "env", "timeout"];
+
 /// The agent this program runs under: the nearest process above it that is not a shell. A hook runs through a
 /// shell, the MCP server straight from the agent, so both arrive at the same process. Its id and start time
 /// (an id can be used again later).
 pub fn agent_process() -> Option<(u32, u64)> {
-    const SHELLS: [&str; 6] = ["sh", "bash", "dash", "zsh", "env", "timeout"];
     let mut pid = std::os::unix::process::parent_id();
     for _ in 0..8 {
         let (comm, parent, start) = proc_stat(pid)?;
@@ -644,6 +659,31 @@ pub fn agent_process() -> Option<(u32, u64)> {
         pid = parent;
     }
     None
+}
+
+/// Whether the agent this hook runs under is the one tab `tab` runs, not one another agent started there: no other
+/// agent (a process whose hooks noted it) stands between it and the tab's program. A launcher that is no agent (a
+/// node wrapper) does not count; where the tab's program is not seen (a project's container) it is taken as the tab's.
+/// The tab's program is told by the variable it gives its agent, else by its note (in the host's root only).
+fn agent_runs_tab(data: &Path, tab: &str) -> bool {
+    let file = crate::sessions::tab_file(&crate::paths::Data::new(data.to_path_buf()), tab);
+    let noted = || read_json(&file, Value::Null).ok().and_then(|v| v["pid"].as_u64()).map(|p| p as u32);
+    let Some(relay) = std::env::var("WHAYBENCH_TAB_PID").ok().and_then(|p| p.parse().ok()).or_else(noted) else { return true };
+    if !Path::new(&format!("/proc/{relay}")).exists() { return true; }
+    let noted = |pid: u32| proc_stat(pid).is_some_and(|(_, _, start)| read_json(&agent_file(data, pid), Value::Null).is_ok_and(|v| v["start"].as_u64() == Some(start)));
+    agent_process().is_none_or(|(agent, _)| !agent_between(agent, relay, noted))
+}
+
+/// Whether a process `is_agent` says is one stands above `pid` before `top` (looked at up to twelve levels).
+fn agent_between(pid: u32, top: u32, is_agent: impl Fn(u32) -> bool) -> bool {
+    let Some((_, mut up, _)) = proc_stat(pid) else { return false };
+    for _ in 0..12 {
+        if up == top || up <= 1 { return false; }
+        if is_agent(up) { return true; }
+        let Some((_, parent, _)) = proc_stat(up) else { return false };
+        up = parent;
+    }
+    false
 }
 
 fn agent_file(data: &Path, pid: u32) -> std::path::PathBuf { data.join("cache").join("agent-process").join(format!("{pid}.json")) }
@@ -673,6 +713,22 @@ mod tests {
         let mut e = json!({"session_id": sid, "hook_event_name": name, "cwd": "/w"});
         for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); }
         e
+    }
+
+    #[test]
+    fn an_agent_started_inside_a_tabs_agent_is_not_the_tabs() {
+        let me = std::process::id();
+        let mut direct = std::process::Command::new("sleep").arg("5").spawn().unwrap();
+        let mut wrapped = std::process::Command::new("python3").args(["-c", "import subprocess; subprocess.run(['sleep', '5'])"]).spawn().unwrap();
+        // The wrapper's child, once it has started it (a slow machine takes a while).
+        let child = |p: u32| fs::read_to_string(format!("/proc/{p}/task/{p}/children")).ok()?.split_whitespace().next()?.parse::<u32>().ok();
+        let mut inner = None;
+        for _ in 0..100 { inner = child(wrapped.id()); if inner.is_some() { break; } std::thread::sleep(std::time::Duration::from_millis(50)); }
+        let inner = inner.expect("the wrapper started its child");
+        assert!(!agent_between(direct.id(), me, |_| true), "run by the tab's program");
+        assert!(!agent_between(inner, me, |_| false), "through a launcher that is no agent");
+        assert!(agent_between(inner, me, |p| p == wrapped.id()), "inside another agent");
+        for c in [&mut direct, &mut wrapped] { let _ = c.kill(); let _ = c.wait(); }
     }
 
     #[test]
@@ -758,6 +814,20 @@ mod tests {
         assert!(told.contains("call the context_map tool") && told.contains("view panel beside this conversation"), "{told}");
         run(data, &a, &ev(sid, "UserPromptSubmit", json!({"prompt": "/clear"}))).unwrap();
         assert!(read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null).unwrap().get("firstPrompt").is_none(), "commands are not what was asked");
+        // Another agent's message is what was asked (it reaches only a conversation shown in a tab).
+        let typed = format!("{} does read work?", crate::i18n::ai_f("typed-from-session", &[("session", "Codex 01a21a7e".into())]));
+        let first = |sid: &str| read_json(&data.join("sessions").join(format!("{sid}.json")), Value::Null).unwrap()["firstPrompt"].clone();
+        run(data, &a, &ev(sid, "UserPromptSubmit", json!({"prompt": typed}))).unwrap();
+        assert_eq!(first(sid), json!("Codex 01a21a7e: does read work?"), "said who sent it");
+        let bracket = "aaaaaaaa-0000-0000-0000-000000000008";
+        run(data, &a, &ev(bracket, "UserPromptSubmit", json!({"prompt": typed.replace("does", "[Bug] does")}))).unwrap();
+        assert_eq!(first(bracket), json!("Codex 01a21a7e: [Bug] does read work?"), "its own '[' is kept");
+        let pasted = "aaaaaaaa-0000-0000-0000-000000000007";
+        run(data, &a, &ev(pasted, "UserPromptSubmit", json!({"prompt": format!("<pasted_content id=\"7bc2\">\n{typed}\nmore</pasted_content>")}))).unwrap();
+        assert_eq!(first(pasted), json!("Codex 01a21a7e: does read work? more"), "a long one, pasted");
+        let attached = "aaaaaaaa-0000-0000-0000-000000000009";
+        run(data, &Agent { tab: None, ..a }, &ev(attached, "UserPromptSubmit", json!({"prompt": typed}))).unwrap();
+        assert_eq!(first(attached), json!("Codex 01a21a7e: does read work?"), "a process run without the tab's variable (attached after /background)");
         // A decision attached to the files of a branch comes with the first read of such a file.
         map::command(data, sid, Some(json!({"upsert": [{"id": "t", "label": "App"}, {"id": "b", "parent": "t", "label": "Store"}, {"id": "d", "parent": "b", "label": "Store → SQLite", "kind": "conclusion", "state": "done"}], "current": "b"}))).unwrap();
         let file = data.join("f.rs");

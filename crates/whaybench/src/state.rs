@@ -689,7 +689,11 @@ impl App {
         let state = wb_core::paths::read_text(&wb_core::sessions::state_dir(&wb_core::roots::for_session(&self.data, session)).join(format!("{session}.json"))).ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).unwrap_or_default();
         // Counted from when the text was typed in: the end of the turn before it is not the answer.
-        let at = match wb_core::sessions::asked::read(&self.data, session, tab) {
+        // Noted under the asking session (or, older, its tab); back to the tab that shows that session now, if one does.
+        let asker = back["asker"].as_str().unwrap_or(tab);
+        let tab = crate::ctl::showing(&self.data, asker).unwrap_or_else(|| tab.to_string());
+        let tab = tab.as_str();
+        let at = match wb_core::sessions::asked::read(&self.data, session, asker) {
             Some((_, wb_core::sessions::asked::Became::Left)) => return,
             Some((_, wb_core::sessions::asked::Became::Typed(t))) => at.max(t),
             Some((_, wb_core::sessions::asked::Became::Refused)) => { let _ = std::fs::remove_file(&file); return; }

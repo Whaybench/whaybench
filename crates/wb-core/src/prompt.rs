@@ -37,12 +37,25 @@ pub fn label(p: &str) -> String {
     p.to_string()
 }
 
-/// What the person asked, for the session list; None for a command, a request of Whaybench's, a task's notice or a
-/// subagent's report.
+/// What another conversation's agent typed here (`ctl session type`): the conversation it came from and its text,
+/// without the head that marks it.
+pub fn typed_by_agent(p: &str) -> Option<(&str, &str)> {
+    let mark = crate::i18n::ai_f("typed-from-session", &[("session", "\u{0}".into())]);
+    let (head, tail) = mark.split_once('\u{0}')?;
+    p.trim_start().strip_prefix(head)?.split_once(tail)
+}
+
+/// What the person asked, for the session list: a request of Whaybench's by its name ('[Map update]': the person's
+/// own doing, sent for them), long or short (pasted, it is looked at without its wrapping); None for a command, a
+/// task's notice, a subagent's report or other bracketed text.
 pub fn asked(p: &str) -> Option<String> {
     let t = p.trim_start();
-    if t.starts_with('/') || t.starts_with('[') || inside(t, "task-notification").is_some() || inside(t, "agent-message").is_some() { return None; }
-    Some(unwrapped(p).unwrap_or_else(|| p.split_whitespace().collect::<Vec<_>>().join(" ")))
+    if inside(t, "task-notification").is_some() || inside(t, "agent-message").is_some() { return None; }
+    let text = unwrapped(p).unwrap_or_else(|| p.split_whitespace().collect::<Vec<_>>().join(" "));
+    if crate::i18n::request_heads().iter().any(|h| text.starts_with(h)) && let Some(end) = text.find(']') { return Some(text[..=end].to_string()); }
+    // Looked at as typed: a log or a path the person pasted first ('[12:00] ERROR', '/home/...') is their question.
+    if t.starts_with('/') || t.starts_with('[') { return None; }
+    Some(text)
 }
 
 #[cfg(test)]
@@ -60,11 +73,18 @@ mod tests {
         let report = "<agent-message from=\"a1\">\n[Subagent hand-back] ...\n</agent-message>";
         assert_eq!(label(report), crate::i18n::t("prompt-subagent"));
         assert_eq!(asked(report), None);
+        let typed = crate::i18n::ai_f("typed-from-session", &[("session", "Codex 01a21a7e".into())]);
+        assert_eq!(asked(&format!("{typed} does read work?")), None, "another agent's message is not the person's");
+        assert_eq!(typed_by_agent(&format!("{typed} does read work?")), Some(("Codex 01a21a7e", " does read work?")));
+        assert_eq!(typed_by_agent("[Map update] x"), None);
         let pasted = "see this <pasted_content id=\"1da3\">\nline one\nline two</pasted_content> please";
         assert_eq!(label(pasted), "see this line one line two please");
         assert_eq!(asked(pasted).as_deref(), Some("see this line one line two please"));
         assert_eq!(label("[Map update] Bring this session's map up to date"), "[Map update]");
-        assert_eq!(asked("[Map update] x"), None);
+        assert_eq!(asked("[Map update] x").as_deref(), Some("[Map update]"), "a request of Whaybench's, by its name");
+        assert_eq!(asked("<pasted_content id=\"1\">\n[Map update] a long one\n</pasted_content>").as_deref(), Some("[Map update]"), "long or short alike");
+        assert_eq!(asked("<pasted_content id=\"1\">[12:00] ERROR x</pasted_content> why?").as_deref(), Some("[12:00] ERROR x why?"), "a pasted log first is the person's");
+        assert_eq!(asked("[Something else] x"), None);
         assert_eq!(asked("/compact"), None);
         assert_eq!(label("plain  question"), "plain  question");
         assert_eq!(asked("plain \n question").as_deref(), Some("plain question"));

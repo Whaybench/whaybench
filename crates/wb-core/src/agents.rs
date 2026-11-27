@@ -109,17 +109,22 @@ fn session_agent(data: &Path, sid: &str) -> String {
 
 /// A session's line where a conversation is named: its title, the start of its number and its agent. The title is cut,
 /// not what comes after it: two conversations of one title are told apart by that.
-pub fn session_line(data: &Path, sid: &str) -> String { line_of(data, sid, &crate::sessions::session_name(&crate::paths::Data::new(data.to_path_buf()), sid)) }
+pub fn session_line(data: &Path, sid: &str) -> String { line_of(data, sid, &crate::sessions::session_name(&crate::paths::Data::new(data.to_path_buf()), sid), LINE_TITLE) }
+
+/// The same, shorter, for a conversation tab's title: a narrow tab cuts what does not fit from the right, and the number
+/// and agent must stay in sight.
+pub fn tab_line(data: &Path, sid: &str) -> String { line_of(data, sid, &crate::sessions::session_name(&crate::paths::Data::new(data.to_path_buf()), sid), TAB_TITLE) }
 
 /// The same for a conversation that only starts: its name is not asked for yet (that can take the agent's answer).
-pub fn new_session_line(data: &Path, sid: &str) -> String { line_of(data, sid, "") }
+pub fn new_session_line(data: &Path, sid: &str) -> String { line_of(data, sid, "", TAB_TITLE) }
 
-fn line_of(data: &Path, sid: &str, name: &str) -> String {
+fn line_of(data: &Path, sid: &str, name: &str, max: usize) -> String {
     let title: String = name.lines().next().unwrap_or_default().to_string();
-    let title = if title.is_empty() { crate::i18n::t("new-session").to_string() } else if title.chars().count() > LINE_TITLE { format!("{}…", title.chars().take(LINE_TITLE).collect::<String>()) } else { title };
+    let title = if title.is_empty() { crate::i18n::t("new-session").to_string() } else if title.chars().count() > max { format!("{}…", title.chars().take(max).collect::<String>()) } else { title };
     format!("{title} · {} · {}", sid.chars().take(8).collect::<String>(), session_agent(data, sid))
 }
-const LINE_TITLE: usize = 24;
+const LINE_TITLE: usize = 60;
+const TAB_TITLE: usize = 24;
 
 /// Where a project's container finds the host's agent add-ons.
 pub const ENV_ADDONS: &str = "WHAYBENCH_AGENT_ADDONS";
@@ -574,8 +579,9 @@ mod tests {
         assert_eq!((session_label(dir.path(), "01a1d60c-6"), session_label(dir.path(), "a3cf3125-f")), ("Codex 01a1d60c".into(), "Claude Code a3cf3125".into()));
         // A title is cut before what tells two conversations apart, and one without a title says so.
         assert!(session_line(dir.path(), "a3cf3125-f").ends_with(" · a3cf3125 · Claude Code"));
-        crate::paths::write_atomic(&dir.path().join("names.json"), serde_json::json!({"a3cf3125-f": "x".repeat(40)}).to_string()).unwrap();
-        assert_eq!(session_line(dir.path(), "a3cf3125-f"), format!("{}… · a3cf3125 · Claude Code", "x".repeat(24)));
+        crate::paths::write_atomic(&dir.path().join("names.json"), serde_json::json!({"a3cf3125-f": "x".repeat(70)}).to_string()).unwrap();
+        assert_eq!(session_line(dir.path(), "a3cf3125-f"), format!("{}… · a3cf3125 · Claude Code", "x".repeat(60)));
+        assert_eq!(tab_line(dir.path(), "a3cf3125-f"), format!("{}… · a3cf3125 · Claude Code", "x".repeat(24)), "a tab's title, shorter");
         assert_eq!((name_of(dir.path(), None), name_of(dir.path(), Some("codex")), name_of(dir.path(), Some("gone"))), ("Claude Code".into(), "Codex".into(), "gone".into()));
     }
 }

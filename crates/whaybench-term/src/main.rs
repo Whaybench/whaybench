@@ -178,6 +178,8 @@ impl Relay {
         let mut env: Vec<(String, String)> = vec![
             ("TERM".into(), "xterm-256color".into()), ("COLORTERM".into(), "truecolor".into()),
             ("WHAYBENCH".into(), "1".into()), ("WHAYBENCH_TAB".into(), self.tab.clone()),
+            // This program, for the agent's hooks to tell it from an agent the agent starts (which inherits both).
+            ("WHAYBENCH_TAB_PID".into(), std::process::id().to_string()),
             (paths::ENV_DATA_DIR.into(), self.data.root.to_string_lossy().to_string()),
         ];
         if let Some(from) = self.map_from.take() {
@@ -416,7 +418,7 @@ impl Relay {
         }
         if !self.running && self.title == wb_core::i18n::t("ended") { return; }
         if let Some(s) = self.session.clone() {
-            let title = wb_core::agents::session_line(&self.data.root, &s);
+            let title = wb_core::agents::tab_line(&self.data.root, &s);
             self.set_title(&title);
         }
     }

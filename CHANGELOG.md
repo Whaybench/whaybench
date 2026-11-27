@@ -8,6 +8,19 @@ names another step.
 ## [Unreleased]
 
 ### Fixed
+- A conversation opened in a tab for other agents to talk in stays in the session list when its tab closes: what
+  another conversation's agent types there is its question, shown with who sent it ("Codex 01a21a7e: ..."), long
+  (pasted) or short. One running in the background, with no tab, never gets such text.
+- Whaybench's own requests are a conversation's question by their name ("[Map update]"), long or short alike; a log or
+  a path the person pastes first counts as their question.
+- An agent attached to its tab after /background is named as the sender of what it types into another conversation,
+  and its `session wait` finds the answer; an ask is noted under the asking conversation, so closing or changing its
+  tab meanwhile loses nothing, and the way back goes to the tab that shows it now.
+- Codex in its Linux sandbox can type into another conversation and wait for its answer: the request goes through
+  Whaybench's ask folder, which checks it the same way.
+- An agent started inside a tab's agent (a `claude -p` it runs) no longer takes that tab as its own.
+- The line under the input field names a conversation with up to 60 characters of its title; a tab keeps the short
+  one so its number stays in sight. A search shows a hit near the start from the start, so who sent it stays in view.
 - The line under the input field shows a conversation's new name as soon as its map or record changes, not only when
   the field is first pointed at it or a prompt was just sent: a name the agent gives late in its first turn shows.
 - The conversation map tool refuses a call with a field it does not have (a node's `label` sent outside `upsert`)

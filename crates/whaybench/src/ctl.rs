@@ -52,10 +52,13 @@ fn shot_name(out: &Path) -> Option<String> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Instance { pub pid: u32, pub socket: String, pub run: String }
+pub struct Instance { pub pid: u32, pub socket: String, pub run: String, #[serde(default)] pub pid_space: String }
+
+/// Which process space this program runs in: a sandbox with a /proc of its own has another.
+fn pid_space() -> String { fs::read_link("/proc/self/ns/pid").map(|p| p.to_string_lossy().to_string()).unwrap_or_default() }
 
 pub fn write_instance(data: &Data, run: &str, socket: &str) -> std::io::Result<()> {
-    let text = serde_json::to_string(&Instance { pid: std::process::id(), socket: socket.into(), run: run.into() })?;
+    let text = serde_json::to_string(&Instance { pid: std::process::id(), socket: socket.into(), run: run.into(), pid_space: pid_space() })?;
     write_atomic(&data.instance(), text.as_bytes())
 }
 
@@ -137,7 +140,9 @@ fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool, l
     let (left, asker) = left;
     let from = from.filter(|f| asked || *f != tab.tab);
     let text = match from {
-        Some(f) => from_other(text, &sessions::session_of_tab(data, f).map(|s| wb_core::agents::session_label(&data.root, &s)).unwrap_or_else(|| f.to_string())).map_err(Refused::Rule)?,
+        // Named by the conversation that tab shows (an attached one's too), else by the tab.
+        Some(f) => from_other(text, &sessions::session_of_tab(data, f).or_else(|| sessions::open_tabs(data).into_iter().find(|t| t.tab == f).and_then(|t| t.session))
+            .map(|s| wb_core::agents::session_label(&data.root, &s)).unwrap_or_else(|| f.to_string())).map_err(Refused::Rule)?,
         None => text.to_string(),
     };
     let dir = sessions::tab_inbox(data, &tab.tab);
@@ -148,7 +153,8 @@ fn deliver(data: &Data, id: &str, text: &str, from: Option<&str>, asked: bool, l
     if let Err(e) = fs::create_dir_all(&dir).and_then(|_| write_atomic(&dir.join(format!("{name}.json")), v.to_string().as_bytes())) { return Err(Refused::Write(e.to_string())); }
     // Typed in: what fails after this is not sent again, or the other conversation would get it twice.
     if let Some(from) = from {
-        let back = serde_json::json!({"session": id, "tab": from, "at": now_ms()});
+        // The asker's name too: the way back is the tab that shows its session then, if it moved to another.
+        let back = serde_json::json!({"session": id, "tab": from, "asker": asker, "at": now_ms()});
         write_atomic(&return_file(data), back.to_string().as_bytes()).map_err(|e| Refused::Rule(e.to_string()))?;
     }
     post(data, &Request::FocusTerm { tab: tab.tab, agent: from.is_some() }).map_err(Refused::Rule)
@@ -189,9 +195,12 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
     for bytes in take_files(&ask_dir(root)) {
         let Some(v) = serde_json::from_slice::<serde_json::Value>(&bytes).ok() else { continue };
         let (to, text) = (v["to"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
-        let mut from = v["from"].as_str().unwrap_or("another conversation").to_string();
+        // Without a tab, the tab that shows the sending session (one attached after /background).
+        let shown = v["from"].as_str().is_none().then(|| v["session"].as_str().and_then(|s| showing(data, s))).flatten();
+        let mut from = v["from"].as_str().map(String::from).or(shown).unwrap_or_else(|| "another conversation".into());
         let left = v["left"].as_i64().unwrap_or_else(now_ms);
-        let asker = v["from"].as_str().unwrap_or("");
+        // The name the asker's `wait` looks under: its session, or (an older request) its tab.
+        let asker = v["asker"].as_str().or(v["from"].as_str()).unwrap_or("");
         // Told to the asker's `session wait`, for a conversation of the root it was asked in.
         let refused = || if wb_core::roots::known_session(data, to).is_some_and(|k| k.root == root.root) { sessions::asked::note(data, to, asker, left, sessions::asked::Became::Refused) };
         if let Some(pid) = project {
@@ -224,6 +233,30 @@ fn deliver_asked_in(data: &Data, root: &Data, project: Option<&str>) {
     }
 }
 
+/// The tab of the conversation running this command: its own, or for one attached after /background (it runs
+/// without the tab's variable) the tab showing the session its hooks noted for this agent. `type` and `wait` agree.
+fn sender(data: &Data) -> Option<String> {
+    std::env::var("WHAYBENCH_TAB").ok().or_else(|| showing(data, &wb_core::hook::session_of_agent(&data.root)?))
+}
+
+/// The name an ask is noted under, the same for `type` and the `wait` after it: the asking conversation's session
+/// (so its tab may close or change between them), else its tab.
+fn asker(data: &Data) -> String { wb_core::hook::session_of_agent(&data.root).or_else(|| sender(data)).unwrap_or_default() }
+
+/// The open tab that shows a session, followed where it moved.
+pub(crate) fn showing(data: &Data, session: &str) -> Option<String> {
+    let now = sessions::current_id(data, session);
+    sessions::open_tabs(data).into_iter().find(|t| t.session.as_deref() == Some(now.as_str())).map(|t| t.tab)
+}
+
+/// An agent in a conversation tab that cannot see Whaybench's process although Whaybench left its note: one in a sandbox
+/// with a /proc of its own, told by the note's process space being another (a Whaybench that crashed in this one is
+/// not running, said at once).
+fn sandboxed(data: &Data) -> bool {
+    by_agent() && !running(data) && fs::read_to_string(data.instance()).ok().and_then(|s| serde_json::from_str::<Instance>(&s).ok())
+        .is_some_and(|i| i.pid_space != pid_space())
+}
+
 /// Whether an agent in a conversation tab runs this command (the panels, the person's, have no tab).
 fn by_agent() -> bool { std::env::var_os("WHAYBENCH_TAB").is_some() }
 
@@ -247,7 +280,9 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
     if in_project && !here {
         return Err("in a Briefsafe project only these work: `whaybench ctl session list` (the project's conversations), `session type ID \"TEXT\"`, `session wait ID [SECONDS]`".into());
     }
-    if !in_project && !running(data) { return Err(format!("not running with data directory {}", data.root.display())); }
+    // An agent in a sandbox with a /proc of its own (Codex on Linux) cannot see Whaybench run: `type` and `wait` work
+    // there through ask/ and the files, as in a project.
+    if !in_project && !running(data) && !(here && sandboxed(data)) { return Err(format!("not running with data directory {}", data.root.display())); }
     match words.first().map(String::as_str) {
         Some("new") => {
             // `--project ID`: a new conversation in that Briefsafe project (it must be open; the tab refuses otherwise).
@@ -292,7 +327,10 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
         Some("type") => {
             let id = words.get(1).ok_or("session type needs an id")?;
             let text = words.get(2).ok_or("session type needs text")?;
-            let from = std::env::var("WHAYBENCH_TAB").ok();
+            // Its session told on in a request too: the host finds the tab that shows it.
+            let me = wb_core::hook::session_of_agent(&data.root);
+            let from = sender(data);
+            let asker = asker(data);
             let left = now_ms();
             // From a project's conversation: always through ask/ (the host checks it is this project's own). One that
             // cannot take it is said now, not left to a wait for an answer.
@@ -304,16 +342,22 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
                 // What the host would not type: said here, where the agent sees it.
                 if text.chars().any(|c| c.is_control() && c != '\n' && c != '\t') { return Err("the text has control characters (colour codes, carriage returns): send plain text".into()); }
             }
-            let tried = if in_project { Err(Refused::Write(String::new())) } else { deliver(data, id, text, from.as_deref(), false, (left, from.as_deref().unwrap_or(""))) };
+            // In a sandbox the tabs' programs are not seen either: straight to ask/, where the host checks the same;
+            // a command or control characters are refused here already, where the agent sees it.
+            if sandboxed(data) {
+                from_other(text, "").map_err(|e| e.to_string())?;
+                if text.chars().any(|c| c.is_control() && c != '\n' && c != '\t') { return Err("the text has control characters (colour codes, carriage returns): send plain text".into()); }
+            }
+            let tried = if in_project || sandboxed(data) { Err(Refused::Write(String::new())) } else { deliver(data, id, text, from.as_deref(), false, (left, &asker)) };
             match tried {
                 // An agent in a sandbox (Codex) may not write other tabs' input: it leaves a request in ask/, which
                 // Whaybench, outside the sandbox, checks the same way and delivers. A refusal stays a refusal.
                 Err(Refused::Write(_)) if from.is_some() || in_project => {
                     let name = format!("{}-{}.json", SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0), std::process::id());
-                    let request = serde_json::json!({"to": id, "text": text, "from": from, "left": left}).to_string();
+                    let request = serde_json::json!({"to": id, "text": text, "from": from, "session": me, "asker": asker, "left": left}).to_string();
                     if request.len() as u64 > ASK_MAX { return Err(format!("the text is too long ({} bytes; at most {ASK_MAX}): write it to a file and send its path", request.len())); }
                     // First, so a `session wait` started at once does not take an earlier answer for this one's.
-                    if let Some(f) = sessions::asked::left_file(&ask_dir(data), id, from.as_deref().unwrap_or("")) { let _ = write_atomic(&f, left.to_string().as_bytes()); }
+                    if let Some(f) = sessions::asked::left_file(&ask_dir(data), id, &asker) { let _ = write_atomic(&f, left.to_string().as_bytes()); }
                     write_atomic(&ask_dir(data).join(name), request.as_bytes()).map_err(|e| format!("not sent: {e}"))
                 }
                 Err(Refused::Write(e) | Refused::Rule(e)) => Err(e),
@@ -327,13 +371,16 @@ fn session_command(data: &Data, words: &[String]) -> Result<(), String> {
             let limit = words.get(2).map(|s| s.parse::<u64>().map_err(|_| "session wait: SECONDS is a number")).transpose()?.unwrap_or(900);
             // A project's answer goes only to a tab of that project (spec 3.22: project -> host is blocked), checked at
             // every read: the project may be logged in to while this waits.
-            let caller = std::env::var("WHAYBENCH_TAB").ok().and_then(|t| sessions::tab_project(data, &t));
+            let caller = sender(data).and_then(|t| sessions::tab_project(data, &t));
             let outside = |sid: &str| wb_core::roots::Roots::new(data.clone()).project_of(sid).is_some_and(|p| caller.as_deref() != Some(p.as_str()));
             if outside(id) { return Err(wb_core::i18n::t("briefsafe-outside-project").into()); }
             // From the last time something was typed into it, if that was in the last hour: the answer may have come
             // already between `type` and this wait.
             let now = now_ms();
-            let tab = std::env::var("WHAYBENCH_TAB").unwrap_or_default();
+            // The same name `type` noted the ask under; one asked before an upgrade is under the asking tab.
+            let noted = |k: &str| sessions::asked::read(data, id, k).is_some() || sessions::asked::left_file(&ask_dir(data), id, k).is_some_and(|f| f.exists());
+            let (now_key, old_key) = (asker(data), sender(data).unwrap_or_default());
+            let tab = if !noted(&now_key) && noted(&old_key) { old_key } else { now_key };
             let fresh = |at: i64| now - at < 3_600_000;
             // Left in ask/ and not yet taken by the host: what became of an earlier request says nothing of it.
             let left = sessions::asked::left_file(&ask_dir(data), id, &tab).and_then(|f| wb_core::paths::read_text(&f).ok()).and_then(|t| t.trim().parse::<i64>().ok()).filter(|at| fresh(*at));
@@ -732,6 +779,21 @@ mod tests {
             .map(|f| serde_json::from_slice::<serde_json::Value>(&fs::read(f.path()).unwrap()).unwrap()["text"].as_str().unwrap().to_string()).collect();
         assert_eq!(typed.len(), 1, "the shell line and the spoofed /exit are refused: {typed:?}");
         assert!(typed[0].ends_with("what do you think?") && typed[0] != "what do you think?", "marked as from another conversation: {}", typed[0]);
+        // A conversation no open tab shows (one running in the background) is never typed into, marked or not.
+        assert!(matches!(deliver(&data, "s-background", "hi", Some("t-codex"), true, (1, "")), Err(Refused::Rule(_))));
+        assert!(matches!(deliver(&data, "s-background", "hi", None, false, (1, "")), Err(Refused::Rule(_))));
+        assert!(!sessions::tab_inbox(&data, "s-background").exists());
+        // A sender with no tab of its own (attached after /background) is named by the tab that shows its session.
+        fs::create_dir_all(sessions::sessions_dir(&data)).unwrap();
+        write_atomic(&sessions::sessions_dir(&data).join("s-codex.json"), br#"{"id":"s-codex","agent":"codex"}"#).unwrap();
+        sessions::write_tab(&data, "t-attached", Some("s-codex"), true);
+        for f in fs::read_dir(sessions::tab_inbox(&data, "t-to")).unwrap().flatten() { fs::remove_file(f.path()).unwrap(); }
+        write_atomic(&ask_dir(&data).join("5.json"), serde_json::json!({"to": "s-to", "text": "and now?", "from": null, "session": "s-codex"}).to_string().as_bytes()).unwrap();
+        deliver_asked(&data);
+        let typed: Vec<String> = fs::read_dir(sessions::tab_inbox(&data, "t-to")).unwrap().flatten()
+            .map(|f| serde_json::from_slice::<serde_json::Value>(&fs::read(f.path()).unwrap()).unwrap()["text"].as_str().unwrap().to_string()).collect();
+        let label = wb_core::agents::session_label(&data.root, "s-codex");
+        assert!(typed.len() == 1 && typed[0].contains(&label) && !typed[0].contains("another conversation"), "{label}: {typed:?}");
     }
     #[test]
     fn a_projects_agent_types_only_plain_text_into_its_own_projects_conversations() {

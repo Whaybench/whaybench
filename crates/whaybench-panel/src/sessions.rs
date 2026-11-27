@@ -17,9 +17,10 @@ pub fn search_note(query: &str, pairs: &[(&str, String)]) -> Option<String> {
     if words.is_empty() || !words.iter().all(|w| lower.iter().any(|(_, t)| t.contains(w))) { return None; }
     for (kind, t) in &lower {
         if let Some(byte) = t.find(&words[0]) {
+            // From the start when the match is near it, so what begins the text (who sent it) stays in sight.
             let at = t[..byte].chars().count();
-            let start = at.saturating_sub(12);
-            let piece: String = t.chars().skip(start).take(40).collect();
+            let start = if at < 60 { 0 } else { at - 12 };
+            let piece: String = t.chars().skip(start).take(at - start + 28).collect();
             let flat = piece.split_whitespace().collect::<Vec<_>>().join(" ");
             return Some(format!("{kind}: {}{flat}", if start > 0 { "…" } else { "" }));
         }
@@ -450,12 +451,16 @@ mod tests {
         assert!(search_note("parser none", &p).is_none());
         assert!(search_note("", &p).is_none());
         assert_eq!(search_note("pass", &p).unwrap(), "Answer: tests pass on the server");
+        let sent = [("First question", "Codex 01a21a7e: please look at the parser and the long list of things it reads".to_string())];
+        assert!(search_note("list", &sent).unwrap().starts_with("First question: codex 01a21a7e: "), "who sent it stays in sight");
     }
     #[test]
     fn a_long_hit_shows_its_surroundings() {
-        let long = format!("{}needle{}", "a".repeat(30), "b".repeat(60));
+        let long = format!("{}needle{}", "a".repeat(80), "b".repeat(60));
         let got = search_note("needle", &[("Answer", long)]).unwrap();
         assert!(got.starts_with("Answer: …"));
         assert!(got.contains("needle"));
+        let near = format!("{}needle{}", "a".repeat(30), "b".repeat(60));
+        assert!(search_note("needle", &[("Answer", near)]).unwrap().starts_with("Answer: aaa"), "near the start: from the start");
     }
 }
