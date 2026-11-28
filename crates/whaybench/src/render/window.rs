@@ -168,7 +168,14 @@ pub fn init_window(event_loop: &mut EventLoop<'static, App>, state: &mut App, ow
             }
 
             let size = backend.window_size();
-            let age = backend.buffer_age().unwrap_or(0);
+            // The age is asked with the window's surface current: off-screen drawing (what lies under a glass or a lens)
+            // leaves it off the context, and asked then it is unknown (0): the frame drawn whole. bind() only sizes the
+            // surface and wraps it; drawing makes it current. Made current here, by hand.
+            let _ = backend.bind();
+            let surface: *const smithay::backend::egl::EGLSurface = backend.egl_surface();
+            // SAFETY: the surface is the backend's own and lives through this call; only the renderer's context is borrowed.
+            let current = unsafe { backend.renderer().egl_context().make_current_with_surface(&*surface) }.is_ok();
+            let age = if current { backend.buffer_age().unwrap_or(0) } else { 0 };
             // A frame that cannot be drawn is left out and tried again: stopping here would take every panel with it.
             let drawn: Result<_, String> = 'frame: {
                 let (renderer, mut framebuffer) = match backend.bind() { Ok(b) => b, Err(e) => break 'frame Err(format!("{e:?}")) };

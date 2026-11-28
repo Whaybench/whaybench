@@ -18,6 +18,9 @@ names another step.
 - The theme list no longer offers the default (Light's first colours are the same); Light is in force before a
   theme is chosen and when the chosen one is deleted.
 
+### Fixed
+- The window's buffer age is asked with its surface current, so a frame after off-screen drawing is not drawn whole.
+
 ## [0.9.11] - 2026-11-28
 
 ### Added
